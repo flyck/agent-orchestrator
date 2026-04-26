@@ -15,7 +15,13 @@ Start with [`../MANIFESTO.md`](../MANIFESTO.md) — the principles every doc her
 7. [07-multi-agent-review-flow.md](07-multi-agent-review-flow.md) — how to keep the review pipeline useful, not agent theater
 8. [08-design-system.md](08-design-system.md) — paper aesthetic: type, color, components, anti-patterns
 9. [09-opencode-integration-notes.md](09-opencode-integration-notes.md) — verified HTTP API surface, chosen integration strategy, revised Phase 0
-10. [10-spec-driven-workflow.md](10-spec-driven-workflow.md) — the user writes the spec before any agent runs; explicit gates, no auto-pilot
+10. [10-spec-driven-workflow.md](10-spec-driven-workflow.md) — the user writes the spec; from there agents work and the user can interject at any moment
+11. [11-background-agents.md](11-background-agents.md) — separate workspace, separate queue, conservative defaults
+12. [12-git-worktrees.md](12-git-worktrees.md) — every task that may modify code runs in its own worktree
+13. [13-model-access-setup.md](13-model-access-setup.md) — first-run onboarding for provider auth
+14. [14-skills-and-repo-context.md](14-skills-and-repo-context.md) — skills library + auto-read repo README/backlog
+15. [15-integrations-and-suggested-next.md](15-integrations-and-suggested-next.md) — GitHub integration + suggested follow-ups
+16. [16-model-performance-metrics.md](16-model-performance-metrics.md) — difficulty scoring + historic model performance view (v2)
 
 ## TL;DR
 
@@ -24,5 +30,5 @@ Start with [`../MANIFESTO.md`](../MANIFESTO.md) — the principles every doc her
 - **Engine**: **OpenCode** — one persistent session per agent role, driven via the engine adapter. WebSocket carries events out and user messages in.
 - **Agents**: editable from the Settings UI; each has a markdown system prompt and a Lucide icon. Built-ins seeded from `agents/builtin/*.md` on first run.
 - **Design**: paper aesthetic — near-monochrome, serif headings, hairline rules, no shadows or gradients. See `08-design-system.md`.
-- **Spec-driven**: Feature/Bugfix tabs require a user-authored spec before any agent runs. Explicit gates, no auto-pilot. See `10-spec-driven-workflow.md`.
+- **Spec-driven**: Feature/Bugfix tabs require a user-authored spec. From there the workflow runs forward with visible agent states; the user can interject at any moment. No artificial gates. See `10-spec-driven-workflow.md`.
 - **v1 scope**: Review tab end-to-end. Feature/Bugfix tabs ship the Spec gate UI; downstream agent execution is v2. Architecture Compare scaffolded only.

@@ -11,7 +11,7 @@ The product is for someone who values content over chrome. Visual language: edit
 5. **No motion theater.** Streaming text *is* the animation. No spinners that pulse for show, no shimmer skeletons. A simple status dot suffices.
 6. **No gradients, no shadows, no glows.** Ever.
 7. **Respect density preferences.** Default to comfortable; offer a compact toggle.
-8. **Friction in the right places.** Workflow gates are a feature. Submit buttons stay disabled until the user has done the work. There are no countdowns, no auto-advances, no "skip this step" toggles. See [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md). The product is for someone who wants to keep thinking; the UI should not pretend otherwise.
+8. **Clear states, easy interjection.** Every agent's state is visible at a glance. The user can comment, redirect, or stop at any moment from any view. No artificial blocks between workflow phases — discipline lives in the upfront spec, not in mid-flow gates. See [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md).
 
 ## Color tokens
 
@@ -137,12 +137,12 @@ Visual:
 - ❌ Big colored CTA buttons that distract from content.
 
 Workflow / interaction:
-- ❌ "Auto-pilot" or "run to completion" buttons.
-- ❌ Countdown timers that auto-advance gates.
+- ❌ Running a task with no user-written spec ("auto-pilot").
 - ❌ Pre-filled spec templates with placeholder content.
 - ❌ Agent-drafted first drafts the user just edits past.
-- ❌ "Skip this step" toggles on workflow gates.
-- ❌ Default settings that bypass any gate.
+- ❌ Disabled buttons that exist only to slow the user down.
+- ❌ Forced "are you sure?" dialogs and countdowns.
+- ❌ Hidden agent state — the user must always be able to see what each agent is doing.
 
 A future request to add any of these should be pushed back on, not silently honored.
 

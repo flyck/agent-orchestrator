@@ -61,4 +61,4 @@ For PRs / diffs the UI should also show:
 - Runs **locally** on the user's Linux machine.
 - Frontend: Angular. Backend: Bun. (Both negotiable; this is the starting bet.)
 - Open-source-friendly in spirit: even if a runtime engine is closed, the orchestration shell stays open and engine-pluggable.
-- **Spec-driven by design.** The user authors a spec before any agent executes on Feature / Bugfix tabs. Workflow advances through explicit user-approved gates, never auto-completes. Full philosophy and UX in [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md). This is a structural defense against passive "auto-accept" agent use; it is not a process tax, it is the product.
+- **Spec-driven by design.** The user authors a spec, then collaborates with the architecture agent to arrive at a plan. From there agents implement and review while the user watches the live state of every agent and can interject at any moment. There are no artificial gates between phases — discipline lives in the upfront spec, not in mid-flow approval clicks. Full philosophy and UX in [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md).

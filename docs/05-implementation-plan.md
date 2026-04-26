@@ -128,18 +128,18 @@ Write the observed event-type names down at the bottom of `09-opencode-integrati
 
 **Verify**: complete N reviews; banner appears.
 
-## Phase 12 — Spec gate UI for Feature & Bugfix tabs
+## Phase 12 — Spec editor + state strip for Feature & Bugfix tabs
 
-The spec-writing experience is in v1; downstream agent execution is v2. See [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md) for the full spec.
+The spec-writing experience is in v1; downstream agent execution is v2. See [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md) for the philosophy.
 
 1. Spec editor component shared between Feature and Bugfix tabs:
-   - Markdown editor (CodeMirror 6) with required section headers pre-rendered (Goal, Non-goals, Acceptance criteria, Scope, Open questions). Section bodies start empty.
-   - Section-completeness validator — Submit disabled until each section has non-whitespace content.
+   - Markdown editor (CodeMirror 6) with section headers pre-rendered (Goal, Non-goals, Acceptance criteria, Scope, Open questions). Section bodies start empty.
+   - Soft completeness hints — empty sections show an inline "this section is empty — proceed without?" cue. Nothing is hard-blocked; submission always works.
    - "Critique my spec" button — fires a single fast-model agent with a strict critique-only prompt; output renders in a sidebar; cannot edit the spec.
    - Tab-specific labels: Feature uses these section names verbatim; Bugfix renames Goal→"Bug summary", adds Repro steps and Expected vs. Observed.
 2. Persistence: spec markdown stored in `tasks.input_payload`; revisions stored as a `spec_revisions` side table keyed by `task_id` with monotonic `version` and timestamp.
-3. Lock-on-advance: clicking Submit transitions the task to `plan_pending` and freezes the spec. An "Edit spec" button re-opens the editor and writes a new revision row.
-4. Gate visualization: horizontal row of section markers above the editor (Spec ● — Plan ○ — Implement ○ — Review ○ — Accept ○). Future gates render with a "v2 — coming" placeholder when clicked.
+3. Submission transitions the task to `plan` state and snapshots the spec. An "Edit spec" button re-opens the editor and writes a new revision row.
+4. State strip: horizontal row of state markers above the editor (Spec ● — Plan ○ — Implement ○ — Review ○ — Accept ○). Future states render with a "v2 — coming" placeholder when clicked. Strip is informational; clicking a future state does not block anything.
 
 ## Phase 13 — Architecture Compare stub
 

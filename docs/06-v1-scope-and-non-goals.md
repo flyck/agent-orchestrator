@@ -6,7 +6,7 @@ The smallest credible version that proves the product idea on the user's local m
 
 ### Workspaces
 - **Review tab — fully working end-to-end.** Input: pasted diff or local path, plus an optional **Review focus** field. Output: planner map + 3 parallel reviewers (security, performance, architecture) + lead synthesis. **Sessions stay open** so the user can comment into any reviewer pane mid-review or after.
-- **Feature & Bugfix tabs — Spec gate works; downstream stubbed.** The user-authored spec UI (template, gating, persistence, optional "Critique my spec" agent) ships in v1. The Plan / Implement / Review / Accept gates render placeholders pointing to v2. See [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md).
+- **Feature & Bugfix tabs — Spec editor works; downstream stubbed.** The user-authored spec UI (template, soft hints, revisions, optional "Critique my spec" agent) ships in v1. The Plan / Implement / Review / Accept states render placeholders pointing to v2. See [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md).
 - **Architecture Compare tab — scaffolded only**, placeholder describing the planned agent composition.
 - **Settings tab** — general (concurrency, budget, nudge), agents (editable cards), engine (OpenCode model + provider config).
 - **Cost tab** — today / 7-day token + USD totals, breakdown per agent role.
@@ -46,15 +46,15 @@ The smallest credible version that proves the product idea on the user's local m
 - No bright colors except a single ink-red accent for high-severity findings.
 - Serif headings, sans body, mono for code, hairline rules, no shadows.
 
-### Spec-driven gates (v1 partial)
-- Spec template editor for Feature / Bugfix tabs with required sections (Goal, Non-goals, Acceptance criteria, Scope, Open questions). **Submit** disabled until each section has content.
+### Spec-driven workflow (v1 partial)
+- Spec template editor for Feature / Bugfix tabs with structured sections (Goal, Non-goals, Acceptance criteria, Scope, Open questions). Empty sections show soft inline hints; nothing is hard-blocked.
 - Optional "Critique my spec" action runs a single fast-model agent that may suggest gaps but cannot edit the spec.
-- Spec persisted as task input; locked on advance; revisions tracked.
-- The Plan / Implement / Review / Accept gates render placeholder UI pointing to v2.
+- Spec persisted as task input; revisions tracked in `spec_revisions`.
+- State strip shows live progress through Spec → Plan → Implement → Review → Accept. States beyond Spec render placeholder UI pointing to v2.
 
 ### Human-in-the-loop nudge
 - Banner after every Nth completed task. N configurable.
-- Complements the spec-driven gates: the gates keep agent-assisted work honest; the nudge keeps non-agent skills exercised.
+- Quiet companion to the spec discipline — keeps non-agent skills exercised.
 
 ## Non-goals (deferred)
 
@@ -68,8 +68,9 @@ The smallest credible version that proves the product idea on the user's local m
 - Real-time collaboration between humans.
 - Desktop packaging (Tauri/Electron).
 - Theming. Paper design is the only theme. (User-facing density toggle is the one allowed knob.)
-- **Auto-pilot / run-to-completion modes.** Permanently rejected, not deferred. Per [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md).
+- **Running tasks without a user-written spec ("auto-pilot").** Permanently rejected, not deferred. Per [`10-spec-driven-workflow.md`](10-spec-driven-workflow.md).
 - **Agent-drafted spec first drafts.** Permanently rejected. Critique-only.
+- **Hard gates with disabled-until-complete buttons.** Permanently rejected — that's friction for friction's sake. The spec is the discipline; the rest of the workflow runs forward with visible state and on-demand interjection.
 
 ## Definition of done for v1
 

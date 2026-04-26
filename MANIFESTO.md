@@ -4,17 +4,17 @@ The non-negotiable principles of this project. Features come and go. These do no
 
 If a future change conflicts with one of these, the change is wrong, not the principle.
 
-## 1. The human authors the work.
+## 1. Agent orchestration is spec-driven first.
 
-Specs are written by humans. Plans are approved by humans. Findings are acted on by humans. Agents critique, refine, implement, and surface — they never draft, never auto-advance, never auto-merge.
+The human writes the spec. Working with the architecture agent, the human arrives at a plan. From there, agents implement, review, and surface findings. Passive use of the tool is the failure mode to design against — the upfront spec is where the user's thinking lives, and keeping that thinking on top is the top priority.
 
-**Rejected:** auto-pilot modes, run-to-completion buttons, agent-drafted spec templates, pre-filled placeholders, "skip this gate" toggles, countdowns to auto-approval.
+**Rejected:** running a task without a human-authored spec; agents drafting the spec for the user; auto-pilot modes that bypass the spec entirely.
 
-## 2. Workflow gates are a feature, not a tax.
+## 2. Clear states, no friction. Think upfront, interject anytime.
 
-Submit buttons stay disabled until the work is done. Gates require deliberate clicks. Friction is the point — without it, attention degrades into rubber-stamping.
+Every agent in a task has a clearly determinable state — running, waiting, idle, errored — visible at a glance. No artificial gates, no disabled buttons, no forced approvals. The discipline lives in the spec; from there the workflow runs forward and the user can step in at any moment to comment, redirect, or stop.
 
-**Rejected:** anything whose purpose is to make a gate go faster. The gate exists to slow you down.
+**Rejected:** UI that hides what an agent is doing; friction added for its own sake; required clicks that exist only to slow the user down.
 
 ## 3. Keep coding manually.
 
