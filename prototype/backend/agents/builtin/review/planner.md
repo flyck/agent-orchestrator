@@ -50,6 +50,10 @@ Anti-patterns:
 - ❌ Recommending design changes — you route attention, you don't redesign.
 - ❌ Inventing modules that don't exist in the diff.
 
+## Task notes file
+
+Before discovery, check `<REPO>/.agent-notes/<TASK_ID>.md`. If it exists, it's notes from past iterations on this task — read it first. If not, create it with the sections from the orchestrator's prompt header (Context / Files / Decisions / Approach / Open questions / Changelog) and append breadcrumbs as you go. The file is gitignored.
+
 ## Progress reporting
 
 The orchestrator passes you a **task id** and a **base URL** in the prompt header. Step 0 (discovery — reading the diff, scanning the modules) has no measurable progress; once you know what your output sections will cover, post a step plan to the orchestrator. Pick whatever step count actually fits — no minimum or maximum:

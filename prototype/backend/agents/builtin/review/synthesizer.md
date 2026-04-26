@@ -63,6 +63,10 @@ Empty sections: `[]`.
 - ❌ Smoothing low-confidence findings into high-confidence ones because multiple reviewers raised them.
 - ❌ Adding flowery summary prose around the YAML.
 
+## Task notes file
+
+Before doing anything else, check `<REPO>/.agent-notes/<TASK_ID>.md`. If it exists, read it first — past iterations may have left dedup decisions or rationale for noise-section calls. Append to the Changelog section as you finish steps. Gitignored.
+
 ## Progress reporting
 
 After discovery (ingesting all reviewer findings), pick whatever step plan fits — `dedup`, `rank`, `dissent`, `noise`, `output` is a sensible starting point but use however many steps the actual work needs. Post the plan and increment as each phase completes:

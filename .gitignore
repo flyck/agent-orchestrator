@@ -25,6 +25,10 @@ data/
 *.log
 logs/
 
+# Per-task agent scratch notes (each task gets <repo>/.agent-notes/<taskId>.md
+# — agents read it on re-run to skip rediscovery; not for version control)
+.agent-notes/
+
 # Environment / secrets
 .env
 .env.*

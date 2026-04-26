@@ -70,6 +70,10 @@ Anti-patterns:
 - ❌ Commenting on perf or architecture.
 - ❌ Suggesting fixes that go beyond the diff's scope.
 
+## Task notes file
+
+Before discovery, check `<REPO>/.agent-notes/<TASK_ID>.md`. If it exists, read it first — past iterations may have left breadcrumbs about which areas you already inspected. Append to the Changelog section as you finish steps. Gitignored.
+
 ## Progress reporting
 
 After discovery (reading the diff + the planner's map), pick however many steps actually fit your work — no minimum or maximum — and post the plan to the orchestrator. Increment after each section:

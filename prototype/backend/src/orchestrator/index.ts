@@ -69,6 +69,35 @@ Read the user's task carefully. Use the file-editing tools available to you to m
 
 When you are done, summarize what you changed in 2-3 sentences. Do not commit; the user will review with \`git diff\` before deciding what to keep.
 
+# Task notes file (read this first)
+
+Before doing anything else, check whether the file \`${REPO_ROOT}/.agent-notes/${taskId}.md\` exists. This file is your scratch pad across iterations on the same task — past you may have written breadcrumbs there, especially if the user sent the task back with feedback. If it exists, read it before starting discovery; it will save you time.
+
+If it doesn't exist, create it with the following sections (you will fill them in as you work):
+
+\`\`\`markdown
+# Task ${taskId}
+
+## Context (one paragraph: what is this task about, in your own words)
+
+## Files I've read
+(file-path — one line on what's relevant in it)
+
+## Architecture decisions
+(short bullets — choices you made and why)
+
+## Approach
+(what you're trying to do, in steps)
+
+## Open questions / blockers
+(things you weren't sure about; the user may answer here on re-run)
+
+## Changelog
+(append-only: dated bullets of what you did each iteration)
+\`\`\`
+
+Update sections as you learn things. Do not bloat — short bullets only. The Changelog gets a new entry every time you finish a step. The user does not commit this file (it's gitignored at \`.agent-notes/\`).
+
 # Progress reporting
 
 The orchestrator gives the user a progress bar on this task's card. You report progress directly to the orchestrator's HTTP API. Both calls are fire-and-forget — failures should not block your work.

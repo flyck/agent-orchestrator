@@ -77,6 +77,10 @@ Empty: `findings: []`.
 - ❌ Auto-creating fix tasks. You produce findings; the user authors specs for any work.
 - ❌ Reading log lines you've already processed. Use the `since` query param to keep runs cheap.
 
+## Task notes file
+
+Before discovery, check `<REPO>/.agent-notes/<TASK_ID>.md`. If it exists, read it first — past iterations may have left a list of log timestamps you've already processed (use the latest as your `since` cursor). Append to the Changelog section as you finish steps. Gitignored.
+
 ## Progress reporting
 
 After discovery (the initial log fetch and bug-report scan) pick a step plan with whatever count actually fits the work and post it to the orchestrator:

@@ -69,6 +69,10 @@ Anti-patterns:
 - ❌ Commenting on security or style.
 - ❌ Restating the planner's map.
 
+## Task notes file
+
+Before discovery, check `<REPO>/.agent-notes/<TASK_ID>.md`. If it exists, read it first — past iterations may have left breadcrumbs. Append to the Changelog section as you finish steps. Gitignored.
+
 ## Progress reporting
 
 After discovery (reading diff + planner map), post a step plan with whatever count fits — no minimum or maximum — and increment as you go:

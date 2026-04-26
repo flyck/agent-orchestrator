@@ -442,7 +442,23 @@ export class HomePage {
         ),
       )
       .subscribe((cs) => {
-        this.costSummary.set(cs);
+        if (!cs) {
+          this.costSummary.set(null);
+          this.costLoading.set(false);
+          return;
+        }
+        const from = cs.range?.from ?? 0;
+        const to = cs.range?.to ?? 0;
+        const endPoint = to > from ? to - 1 : to;
+        const series = cs.series.map((s) => {
+          const xs = new Set(s.data.map((p) => p[0]));
+          const pts = [...s.data];
+          if (!xs.has(from)) pts.push([from, 0]);
+          if (!xs.has(endPoint)) pts.push([endPoint, 0]);
+          pts.sort((a, b) => a[0] - b[0]);
+          return { ...s, data: pts };
+        });
+        this.costSummary.set({ ...cs, series });
         this.costLoading.set(false);
       });
   }
