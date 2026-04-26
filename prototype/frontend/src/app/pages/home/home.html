@@ -188,11 +188,21 @@
       <div class="shell-line muted">⏵ <em>Live SSE stream from /api/tasks/{{ sel.raw.id }}/events lands here in the next iteration.</em></div>
     </div>
 
-    <!-- ─── Working-tree diff ────────────────────────────────────────────── -->
+    <!-- ─── Working-tree changes ──────────────────────────────────────── -->
     @let d = diff();
     <section class="diff-section">
       <header class="diff-head">
-        <h3>Working-tree diff <span class="meta">vs HEAD</span></h3>
+        <h3>Files changed</h3>
+        <span class="meta">
+          @if (d?.base_resolved) {
+            since this task started · base {{ d!.base.slice(0, 8) }}
+          } @else if (sel.raw.worktree_base_ref) {
+            base {{ sel.raw.worktree_base_ref.slice(0, 8) }} not found · falling back to HEAD
+          } @else {
+            no base captured · showing uncommitted only
+          }
+        </span>
+        <span class="diff-spacer"></span>
         <button type="button" class="meta-action" (click)="refreshDiff()" [disabled]="diffLoading()">
           {{ diffLoading() ? 'loading…' : 'refresh' }}
         </button>
@@ -201,9 +211,12 @@
       @if (diffError()) {
         <p class="finalize-err">{{ diffError() }}</p>
       } @else if (!d) {
-        <p class="muted small">Loading diff…</p>
+        <p class="muted small">Loading…</p>
       } @else if (d.files.length === 0) {
-        <p class="muted small">Working tree is clean — nothing to review.</p>
+        <p class="muted small">
+          Nothing to review — no files changed since this task's base
+          (or working tree is clean if no base was captured).
+        </p>
       } @else {
         <ul class="diff-files">
           @for (f of d.files; track f.path) {
@@ -220,10 +233,18 @@
             </li>
           }
         </ul>
-        @if (d.patch) {
+        <div class="diff-toggle">
+          <button type="button" class="meta-action" (click)="togglePatch()">
+            {{ showPatch() ? 'hide patch' : 'show patch' }}
+          </button>
+          <span class="meta">{{ d.patch.length }} bytes</span>
+        </div>
+        @if (showPatch() && d.patch) {
           <pre class="diff-patch mono"><code>{{ d.patch }}</code></pre>
           @if (d.truncated) {
-            <p class="muted small">Diff truncated at 400KB. Run <code>git diff HEAD</code> for the full patch.</p>
+            <p class="muted small">
+              Diff truncated at 400KB. Run <code>git diff {{ d.base }}</code> for the full patch.
+            </p>
           }
         }
       }

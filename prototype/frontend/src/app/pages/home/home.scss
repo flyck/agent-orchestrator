@@ -359,7 +359,7 @@
 .diff-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 10px;
   h3 {
     margin: 0;
@@ -367,6 +367,13 @@
     font-size: 16px;
   }
   h3 .meta { margin-left: 8px; }
+}
+.diff-spacer { flex: 1; }
+.diff-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 .diff-files {
   list-style: none;

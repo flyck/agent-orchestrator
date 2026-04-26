@@ -100,6 +100,12 @@ export function deleteTask(id: string, handle: Database = db()): boolean {
   return r.changes > 0;
 }
 
+export function setTaskBaseRef(id: string, baseRef: string, handle: Database = db()): void {
+  handle
+    .prepare("UPDATE tasks SET worktree_base_ref = ?, updated_at = ? WHERE id = ?")
+    .run(baseRef, Date.now(), id);
+}
+
 export function updateTaskStatus(
   id: string,
   status: TaskStatus,

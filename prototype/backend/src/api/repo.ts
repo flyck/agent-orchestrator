@@ -54,34 +54,61 @@ repo.get("/diff", async (c) => {
   const root = findRepoRoot(import.meta.dir);
   if (!root) return c.json({ error: "no_repo", message: "no .git found above backend dir" }, 500);
 
-  // 1. Status (porcelain v1 — easy to parse)
-  const status = await run("git", ["status", "--porcelain"], root);
-  const lines = status.stdout.split("\n").filter((l) => l.length > 0);
-  const entries: FileEntry[] = lines.map((l) => ({
-    path: l.slice(3),
-    status: l.slice(0, 2),
-    added: 0,
-    deleted: 0,
-  }));
+  // Optional ?base=<sha> scopes the diff to "everything since this ref"
+  // (committed + uncommitted). Defaults to HEAD = working-tree-only.
+  const requestedBase = c.req.query("base");
+  let base = "HEAD";
+  if (requestedBase) {
+    // Validate the ref exists; otherwise fall back to HEAD with a marker.
+    const verify = await run("git", ["rev-parse", "--verify", `${requestedBase}^{commit}`], root);
+    if (verify.code === 0) base = requestedBase;
+  }
 
-  // 2. numstat for tracked changes (vs HEAD)
-  const numstat = await run("git", ["diff", "HEAD", "--numstat"], root);
+  // File list: status for working-tree state, plus diff --name-status for
+  // anything committed since base. Merge them by path.
+  const statusRes = await run("git", ["status", "--porcelain"], root);
+  const map = new Map<string, FileEntry>();
+  for (const line of statusRes.stdout.split("\n")) {
+    if (line.length === 0) continue;
+    const path = line.slice(3);
+    map.set(path, { path, status: line.slice(0, 2), added: 0, deleted: 0 });
+  }
+  if (base !== "HEAD") {
+    const since = await run("git", ["diff", `${base}..HEAD`, "--name-status"], root);
+    for (const line of since.stdout.split("\n")) {
+      const m = line.match(/^([A-Z])\s+(.+)$/);
+      if (!m) continue;
+      const [, code, path] = m;
+      if (!map.has(path!)) {
+        map.set(path!, { path: path!, status: `${code} `, added: 0, deleted: 0 });
+      }
+    }
+  }
+
+  // numstat for +/- per file, scoped to the chosen base
+  const numstat = await run("git", ["diff", base, "--numstat"], root);
   for (const line of numstat.stdout.split("\n")) {
     const m = line.match(/^(\d+|-)\s+(\d+|-)\s+(.+)$/);
     if (!m) continue;
     const [, addStr, delStr, p] = m;
-    const e = entries.find((x) => x.path === p);
+    const e = map.get(p!);
     if (e) {
       e.added = addStr === "-" ? 0 : Number(addStr);
       e.deleted = delStr === "-" ? 0 : Number(delStr);
+    } else {
+      map.set(p!, {
+        path: p!,
+        status: "  ",
+        added: addStr === "-" ? 0 : Number(addStr),
+        deleted: delStr === "-" ? 0 : Number(delStr),
+      });
     }
   }
 
-  // 3. unified diff (HEAD -> working tree, including staged)
-  const diff = await run("git", ["diff", "HEAD", "--no-color"], root);
-  // 4. Cap massive diffs so the frontend doesn't choke. Anything bigger
-  //    than ~400KB gets truncated with a marker; user can still git-diff
-  //    locally if they need the full thing.
+  const entries = [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+
+  // Unified patch
+  const diff = await run("git", ["diff", base, "--no-color"], root);
   const MAX_DIFF_BYTES = 400_000;
   let patch = diff.stdout;
   let truncated = false;
@@ -92,6 +119,8 @@ repo.get("/diff", async (c) => {
 
   return c.json({
     repo_root: root,
+    base,
+    base_resolved: base !== "HEAD",
     files: entries,
     patch,
     truncated,

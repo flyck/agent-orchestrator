@@ -168,11 +168,16 @@ export class HomePage {
   protected readonly finalizeResult = signal<string | null>(null);
   protected readonly finalizeError = signal<string | null>(null);
 
-  // ─── Diff for selected task ───────────────────────────────────────────
+  // ─── Working-tree changes for selected task ───────────────────────────
   protected readonly diff = signal<DiffResponse | null>(null);
   protected readonly diffLoading = signal(false);
   protected readonly diffError = signal<string | null>(null);
+  protected readonly showPatch = signal(false);
   protected readonly openMessage = signal<string | null>(null);
+
+  togglePatch() {
+    this.showPatch.update((v) => !v);
+  }
 
   protected readonly hasIdeCommand = signal(false);
   protected readonly hasMagitCommand = signal(false);
@@ -419,7 +424,9 @@ export class HomePage {
   refreshDiff() {
     this.diffLoading.set(true);
     this.diffError.set(null);
-    this.repoApi.diff().subscribe({
+    const sel = this.selectedTask();
+    const base = sel?.raw.worktree_base_ref ?? null;
+    this.repoApi.diff({ base }).subscribe({
       next: (d) => {
         this.diff.set(d);
         this.diffLoading.set(false);

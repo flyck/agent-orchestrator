@@ -18,10 +18,29 @@
 import type { EngineEvent, EngineSession } from "../engine/types";
 import { OpenCodeSession } from "../engine/opencode";
 import { getEngine } from "../engine/singleton";
-import { getTask, updateTaskStatus, type TaskRow } from "../db/tasks";
+import { getTask, setTaskBaseRef, updateTaskStatus, type TaskRow } from "../db/tasks";
 import { recordUsageEvent } from "../db/usageEvents";
 import { log } from "../log";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
+function findRepoRoot(start: string): string | null {
+  let cur = resolve(start);
+  while (cur !== "/" && cur !== "") {
+    if (existsSync(join(cur, ".git"))) return cur;
+    cur = dirname(cur);
+  }
+  return null;
+}
+
+function captureHeadSha(): string | null {
+  const root = findRepoRoot(import.meta.dir);
+  if (!root) return null;
+  const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
+  if (r.status !== 0) return null;
+  return r.stdout.trim() || null;
+}
 
 interface ActiveTask {
   taskId: string;
@@ -63,6 +82,20 @@ export async function startRun(taskId: string): Promise<{ sessionId: string }> {
     workspace: task.workspace,
     title: task.title,
   });
+
+  // Snapshot the repo's HEAD now so the diff endpoint can scope changes to
+  // "since this task started" — even if HEAD advances later (other tasks
+  // commit, user commits manually, etc).
+  if (!task.worktree_base_ref) {
+    const sha = captureHeadSha();
+    if (sha) {
+      setTaskBaseRef(taskId, sha);
+      task.worktree_base_ref = sha;
+      log.info("orchestrator.run.base_ref_captured", { taskId, sha: sha.slice(0, 12) });
+    } else {
+      log.warn("orchestrator.run.base_ref_missing", { taskId });
+    }
+  }
 
   let engine;
   try {
