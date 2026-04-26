@@ -101,6 +101,12 @@ export class TasksService {
     return this.http.post<{ ok: boolean }>(`/api/tasks/${id}/force-complete`, {});
   }
 
+  queueSnapshot(): Observable<{ active: string[]; pending: string[]; max: number }> {
+    return this.http.get<{ active: string[]; pending: string[]; max: number }>(
+      `/api/tasks/queue/snapshot`,
+    );
+  }
+
   delete(id: string): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`/api/tasks/${id}`);
   }

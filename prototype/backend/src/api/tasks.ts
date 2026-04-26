@@ -15,6 +15,7 @@ import {
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
+import { snapshot as queueSnapshot } from "../queue";
 import { finalizeTask } from "../orchestrator/finalize";
 import { log } from "../log";
 
@@ -59,6 +60,9 @@ tasks.get("/", (c) => {
   return c.json({ tasks: listTasks({ workspace, status }) });
 });
 
+/** Live queue snapshot — drives a "running 2/3 · 1 queued" pipeline meter. */
+tasks.get("/queue/snapshot", (c) => c.json(queueSnapshot()));
+
 tasks.get("/:id", (c) => {
   const t = getTask(c.req.param("id"));
   if (!t) return c.json({ error: "not_found" }, 404);
@@ -83,6 +87,11 @@ tasks.post("/:id/run", async (c) => {
   log.info("api.tasks.run", { id });
   try {
     const r = await startRun(id);
+    if (!r) {
+      // Queued — capacity full. Status is now "queued" in the DB; the
+      // dispatcher will run it as soon as a slot frees.
+      return c.json({ task_id: id, queued: true, events_url: `/api/tasks/${id}/events` });
+    }
     return c.json({ task_id: id, session_id: r.sessionId, events_url: `/api/tasks/${id}/events` });
   } catch (err) {
     log.error("api.tasks.run.failed", {
@@ -147,6 +156,9 @@ tasks.post("/:id/continue", async (c) => {
   log.info("api.tasks.continue", { id, len: parsed.data.message.length });
   try {
     const r = await startRun(id, { followUp: parsed.data.message });
+    if (!r) {
+      return c.json({ task_id: id, queued: true, events_url: `/api/tasks/${id}/events` });
+    }
     return c.json({ task_id: id, session_id: r.sessionId, events_url: `/api/tasks/${id}/events` });
   } catch (err) {
     log.error("api.tasks.continue.failed", { id, error: String(err) });

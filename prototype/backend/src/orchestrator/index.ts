@@ -29,6 +29,7 @@ import {
   type TaskRow,
 } from "../db/tasks";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
+import * as queue from "../queue";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { recordUsageEvent } from "../db/usageEvents";
@@ -118,7 +119,21 @@ export function addListener(taskId: string, fn: (e: EngineEvent) => void): () =>
   return () => a.listeners.delete(fn);
 }
 
+/**
+ * Public entry. Routes through the job queue: if there's free capacity
+ * the run starts immediately and we return the session id; otherwise
+ * the task is marked queued and the dispatcher picks it up later.
+ * Returns null when queued.
+ */
 export async function startRun(
+  taskId: string,
+  opts: { followUp?: string } = {},
+): Promise<{ sessionId: string } | null> {
+  return queue.submit(taskId, () => startRunInternal(taskId, opts));
+}
+
+/** Actual run kickoff. Called by the queue once a slot is free. */
+async function startRunInternal(
   taskId: string,
   opts: { followUp?: string } = {},
 ): Promise<{ sessionId: string }> {
@@ -373,6 +388,8 @@ export async function startRun(
       const finalState =
         terminal === "error" || terminal === null ? task.current_state : "ready";
       updateTaskStatus(taskId, finalStatus, finalState);
+      // Tell the queue we're done so it can promote the next pending task.
+      queue.release(taskId);
       const lastErrorStr = lastError
         ? typeof lastError === "string"
           ? lastError.slice(0, 800)

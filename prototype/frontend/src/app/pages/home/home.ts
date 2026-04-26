@@ -291,6 +291,10 @@ export class HomePage {
   protected readonly closedCount = computed(
     () => this.tasks().filter((t) => t.status === 'closed').length,
   );
+  protected readonly queueState = signal<{ active: string[]; pending: string[]; max: number } | null>(null);
+  protected readonly runningCount = computed(() => this.queueState()?.active.length ?? 0);
+  protected readonly queuedCount = computed(() => this.queueState()?.pending.length ?? 0);
+  protected readonly maxParallel = computed(() => this.queueState()?.max ?? null);
 
   // ─── Inline task expansion ────────────────────────────────────────────
   protected readonly selectedId = signal<string | null>(null);
@@ -708,6 +712,14 @@ export class HomePage {
     timer(0, 1000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => this.nowTick.set(Date.now()));
+
+    // Queue snapshot — every 3s while the Home is open. Cheap (in-memory).
+    timer(0, 3000)
+      .pipe(
+        takeUntil(this.destroy$),
+        switchMap(() => this.tasksApi.queueSnapshot().pipe(catchError(() => of(null)))),
+      )
+      .subscribe((q) => this.queueState.set(q));
 
     // Tasks — refresh every 5s (covers SSE-less initial wiring).
     timer(0, 5000)

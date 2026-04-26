@@ -2,11 +2,14 @@ import { app } from "./api";
 import { db } from "./db";
 import { syncAgentsFromDisk } from "./agents/sync";
 import { installCrashHandlers, log } from "./log";
+import { bootScan as queueBootScan } from "./queue";
 
 installCrashHandlers();
 
 // Initialize DB (schema + default settings) eagerly so sync can write.
 db();
+
+queueBootScan();
 
 const sync = syncAgentsFromDisk();
 log.info("agents.sync", {

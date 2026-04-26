@@ -55,6 +55,9 @@
     </div>
     <div class="pipeline-controls">
       <span class="meta">{{ openCount() }} open · {{ closedCount() }} closed</span>
+      @if (maxParallel() !== null) {
+        <span class="meta">running {{ runningCount() }}/{{ maxParallel() }}@if (queuedCount() > 0) {<span> · {{ queuedCount() }} queued</span>}</span>
+      }
       @if (tasksError()) {
         <span class="meta error">backend error: {{ tasksError() }}</span>
       }
