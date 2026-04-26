@@ -196,3 +196,21 @@ CREATE TABLE IF NOT EXISTS suggestions (
 
 CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_suggestions_task   ON suggestions(task_id);
+
+-- User-submitted bug reports about the orchestrator itself. The "Bug" button
+-- in the frontend posts an HTML snapshot + optional comment. The
+-- orchestrator-debugger background agent picks these up alongside the daily
+-- log scan and produces findings.
+CREATE TABLE IF NOT EXISTS bug_reports (
+  id              TEXT PRIMARY KEY,
+  page_url        TEXT NOT NULL,
+  user_agent      TEXT,
+  comment         TEXT,
+  html_snapshot   TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'open',  -- open | investigating | resolved | dismissed
+  task_id         TEXT REFERENCES tasks(id),     -- set when the debugger spawns a task for it
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC);
