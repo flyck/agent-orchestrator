@@ -68,6 +68,23 @@ export class OpenCodeSession implements EngineSession {
     }
   }
 
+  /**
+   * Respond to a `permission.asked` event. opencode accepts response values:
+   *   - "once"    grant just this request
+   *   - "always"  grant + remember for the session
+   *   - "reject"  deny
+   */
+  async respondToPermission(
+    permissionId: string,
+    response: "once" | "always" | "reject" = "always",
+  ): Promise<void> {
+    if (this.closed) return;
+    await this.client.postJson(
+      `/session/${this.internal.id}/permissions/${permissionId}`,
+      { response },
+    );
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -85,8 +102,13 @@ export async function createSession(
   spec: { title?: string; defaultSystem: string; defaultModel: ModelRef },
   bus: EventBus,
 ): Promise<OpenCodeSession> {
+  // Auto-allow all permissions for orchestrator-driven sessions. The user
+  // already authorized this work by creating the task; opencode's per-tool
+  // permission gates would otherwise block tool use silently. If we ever
+  // want a stricter mode, this becomes an opt-in toggle in OpenSessionSpec.
   const created = (await client.postJson<CreateSessionResponse>("/session", {
     title: spec.title,
+    permission: [{ permission: "*", pattern: "*", action: "allow" }],
   })) as CreateSessionResponse;
   // Subscribe to the bus before sending any messages so we don't miss the
   // first events.

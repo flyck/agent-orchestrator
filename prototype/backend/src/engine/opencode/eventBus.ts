@@ -39,7 +39,7 @@ export class EventBus {
   private queues = new Map<string, EventQueue<EngineEvent>>();
   private connectedPromise: Promise<void> | null = null;
   private aborted = false;
-  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private reader: { cancel: () => Promise<void> } | null = null;
   /** Last-seen sessionID for events that don't carry one — best-effort. */
   private onError?: (err: unknown) => void;
 
