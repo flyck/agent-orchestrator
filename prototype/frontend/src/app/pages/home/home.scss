@@ -302,6 +302,30 @@
   }
 }
 
+.time-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 24px;
+  margin: 0 0 14px;
+  padding: 0;
+  > div { display: contents; }
+  dt {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .rel { font-family: var(--font-sans); }
+}
+
 .shell {
   background: #15151399;
   background: #181816;

@@ -133,9 +133,34 @@
       </div>
     }
 
+    <dl class="time-meta">
+      <div>
+        <dt>created</dt>
+        <dd>
+          <span class="abs">{{ formatTs(sel.raw.created_at) }}</span>
+          <span class="rel meta">{{ relativeTs(sel.raw.created_at) }}</span>
+        </dd>
+      </div>
+      <div>
+        <dt>updated</dt>
+        <dd>
+          <span class="abs">{{ formatTs(sel.raw.updated_at) }}</span>
+          <span class="rel meta">{{ relativeTs(sel.raw.updated_at) }}</span>
+        </dd>
+      </div>
+      @if (terminalStatuses.has(sel.raw.status)) {
+        <div>
+          <dt>finished</dt>
+          <dd>
+            <span class="abs">{{ formatTs(sel.raw.updated_at) }}</span>
+            <span class="rel meta">{{ relativeTs(sel.raw.updated_at) }}</span>
+          </dd>
+        </div>
+      }
+    </dl>
+
     <div class="shell">
       <div class="shell-line muted">id: {{ sel.raw.id }}</div>
-      <div class="shell-line muted">created: {{ sel.raw.created_at }}</div>
       <div class="shell-line muted">⏵ <em>Live SSE stream from /api/tasks/{{ sel.raw.id }}/events lands here in the next iteration.</em></div>
     </div>
 

@@ -65,6 +65,23 @@ interface ViewTask {
   worktreePath: string | null;
 }
 
+/** ISO date + time, UTC. Hover shows the same; we just want unambiguous text. */
+export function formatTs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const d = new Date(ms);
+  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+/** "5s ago", "12m ago", "2h ago", "3d ago" — coarse but consistent. */
+export function relativeTs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const diff = Math.max(0, Date.now() - ms);
+  if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
+  return `${Math.round(diff / 86_400_000)}d ago`;
+}
+
 function toViewTask(t: Task): ViewTask {
   // Closed = task has reached a terminal status (done/failed/canceled).
   const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
@@ -100,6 +117,9 @@ export class HomePage {
   protected readonly states = PIPELINE_STATES;
   protected readonly stateLabels = STATE_LABELS;
   protected readonly kindLabels = KIND_LABELS;
+  protected readonly formatTs = formatTs;
+  protected readonly relativeTs = relativeTs;
+  protected readonly terminalStatuses = new Set(['done', 'failed', 'canceled']);
 
   // ─── Real tasks ───────────────────────────────────────────────────────
   protected readonly tasks = signal<ViewTask[]>([]);
@@ -117,6 +137,11 @@ export class HomePage {
       spec: [], plan: [], build: [], ready: [], finalize: [],
     };
     for (const t of this.visibleTasks()) groups[t.state].push(t);
+    // Ready column gets a deterministic order (newest-updated first) so
+    // recently-finished tasks float to the top. Other columns keep the
+    // backend's order (created_at desc) — they're typically short-lived
+    // and inserting churn would make them feel jumpy.
+    groups.ready.sort((a, b) => b.raw.updated_at - a.raw.updated_at);
     return groups;
   });
 
@@ -142,14 +167,26 @@ export class HomePage {
   protected readonly finalizeError = signal<string | null>(null);
 
   selectTask(id: string) {
-    this.selectedId.update((cur) => (cur === id ? null : id));
+    const next = this.selectedId() === id ? null : id;
+    this.selectedId.set(next);
     this.interjectionText = '';
     this.finalizeResult.set(null);
     this.finalizeError.set(null);
+    this.syncQueryParams({ task: next });
   }
 
   closeDetail() {
     this.selectedId.set(null);
+    this.syncQueryParams({ task: null });
+  }
+
+  private syncQueryParams(patch: Record<string, string | null>) {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: patch,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   deleteSelectedTask() {
@@ -158,6 +195,7 @@ export class HomePage {
     this.tasksApi.delete(sel.raw.id).subscribe({
       next: () => {
         this.selectedId.set(null);
+        this.syncQueryParams({ task: null });
         this.refreshTasks();
       },
       error: (e) =>
@@ -296,12 +334,16 @@ export class HomePage {
   private destroy$ = new Subject<void>();
 
   constructor() {
-    // Hydrate showClosed from the URL on first navigation.
+    // Hydrate filter + selection from the URL. Only applies on initial nav
+    // — subsequent param changes from our own syncQueryParams calls are
+    // idempotent (the values already match the signals).
     this.route.queryParamMap
       .pipe(takeUntil(this.destroy$))
       .subscribe((p) => {
-        const v = p.get('closed');
-        this.showClosed.set(v === '1' || v === 'true');
+        const closed = p.get('closed');
+        this.showClosed.set(closed === '1' || closed === 'true');
+        const task = p.get('task');
+        this.selectedId.set(task && task.length > 0 ? task : null);
       });
 
     // Settings — one-shot for the PR poll display.
@@ -359,14 +401,7 @@ export class HomePage {
   toggleClosed() {
     const next = !this.showClosed();
     this.showClosed.set(next);
-    // Persist in URL so reloads keep the choice. closed=1 when on, removed
-    // (replaced with null) when off — keeps the URL clean.
-    this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { closed: next ? '1' : null },
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
-    });
+    this.syncQueryParams({ closed: next ? '1' : null });
   }
 
   pickUp(_item: { id: string; title: string }) {
