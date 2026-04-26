@@ -43,6 +43,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   backlog_token_budget: "1000",
   // IDE integration
   ide_open_command: "",
+  // GitHub: polling for PRs where the user is a requested reviewer.
+  // Wired in Phase 13 when the GitHub provider lands; setting is here so
+  // the UI can show it from day one.
+  pr_review_poll_interval_minutes: "5",
 };
 
 function seedDefaultSettings(db: Database) {

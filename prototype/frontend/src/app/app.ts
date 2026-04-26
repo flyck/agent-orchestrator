@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { catchError, of, timer, switchMap } from 'rxjs';
+import { BugReportButton } from './components/bug-report-button';
 
 interface HealthResponse {
   ok: boolean;
@@ -20,7 +21,7 @@ const TABS: { path: string; label: string }[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, BugReportButton],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })

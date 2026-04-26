@@ -18,6 +18,7 @@ export interface Settings {
   readme_token_budget: number;
   backlog_token_budget: number;
   ide_open_command: string;
+  pr_review_poll_interval_minutes: number;
 }
 
 const NUMBER_KEYS = new Set<keyof Settings>([
@@ -29,6 +30,7 @@ const NUMBER_KEYS = new Set<keyof Settings>([
   "worktree_max_age_days",
   "readme_token_budget",
   "backlog_token_budget",
+  "pr_review_poll_interval_minutes",
 ]);
 
 const NULLABLE_NUMBER_KEYS = new Set<keyof Settings>([

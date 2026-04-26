@@ -6,6 +6,41 @@
 }
 .block:first-child { border-top: 0; padding-top: 8px; }
 
+/* ─── Manual-coding nudge banner ──────────────────────────────────────── */
+.nudge {
+  margin: 16px 0 0;
+  padding: 14px 18px;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper-soft);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 16px;
+  .meta { margin: 0; }
+  .nudge-body {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    line-height: 1.45;
+    margin: 4px 0 0;
+    color: var(--ink);
+    max-width: 720px;
+  }
+  .nudge-dismiss {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--paper);
+  }
+}
+
+/* ─── Chart wrap ──────────────────────────────────────────────────────── */
+.chart-wrap {
+  border: 1px solid var(--rule);
+  background: var(--paper-soft);
+  padding: 8px 4px 0;
+  apx-chart { display: block; }
+}
+
 .block-head {
   display: flex;
   justify-content: space-between;
@@ -100,6 +135,8 @@
 /* Task card */
 .task-card {
   display: block;
+  width: 100%;
+  text-align: left;
   text-decoration: none;
   color: var(--ink);
   border: 1px solid var(--rule);
@@ -107,8 +144,14 @@
   padding: 10px 12px;
   background: var(--paper);
   cursor: pointer;
+  font: inherit;
 }
 .task-card:hover { background: var(--paper-soft); }
+.task-card.selected {
+  border-color: var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
 
 .column[data-state='spec']  .task-card { background: var(--state-spec-bg); }
 .column[data-state='plan']  .task-card { background: var(--state-plan-bg); }
@@ -163,11 +206,90 @@
   word-break: break-all;
 }
 
+/* ─── Inline task detail ──────────────────────────────────────────────── */
+.detail {
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  padding: 20px 22px;
+  margin-top: 0;
+}
+.detail.attention {
+  background: var(--ink-amber-bg);
+  border-color: var(--ink-amber);
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
+  h2 { margin: 4px 0 0; }
+}
+.detail-close {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  border-color: var(--rule-strong);
+}
+
+.attention-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  font-size: 13px;
+  code {
+    background: var(--paper-soft);
+    padding: 2px 6px;
+    border-radius: 2px;
+  }
+  .meta-action {
+    margin-left: auto;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+}
+
+.shell {
+  background: #15151399;
+  background: #181816;
+  color: #ECEAE2;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  border-radius: 2px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--rule-strong);
+}
+.shell-line { white-space: pre-wrap; }
+.shell-line.muted { color: #8E8C84; }
+
+.interject {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 12px;
+  input { width: 100%; }
+}
+
 /* ─── Backlog ─────────────────────────────────────────────────────────── */
 .backlog-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
 }
 .backlog-section {
   border: 1px solid var(--rule);

@@ -1,3 +1,15 @@
+<!-- ─── Manual-coding nudge ─────────────────────────────────────────────── -->
+@if (nudgeVisible()) {
+  <aside class="nudge">
+    <p class="meta">friendly reminder · per the manifesto</p>
+    <p class="nudge-body">
+      Code something manually today. The orchestrator is fast; staying sharp is faster than getting
+      sharp again. Skill atrophy is the real cost of agent-assisted work, not tokens.
+    </p>
+    <button class="nudge-dismiss" type="button" (click)="dismissNudge()">Dismiss for now</button>
+  </aside>
+}
+
 <!-- ─── Token usage ─────────────────────────────────────────────────────── -->
 <section class="block usage">
   <header class="block-head">
@@ -6,41 +18,32 @@
       <h2>Token usage by provider</h2>
     </div>
     <p class="muted small">
-      A line per provider where you have credentials. Nothing recorded yet — the engine adapter starts
-      writing usage rows once tasks run.
+      A line per provider where you have credentials. Empty until tasks run and the engine adapter
+      records cost rows.
     </p>
   </header>
 
-  @if (usage().length === 0) {
-    <div class="usage-empty">
-      <svg viewBox="0 0 600 80" preserveAspectRatio="none" aria-hidden="true">
-        <line x1="0" y1="40" x2="600" y2="40" stroke="var(--rule)" stroke-dasharray="3 5" />
-        <text x="300" y="46" text-anchor="middle" fill="var(--ink-faint)" font-size="11"
-              font-family="Inter, sans-serif" letter-spacing="0.06em">
-          AWAITING DATA
-        </text>
-      </svg>
-    </div>
-  } @else {
-    <ul class="usage-list">
-      @for (u of usage(); track u.providerId) {
-        <li>
-          <span class="usage-label">{{ u.label }}</span>
-          <span class="mono">${{ u.spentUsd.toFixed(2) }}</span>
-          @if (u.budgetUsd) {
-            <span class="meta">/ ${{ u.budgetUsd.toFixed(2) }}</span>
-          }
-        </li>
-      }
-    </ul>
-  }
+  <div class="chart-wrap">
+    <apx-chart
+      [chart]="usageOptions.chart!"
+      [series]="usageOptions.series!"
+      [noData]="usageOptions.noData!"
+      [stroke]="usageOptions.stroke!"
+      [grid]="usageOptions.grid!"
+      [xaxis]="usageOptions.xaxis!"
+      [yaxis]="usageOptions.yaxis!"
+      [legend]="usageOptions.legend!"
+      [colors]="usageOptions.colors!"
+      [tooltip]="usageOptions.tooltip!"
+    />
+  </div>
 </section>
 
 <!-- ─── Active tasks (pipeline) ─────────────────────────────────────────── -->
 <section class="block pipeline">
   <header class="block-head">
     <div>
-      <p class="meta">active tasks</p>
+      <p class="meta">active tasks · click a card to expand</p>
       <h2>Pipeline</h2>
     </div>
     <div class="pipeline-controls">
@@ -67,10 +70,11 @@
           </div>
         } @else {
           @for (task of tasksByState()[state]; track task.id) {
-            <a class="task-card"
-               [class.attention]="task.needsAttention"
-               [class.closed]="task.status === 'closed'"
-               [routerLink]="['/home/task', task.id]">
+            <button class="task-card"
+                    [class.attention]="task.needsAttention"
+                    [class.closed]="task.status === 'closed'"
+                    [class.selected]="selectedId() === task.id"
+                    (click)="selectTask(task.id)">
               <div class="task-card-head">
                 <span class="kind">{{ kindLabels[task.kind] }}</span>
                 @if (task.needsAttention) {
@@ -83,19 +87,66 @@
               </div>
               <div class="task-title">{{ task.title }}</div>
               <div class="progress">
-                <div class="progress-fill"
-                     [style.width.%]="task.progress * 100"></div>
+                <div class="progress-fill" [style.width.%]="task.progress * 100"></div>
               </div>
               @if (task.worktreePath) {
                 <div class="task-foot mono">{{ task.worktreePath }}</div>
               }
-            </a>
+            </button>
           }
         }
       </div>
     }
   </div>
 </section>
+
+<!-- ─── Inline task detail (expands on card click) ──────────────────────── -->
+@let sel = selectedTask();
+@if (sel) {
+  <section class="block detail" [class.attention]="sel.needsAttention">
+    <header class="detail-head">
+      <div>
+        <p class="meta">{{ kindLabels[sel.kind] }} · {{ stateLabels[sel.state] }}</p>
+        <h2>{{ sel.title }}</h2>
+      </div>
+      <button class="detail-close" type="button" (click)="closeDetail()">close</button>
+    </header>
+
+    @if (sel.needsAttention) {
+      <p class="attention-note">
+        <span class="dot waiting"></span>
+        An agent is waiting on your input. Reply below to unblock it.
+      </p>
+    }
+
+    @if (sel.worktreePath) {
+      <div class="detail-meta">
+        <span class="meta">worktree</span>
+        <code class="mono">{{ sel.worktreePath }}</code>
+        <button type="button" class="meta-action" disabled title="Phase 12: opens in $EDITOR">open in IDE</button>
+      </div>
+    }
+
+    <div class="shell">
+      @if (sel.shellLines && sel.shellLines.length) {
+        @for (line of sel.shellLines; track $index) {
+          <div class="shell-line">{{ line }}</div>
+        }
+      } @else {
+        <div class="shell-line muted">No agent activity yet.</div>
+      }
+      <div class="shell-line muted">⏵ <em>Live agent stream wires in once the WebSocket hub lands (Phase 7).</em></div>
+    </div>
+
+    <div class="interject">
+      <input type="text"
+             [(ngModel)]="interjectionText"
+             placeholder="Type a comment to interject — Enter to send"
+             (keydown.enter)="sendInterjection()" />
+      <button type="button" class="primary" (click)="sendInterjection()">Send</button>
+    </div>
+  </section>
+}
 
 <!-- ─── Backlog ─────────────────────────────────────────────────────────── -->
 <section class="block backlog">
@@ -105,52 +156,49 @@
       <h2>Backlog</h2>
     </div>
     <p class="muted small">
-      Pick an item to start a task. You'll author the spec — these are pointers, not pre-filled drafts.
+      Pick an item to start a task — you'll author the spec yourself. These are pointers, not
+      pre-filled drafts.
     </p>
   </header>
 
   <div class="backlog-grid">
     <article class="backlog-section">
       <header class="backlog-section-head">
+        <h3>PRs awaiting your review</h3>
+        <p class="meta">
+          @if (prPollMinutes() !== null) {
+            polls every {{ prPollMinutes() }} min · configurable in Settings
+          } @else {
+            poll cadence configurable in Settings
+          }
+        </p>
+      </header>
+      <p class="muted">
+        Connect GitHub or another provider in Settings → Integrations to surface PRs where you're a
+        requested reviewer. Wired in Phase 13 with Octokit.
+      </p>
+    </article>
+
+    <article class="backlog-section">
+      <header class="backlog-section-head">
         <h3>Related issues</h3>
         <p class="meta">from connected integrations</p>
       </header>
-      @if (relatedIssues().length === 0) {
-        <p class="muted">
-          Connect GitHub in Settings → Integrations to surface related issues from your repos. Coming in Phase 13.
-        </p>
-      } @else {
-        <ul class="backlog-list">
-          @for (item of relatedIssues(); track item.id) {
-            <li>
-              <button class="link-button" (click)="pickUp(item)">{{ item.title }}</button>
-              @if (item.detail) {<span class="meta"> — {{ item.detail }}</span>}
-            </li>
-          }
-        </ul>
-      }
+      <p class="muted">
+        Connected integrations surface issues touching the areas your recent tasks changed. Empty
+        until at least one provider is connected.
+      </p>
     </article>
 
     <article class="backlog-section">
       <header class="backlog-section-head">
         <h3>Refactoring suggestions</h3>
-        <p class="meta">from background agents — moderate cadence</p>
+        <p class="meta">from background agents · moderate cadence</p>
       </header>
-      @if (refactorSuggestions().length === 0) {
-        <p class="muted">
-          Enable background agents in Settings → Agents to surface refactoring suggestions here.
-          They obey the cadence policy in their definition (no PR spam).
-        </p>
-      } @else {
-        <ul class="backlog-list">
-          @for (item of refactorSuggestions(); track item.id) {
-            <li>
-              <button class="link-button" (click)="pickUp(item)">{{ item.title }}</button>
-              @if (item.detail) {<span class="meta"> — {{ item.detail }}</span>}
-            </li>
-          }
-        </ul>
-      }
+      <p class="muted">
+        Enable background agents in Settings → Agents to surface refactoring candidates here. They
+        obey the cadence policy in their definition (no PR spam).
+      </p>
     </article>
   </div>
 </section>

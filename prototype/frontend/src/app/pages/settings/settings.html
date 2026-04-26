@@ -56,6 +56,13 @@
         <span class="label">Engine</span>
         <input type="text" [value]="s.engine" disabled />
       </label>
+
+      <label>
+        <span class="label">PR-review poll interval (minutes)</span>
+        <input type="number" min="0" max="1440"
+               [ngModel]="s.pr_review_poll_interval_minutes"
+               (ngModelChange)="setDraft('pr_review_poll_interval_minutes', $event)" />
+      </label>
     </div>
   </section>
 

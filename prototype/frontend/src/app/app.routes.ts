@@ -8,12 +8,6 @@ export const routes: Routes = [
     title: 'Home',
   },
   {
-    path: 'home/task/:id',
-    loadComponent: () =>
-      import('./pages/home/task-detail').then((m) => m.TaskDetailPage),
-    title: 'Task',
-  },
-  {
     path: 'review',
     loadComponent: () => import('./pages/review/review').then((m) => m.ReviewPage),
     title: 'Review',
