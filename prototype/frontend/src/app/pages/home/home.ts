@@ -180,23 +180,53 @@ export class HomePage {
   }
 
   // ─── Token usage chart ────────────────────────────────────────────────
-  protected readonly usageOptions: Partial<ApexOptions> = {
+  // FIXTURE — seven days of cost-per-day per provider so the chart shape is
+  // visible. Replace with /api/cost/summary in Phase 6 once the engine
+  // adapter persists usage rows. Empty fallback (single empty series) makes
+  // the apex noData callout actually appear when there's no data.
+  private buildUsageSeries() {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const day = (n: number) => today.getTime() - n * 24 * 60 * 60 * 1000;
+    const fixture = [
+      {
+        name: 'openai',
+        data: [
+          [day(6), 0.00], [day(5), 0.42], [day(4), 0.08],
+          [day(3), 1.13], [day(2), 0.61], [day(1), 0.95], [day(0), 0.27],
+        ],
+      },
+      {
+        name: 'github-copilot',
+        data: [
+          [day(6), 0.00], [day(5), 0.00], [day(4), 0.18],
+          [day(3), 0.05], [day(2), 0.31], [day(1), 0.22], [day(0), 0.11],
+        ],
+      },
+    ];
+    return fixture;
+  }
+
+  protected readonly usageOptions: ApexOptions = {
     chart: {
       type: 'line',
-      height: 160,
+      height: 200,
       toolbar: { show: false },
       zoom: { enabled: false },
       foreColor: '#6E6E69',
       fontFamily: 'Inter, system-ui, sans-serif',
       animations: { enabled: false },
+      background: 'transparent',
     },
-    series: [], // empty until backend records cost rows
+    series: this.buildUsageSeries(),
     noData: {
       text: 'AWAITING DATA — provider lines will appear here once tasks run',
       align: 'center',
-      style: { color: '#A3A19A', fontSize: '11px' },
+      verticalAlign: 'middle',
+      style: { color: '#A3A19A', fontSize: '11px', fontFamily: 'Inter, sans-serif' },
     },
-    stroke: { curve: 'straight', width: 1.5 },
+    stroke: { curve: 'straight', width: [1.5, 1.5] },
+    markers: { size: 3, strokeWidth: 0, hover: { size: 4 } },
     grid: {
       borderColor: '#D8D6CF',
       strokeDashArray: 3,
@@ -214,9 +244,19 @@ export class HomePage {
         style: { fontSize: '10px' },
       },
     },
-    legend: { fontSize: '11px', position: 'top', horizontalAlign: 'right' },
-    colors: ['#1A1A18', '#6E6E69', '#A66A1F', '#8B1E1E'],
-    tooltip: { theme: 'light' },
+    legend: {
+      fontSize: '11px',
+      position: 'top',
+      horizontalAlign: 'right',
+      markers: { strokeWidth: 0, size: 6 },
+    },
+    colors: ['#1A1A18', '#6E6E69'],
+    tooltip: {
+      theme: 'light',
+      x: { format: 'MMM dd' },
+      y: { formatter: (v: number) => `$${v.toFixed(4)}` },
+    },
+    dataLabels: { enabled: false },
   };
 
   // ─── Backlog ──────────────────────────────────────────────────────────

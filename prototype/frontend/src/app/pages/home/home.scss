@@ -37,8 +37,14 @@
 .chart-wrap {
   border: 1px solid var(--rule);
   background: var(--paper-soft);
-  padding: 8px 4px 0;
+  padding: 8px 8px 4px;
+  min-height: 200px;
   apx-chart { display: block; }
+}
+/* Apex injects inline styles; nudge tooltip/legend type to match the page. */
+.chart-wrap .apexcharts-tooltip,
+.chart-wrap .apexcharts-legend {
+  font-family: var(--font-sans) !important;
 }
 
 .block-head {
