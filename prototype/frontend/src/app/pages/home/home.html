@@ -62,7 +62,7 @@
         <input type="checkbox" [checked]="showClosed()" (change)="toggleClosed()" />
         <span>show closed</span>
       </label>
-      <button class="primary" disabled title="Spec editor lands in Phase 12">+ new task</button>
+      <button class="primary" type="button" (click)="openNewTaskDialog()">+ new task</button>
     </div>
   </header>
 
@@ -503,3 +503,6 @@
     </article>
   </div>
 </section>
+
+<!-- Spec editor — opens from the + new task button. -->
+<app-new-task-dialog #newTaskDialog (created)="onTaskCreated($event)" />

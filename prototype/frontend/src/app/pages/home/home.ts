@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NgApexchartsModule, type ApexOptions } from 'ng-apexcharts';
@@ -12,6 +12,7 @@ import {
 import { CostService, type CostSummary } from '../../services/cost.service';
 import { RepoService, type DiffResponse } from '../../services/repo.service';
 import { TaskStreamService, type StreamEvent } from '../../services/task-stream.service';
+import { NewTaskDialog } from '../../components/new-task-dialog';
 import type { Subscription } from 'rxjs';
 
 /**
@@ -226,7 +227,7 @@ function toViewTask(t: Task): ViewTask {
 @Component({
   selector: 'app-home-page',
   standalone: true,
-  imports: [NgApexchartsModule, FormsModule],
+  imports: [NgApexchartsModule, FormsModule, NewTaskDialog],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
@@ -476,6 +477,21 @@ export class HomePage {
       error: (e) =>
         this.finalizeError.set(`force-complete failed: ${e?.error?.message ?? e?.message ?? e}`),
     });
+  }
+
+  /** Spec-editor dialog. The "+ new task" button calls show() on it,
+   *  and on success we auto-select the new task so the user lands on
+   *  its detail panel and can watch the live stream immediately. */
+  protected readonly newTaskDialog = viewChild<NewTaskDialog>('newTaskDialog');
+  openNewTaskDialog() {
+    this.newTaskDialog()?.show();
+  }
+  onTaskCreated(id: string) {
+    this.refreshTasks();
+    this.selectedId.set(id);
+    this.detailTab.set('stream');
+    this.syncQueryParams({ task: id, tab: 'stream' });
+    this.openStream(id);
   }
 
   /** While task is open: forward the comment as a live in-session message.
