@@ -125,13 +125,37 @@
       </p>
     }
 
-    @if (sel.worktreePath) {
-      <div class="detail-meta">
+    <div class="detail-meta">
+      @if (sel.worktreePath) {
         <span class="meta">worktree</span>
         <code class="mono">{{ sel.worktreePath }}</code>
-        <button type="button" class="meta-action" disabled title="Phase 12: opens in $EDITOR">open in IDE</button>
-      </div>
-    }
+      } @else {
+        <span class="meta">working tree</span>
+        <code class="mono">repo root</code>
+      }
+      <span class="meta-spacer"></span>
+      @if (hasIdeCommand()) {
+        <button type="button" class="meta-action" (click)="openInIde()" title="ide_open_command">
+          open in IDE
+        </button>
+      } @else {
+        <button type="button" class="meta-action" disabled title="Set ide_open_command in Settings to enable">
+          open in IDE
+        </button>
+      }
+      @if (hasMagitCommand()) {
+        <button type="button" class="meta-action" (click)="openInMagit()" title="magit_open_command">
+          open magit
+        </button>
+      } @else {
+        <button type="button" class="meta-action" disabled title="Set magit_open_command in Settings to enable">
+          open magit
+        </button>
+      }
+      @if (openMessage()) {
+        <span class="meta open-msg">{{ openMessage() }}</span>
+      }
+    </div>
 
     <dl class="time-meta">
       <div>
@@ -163,6 +187,47 @@
       <div class="shell-line muted">id: {{ sel.raw.id }}</div>
       <div class="shell-line muted">⏵ <em>Live SSE stream from /api/tasks/{{ sel.raw.id }}/events lands here in the next iteration.</em></div>
     </div>
+
+    <!-- ─── Working-tree diff ────────────────────────────────────────────── -->
+    @let d = diff();
+    <section class="diff-section">
+      <header class="diff-head">
+        <h3>Working-tree diff <span class="meta">vs HEAD</span></h3>
+        <button type="button" class="meta-action" (click)="refreshDiff()" [disabled]="diffLoading()">
+          {{ diffLoading() ? 'loading…' : 'refresh' }}
+        </button>
+      </header>
+
+      @if (diffError()) {
+        <p class="finalize-err">{{ diffError() }}</p>
+      } @else if (!d) {
+        <p class="muted small">Loading diff…</p>
+      } @else if (d.files.length === 0) {
+        <p class="muted small">Working tree is clean — nothing to review.</p>
+      } @else {
+        <ul class="diff-files">
+          @for (f of d.files; track f.path) {
+            <li>
+              <span class="diff-status meta">{{ f.status }}</span>
+              <button class="diff-path link-button"
+                      type="button"
+                      (click)="openInIde(f.path)"
+                      [disabled]="!hasIdeCommand()"
+                      title="open this file in your IDE">
+                {{ f.path }}
+              </button>
+              <span class="diff-counts meta">+{{ f.added }} −{{ f.deleted }}</span>
+            </li>
+          }
+        </ul>
+        @if (d.patch) {
+          <pre class="diff-patch mono"><code>{{ d.patch }}</code></pre>
+          @if (d.truncated) {
+            <p class="muted small">Diff truncated at 400KB. Run <code>git diff HEAD</code> for the full patch.</p>
+          }
+        }
+      }
+    </section>
 
     @if (sel.status === 'open') {
       <div class="interject">

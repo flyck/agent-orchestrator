@@ -41,8 +41,12 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   repo_context_enabled: "true",
   readme_token_budget: "2000",
   backlog_token_budget: "1000",
-  // IDE integration
+  // IDE integration. Both support a {path} placeholder; if absent, the
+  // path is appended as the last argument. Examples:
+  //   ide_open_command:   "code" or "cursor --reuse-window"
+  //   magit_open_command: 'emacsclient --no-wait --eval (magit-status-setup-buffer "{path}")'
   ide_open_command: "",
+  magit_open_command: "",
   // GitHub: polling for PRs where the user is a requested reviewer.
   // Wired in Phase 13 when the GitHub provider lands; setting is here so
   // the UI can show it from day one.

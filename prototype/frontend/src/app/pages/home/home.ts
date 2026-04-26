@@ -10,6 +10,7 @@ import {
   type TaskState,
 } from '../../services/tasks.service';
 import { CostService, type CostSummary } from '../../services/cost.service';
+import { RepoService, type DiffResponse } from '../../services/repo.service';
 
 /**
  * Pipeline state, in order. Each task lives in exactly one state.
@@ -111,6 +112,7 @@ export class HomePage {
   private settingsApi = inject(SettingsService);
   private tasksApi = inject(TasksService);
   private costApi = inject(CostService);
+  private repoApi = inject(RepoService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
@@ -166,13 +168,25 @@ export class HomePage {
   protected readonly finalizeResult = signal<string | null>(null);
   protected readonly finalizeError = signal<string | null>(null);
 
+  // ─── Diff for selected task ───────────────────────────────────────────
+  protected readonly diff = signal<DiffResponse | null>(null);
+  protected readonly diffLoading = signal(false);
+  protected readonly diffError = signal<string | null>(null);
+  protected readonly openMessage = signal<string | null>(null);
+
+  protected readonly hasIdeCommand = signal(false);
+  protected readonly hasMagitCommand = signal(false);
+
   selectTask(id: string) {
     const next = this.selectedId() === id ? null : id;
     this.selectedId.set(next);
     this.interjectionText = '';
     this.finalizeResult.set(null);
     this.finalizeError.set(null);
+    this.openMessage.set(null);
     this.syncQueryParams({ task: next });
+    if (next) this.refreshDiff();
+    else this.diff.set(null);
   }
 
   closeDetail() {
@@ -346,9 +360,13 @@ export class HomePage {
         this.selectedId.set(task && task.length > 0 ? task : null);
       });
 
-    // Settings — one-shot for the PR poll display.
+    // Settings — one-shot for poll display + IDE/magit availability.
     this.settingsApi.get().subscribe({
-      next: (s) => this.prPollMinutes.set(s.pr_review_poll_interval_minutes),
+      next: (s) => {
+        this.prPollMinutes.set(s.pr_review_poll_interval_minutes);
+        this.hasIdeCommand.set(!!s.ide_open_command?.trim());
+        this.hasMagitCommand.set(!!s.magit_open_command?.trim());
+      },
       error: () => this.prPollMinutes.set(null),
     });
 
@@ -395,6 +413,39 @@ export class HomePage {
   refreshTasks() {
     this.tasksApi.list().subscribe({
       next: (r) => this.tasks.set(r.tasks.map(toViewTask)),
+    });
+  }
+
+  refreshDiff() {
+    this.diffLoading.set(true);
+    this.diffError.set(null);
+    this.repoApi.diff().subscribe({
+      next: (d) => {
+        this.diff.set(d);
+        this.diffLoading.set(false);
+      },
+      error: (e) => {
+        this.diffError.set(e?.message ?? String(e));
+        this.diffLoading.set(false);
+      },
+    });
+  }
+
+  openInIde(path?: string) {
+    this.openMessage.set('opening…');
+    this.repoApi.open('ide', path).subscribe({
+      next: (r) => this.openMessage.set(`launched ${r.cmd} ${r.target}`),
+      error: (e) =>
+        this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
+    });
+  }
+
+  openInMagit() {
+    this.openMessage.set('opening magit…');
+    this.repoApi.open('magit').subscribe({
+      next: (r) => this.openMessage.set(`launched ${r.cmd} on ${r.target}`),
+      error: (e) =>
+        this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
   }
 

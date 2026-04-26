@@ -41,11 +41,18 @@ label {
   font-size: 14px;
 }
 
+label.check,
+label.span-2 {
+  grid-column: 1 / -1;
+}
 label.check {
   flex-direction: row;
   align-items: center;
   gap: 8px;
-  grid-column: 1 / -1;
+}
+label.span-2 .label code {
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .label {

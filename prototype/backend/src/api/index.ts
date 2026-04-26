@@ -7,6 +7,7 @@ import { internal } from "./internal";
 import { integrations } from "./integrations";
 import { tasks } from "./tasks";
 import { cost } from "./cost";
+import { repo } from "./repo";
 
 export const app = new Hono();
 
@@ -18,3 +19,4 @@ app.route("/api/internal", internal);
 app.route("/api/integrations", integrations);
 app.route("/api/tasks", tasks);
 app.route("/api/cost", cost);
+app.route("/api/repo", repo);

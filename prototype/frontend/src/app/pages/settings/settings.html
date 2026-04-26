@@ -126,9 +126,20 @@
 
       <label>
         <span class="label">IDE open command</span>
-        <input type="text" placeholder="$EDITOR or e.g. code"
+        <input type="text" placeholder="e.g. code, or 'cursor --reuse-window'"
                [ngModel]="s.ide_open_command"
                (ngModelChange)="setDraft('ide_open_command', $event)" />
+      </label>
+
+      <label class="span-2">
+        <span class="label">
+          Magit open command
+          <span class="meta"> · assumes <code>emacs --daemon</code> is running</span>
+        </span>
+        <input type="text"
+               placeholder='emacsclient --no-wait --eval (magit-status-setup-buffer "{path}")'
+               [ngModel]="s.magit_open_command"
+               (ngModelChange)="setDraft('magit_open_command', $event)" />
       </label>
     </div>
   </section>

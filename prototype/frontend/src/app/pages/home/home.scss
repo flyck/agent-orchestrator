@@ -350,6 +350,87 @@
   input { width: 100%; }
 }
 
+/* ─── Diff section in detail ──────────────────────────────────────────── */
+.diff-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+}
+.diff-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  h3 {
+    margin: 0;
+    font-family: var(--font-serif);
+    font-size: 16px;
+  }
+  h3 .meta { margin-left: 8px; }
+}
+.diff-files {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  li {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    padding: 6px 12px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--rule);
+  }
+  li:last-child { border-bottom: 0; }
+  .diff-status {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    min-width: 24px;
+  }
+  .diff-path {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-align: left;
+    padding: 0;
+  }
+  .diff-path:disabled {
+    cursor: default;
+    text-decoration: none;
+    color: var(--ink-muted);
+  }
+  .diff-counts {
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+}
+.diff-patch {
+  background: var(--paper-soft);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 500px;
+  overflow: auto;
+  white-space: pre;
+  /* Plain shading: + becomes ink, - becomes ink-red (subtle), @@ headers
+     muted. Done via attribute lookup since we don't tokenize the patch. */
+  code { display: block; }
+}
+
+/* meta-action variants and the open message styling */
+.detail-meta .meta-spacer { flex: 1; }
+.detail-meta .meta-action {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.detail-meta .open-msg { font-family: var(--font-mono); font-size: 11px; }
+
 /* ─── Finalize section ────────────────────────────────────────────────── */
 .finalize {
   margin-top: 16px;

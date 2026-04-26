@@ -18,6 +18,7 @@ export interface Settings {
   readme_token_budget: number;
   backlog_token_budget: number;
   ide_open_command: string;
+  magit_open_command: string;
   pr_review_poll_interval_minutes: number;
 }
 
