@@ -6,6 +6,7 @@ import {
   deleteTask,
   getTask,
   listTasks,
+  setTaskProgress,
   type TaskWorkspace,
   type TaskStatus,
 } from "../db/tasks";
@@ -30,6 +31,16 @@ const finalizeSchema = z.object({
   strategy: z.enum(["current", "new"]),
   branch: z.string().min(1).max(80).optional(),
   message: z.string().min(1).max(2000).optional(),
+});
+
+const progressSchema = z.object({
+  step: z.number().int().min(0).max(1000).optional(),
+  total: z.number().int().min(0).max(1000).optional(),
+  label: z.string().max(500).nullable().optional(),
+});
+
+const continueSchema = z.object({
+  message: z.string().min(1).max(20_000),
 });
 
 export const tasks = new Hono();
@@ -87,6 +98,52 @@ tasks.delete("/:id", async (c) => {
   const ok = deleteTask(id);
   log.info("api.tasks.deleted", { id, ok });
   return c.json({ ok });
+});
+
+/**
+ * Agent self-reports progress here. Three optional fields — only what's
+ * provided is updated. The agent is taught to call this in its system
+ * prompt (see orchestrator.SYSTEM_PROMPT).
+ */
+tasks.post("/:id/progress", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = progressSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_progress", issues: parsed.error.issues }, 400);
+  }
+  const t = setTaskProgress(id, parsed.data);
+  log.info("api.tasks.progress", {
+    id,
+    step: t?.current_step,
+    total: t?.total_steps,
+    label: t?.step_label,
+  });
+  return c.json(t);
+});
+
+/**
+ * Bump a Ready task back to Build with new user feedback. Opens a fresh
+ * orchestrator run that prepends the previous spec + the user's message.
+ */
+tasks.post("/:id/continue", async (c) => {
+  const id = c.req.param("id");
+  const task = getTask(id);
+  if (!task) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = continueSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_message", issues: parsed.error.issues }, 400);
+  }
+  log.info("api.tasks.continue", { id, len: parsed.data.message.length });
+  try {
+    const r = await startRun(id, { followUp: parsed.data.message });
+    return c.json({ task_id: id, session_id: r.sessionId, events_url: `/api/tasks/${id}/events` });
+  } catch (err) {
+    log.error("api.tasks.continue.failed", { id, error: String(err) });
+    return c.json({ error: "continue_failed", message: String(err) }, 500);
+  }
 });
 
 tasks.post("/:id/cancel", async (c) => {

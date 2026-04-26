@@ -33,6 +33,9 @@ export interface Task {
   worktree_base_ref: string | null;
   status: TaskStatus;
   current_state: TaskState | null;
+  current_step: number | null;
+  total_steps: number | null;
+  step_label: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -96,6 +99,16 @@ export class TasksService {
 
   sendMessage(id: string, text: string): Observable<{ ok: boolean }> {
     return this.http.post<{ ok: boolean }>(`/api/tasks/${id}/messages`, { text });
+  }
+
+  continueWithFeedback(
+    id: string,
+    message: string,
+  ): Observable<{ task_id: string; session_id: string; events_url: string }> {
+    return this.http.post<{ task_id: string; session_id: string; events_url: string }>(
+      `/api/tasks/${id}/continue`,
+      { message },
+    );
   }
 
   finalize(id: string, input: FinalizeInput): Observable<FinalizeResult> {

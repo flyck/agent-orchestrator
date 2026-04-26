@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   worktree_base_ref TEXT,
   status            TEXT NOT NULL,    -- queued | running | synthesizing | done | failed | canceled | findings_pending
   current_state     TEXT,             -- spec | plan | implement | review | accept (feature/bugfix)
+  -- Agent self-reported progress. NULL until the agent emits its first
+  -- progress update; replaces the coarse state-based heuristic on the UI.
+  current_step      INTEGER,
+  total_steps       INTEGER,
+  step_label        TEXT,
   created_at        INTEGER NOT NULL,
   updated_at        INTEGER NOT NULL
 );

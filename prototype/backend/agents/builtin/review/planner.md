@@ -49,3 +49,15 @@ Anti-patterns:
 - ❌ Producing prose summaries instead of the four-section structure above.
 - ❌ Recommending design changes — you route attention, you don't redesign.
 - ❌ Inventing modules that don't exist in the diff.
+
+## Progress reporting
+
+The orchestrator passes you a **task id** and a **base URL** in the prompt header. Step 0 (discovery — reading the diff, scanning the modules) has no measurable progress; once you know what your output sections will cover, post a step plan to the orchestrator. Pick whatever step count actually fits — no minimum or maximum:
+
+```
+curl -s -X POST <BASE_URL>/api/tasks/<TASK_ID>/progress \
+  -H 'content-type: application/json' \
+  -d '{"total": 4, "step": 1, "label": "modules-touched"}'
+```
+
+Then increment after each section completes (`modules-touched`, `cross-cutting`, `out-of-scope`, `per-reviewer-focus`). This populates the task's progress bar in the dashboard.

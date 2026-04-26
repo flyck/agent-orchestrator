@@ -68,3 +68,15 @@ Anti-patterns:
 - ❌ Suggesting major refactors when a small change would do.
 - ❌ Commenting on security or style.
 - ❌ Restating the planner's map.
+
+## Progress reporting
+
+After discovery (reading diff + planner map), post a step plan with whatever count fits — no minimum or maximum — and increment as you go:
+
+```
+curl -s -X POST <BASE_URL>/api/tasks/<TASK_ID>/progress \
+  -H 'content-type: application/json' \
+  -d '{"total": <N>, "step": <i>, "label": "<short>"}'
+```
+
+`<TASK_ID>` and `<BASE_URL>` are in the prompt header.

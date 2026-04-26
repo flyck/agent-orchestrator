@@ -27,6 +27,9 @@ export interface TaskRow {
   worktree_base_ref: string | null;
   status: TaskStatus;
   current_state: TaskState | null;
+  current_step: number | null;
+  total_steps: number | null;
+  step_label: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -104,6 +107,41 @@ export function setTaskBaseRef(id: string, baseRef: string, handle: Database = d
   handle
     .prepare("UPDATE tasks SET worktree_base_ref = ?, updated_at = ? WHERE id = ?")
     .run(baseRef, Date.now(), id);
+}
+
+export interface ProgressInput {
+  step?: number | null;
+  total?: number | null;
+  label?: string | null;
+}
+
+export function setTaskProgress(
+  id: string,
+  patch: ProgressInput,
+  handle: Database = db(),
+): TaskRow | null {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (patch.step !== undefined) {
+    sets.push("current_step = ?");
+    vals.push(patch.step);
+  }
+  if (patch.total !== undefined) {
+    sets.push("total_steps = ?");
+    vals.push(patch.total);
+  }
+  if (patch.label !== undefined) {
+    sets.push("step_label = ?");
+    vals.push(patch.label);
+  }
+  if (sets.length === 0) return getTask(id, handle);
+  sets.push("updated_at = ?");
+  vals.push(Date.now());
+  vals.push(id);
+  handle
+    .prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`)
+    .run(...(vals as never[]));
+  return getTask(id, handle);
 }
 
 export function updateTaskStatus(

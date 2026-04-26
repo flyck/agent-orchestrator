@@ -2,7 +2,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NgApexchartsModule, type ApexOptions } from 'ng-apexcharts';
-import { catchError, of, Subject, switchMap, takeUntil, timer } from 'rxjs';
+import { catchError, of, Subject, merge, switchMap, takeUntil, timer } from 'rxjs';
 import { SettingsService } from '../../services/settings.service';
 import {
   TasksService,
@@ -56,6 +56,20 @@ function progressForState(state: TaskState | null, status: string): number {
   }
 }
 
+function deriveProgress(t: Task): number {
+  // Agent-reported step / total takes precedence (it's what the agent
+  // actually thinks). Fall back to the coarse state-based mapping when
+  // the agent hasn't reported yet.
+  if (
+    typeof t.current_step === 'number' &&
+    typeof t.total_steps === 'number' &&
+    t.total_steps > 0
+  ) {
+    return Math.max(0, Math.min(1, t.current_step / t.total_steps));
+  }
+  return progressForState(t.current_state ?? null, t.status);
+}
+
 interface ViewTask {
   raw: Task;
   state: PipelineState;
@@ -96,7 +110,7 @@ function toViewTask(t: Task): ViewTask {
     status: closed ? 'closed' : 'open',
     kind: inferKind(t.workspace),
     needsAttention: false, // backend doesn't surface this yet
-    progress: progressForState(t.current_state ?? null, t.status),
+    progress: deriveProgress(t),
     worktreePath: t.worktree_path,
   };
 }
@@ -222,14 +236,29 @@ export class HomePage {
     });
   }
 
+  /** While task is open: forward the comment as a live in-session message.
+   *  When the task is closed (Ready): re-run the orchestrator with the comment
+   *  as feedback — the task transitions back to Build with a fresh session. */
   sendInterjection() {
     const sel = this.selectedTask();
-    if (!sel || !this.interjectionText.trim()) return;
-    const text = this.interjectionText;
-    this.tasksApi.sendMessage(sel.raw.id, text).subscribe({
-      next: () => (this.interjectionText = ''),
-      error: (e) => this.finalizeError.set(`send failed: ${e.message ?? e}`),
-    });
+    const text = this.interjectionText.trim();
+    if (!sel || !text) return;
+
+    if (sel.status === 'open') {
+      this.tasksApi.sendMessage(sel.raw.id, text).subscribe({
+        next: () => { this.interjectionText = ''; },
+        error: (e) => this.finalizeError.set(`send failed: ${e.message ?? e}`),
+      });
+    } else {
+      this.tasksApi.continueWithFeedback(sel.raw.id, text).subscribe({
+        next: () => {
+          this.interjectionText = '';
+          this.refreshTasks();
+        },
+        error: (e) =>
+          this.finalizeError.set(`send-back failed: ${e?.error?.message ?? e?.message ?? e}`),
+      });
+    }
   }
 
   finalizeCurrent() {
@@ -281,6 +310,14 @@ export class HomePage {
   // ─── Token usage chart ────────────────────────────────────────────────
   protected readonly costSummary = signal<CostSummary | null>(null);
   protected readonly costLoading = signal(true);
+
+  // Selected range for the usage chart. Possible values: 'today', '7d', '30d'
+  protected readonly selectedRange = signal<'today' | '7d' | '30d'>('today');
+  private readonly rangeChanged = new Subject<void>();
+  protected readonly costMeta = computed(() => {
+    const r = this.selectedRange();
+    return r === 'today' ? 'today' : r === '7d' ? 'last 7 days' : 'last 30 days';
+  });
 
   protected readonly usageOptions = computed<ApexOptions>(() => {
     const cs = this.costSummary();
@@ -395,11 +432,11 @@ export class HomePage {
       });
 
     // Cost — refresh every 15s.
-    timer(0, 15000)
+    merge(timer(0, 15000), this.rangeChanged.asObservable())
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>
-          this.costApi.summary('7d').pipe(
+          this.costApi.summary(this.selectedRange()).pipe(
             catchError(() => of(null)),
           ),
         ),
@@ -413,6 +450,7 @@ export class HomePage {
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+    this.rangeChanged.complete();
   }
 
   refreshTasks() {
@@ -460,6 +498,11 @@ export class HomePage {
     const next = !this.showClosed();
     this.showClosed.set(next);
     this.syncQueryParams({ closed: next ? '1' : null });
+  }
+
+  setRange(range: 'today' | '7d' | '30d') {
+    this.selectedRange.set(range);
+    this.rangeChanged.next();
   }
 
   pickUp(_item: { id: string; title: string }) {

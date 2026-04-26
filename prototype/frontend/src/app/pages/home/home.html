@@ -17,6 +17,13 @@
         <p class="meta">spend · last 7 days</p>
         <h2>Token usage by provider</h2>
       </div>
+      <div class="usage-controls">
+        <div class="range-buttons">
+          <button type="button" [class.selected]="selectedRange() === 'today'" (click)="setRange('today')">Today</button>
+          <button type="button" [class.selected]="selectedRange() === '7d'" (click)="setRange('7d')">This week</button>
+          <button type="button" [class.selected]="selectedRange() === '30d'" (click)="setRange('30d')">This month</button>
+        </div>
+      </div>
     </header>
 
     <div class="chart-wrap">
@@ -89,6 +96,12 @@
                 }
               </div>
               <div class="task-title">{{ vt.raw.title }}</div>
+              @if (vt.raw.step_label && vt.raw.total_steps) {
+                <div class="step-label meta">
+                  step {{ vt.raw.current_step ?? 0 }}/{{ vt.raw.total_steps }} ·
+                  {{ vt.raw.step_label }}
+                </div>
+              }
               <div class="progress">
                 <div class="progress-fill" [style.width.%]="vt.progress * 100"></div>
               </div>
@@ -250,15 +263,17 @@
       }
     </section>
 
-    @if (sel.status === 'open') {
-      <div class="interject">
-        <input type="text"
-               [(ngModel)]="interjectionText"
-               placeholder="Type a comment to interject — Enter to send"
-               (keydown.enter)="sendInterjection()" />
-        <button type="button" class="primary" (click)="sendInterjection()">Send</button>
-      </div>
-    }
+    <div class="interject">
+      <input type="text"
+             [(ngModel)]="interjectionText"
+             [placeholder]="sel.status === 'open'
+               ? 'Type a comment to interject — Enter to send'
+               : 'Send back with feedback — moves the task back to Build'"
+             (keydown.enter)="sendInterjection()" />
+      <button type="button" class="primary" (click)="sendInterjection()">
+        {{ sel.status === 'open' ? 'Send' : 'Send back' }}
+      </button>
+    </div>
 
     <!-- Finalize: shown for tasks the agent has completed (status=done OR
          current_state in {ready, finalize}). User picks commit destination. -->

@@ -17,6 +17,25 @@ export function openDatabase(path: string = process.env.DB_PATH ?? DEFAULT_DB_PA
 function applySchema(db: Database) {
   const sql = readFileSync(SCHEMA_PATH, "utf8");
   db.exec(sql);
+  applyMigrations(db);
+}
+
+/**
+ * Idempotent migrations for columns we add after the original schema. Each
+ * step probes table_info and ALTERs only if the column is missing.
+ */
+function applyMigrations(db: Database) {
+  const ensureColumn = (table: string, column: string, decl: string) => {
+    const cols = db
+      .query<{ name: string }, never[]>(`PRAGMA table_info(${table})`)
+      .all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+    }
+  };
+  ensureColumn("tasks", "current_step", "INTEGER");
+  ensureColumn("tasks", "total_steps", "INTEGER");
+  ensureColumn("tasks", "step_label", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

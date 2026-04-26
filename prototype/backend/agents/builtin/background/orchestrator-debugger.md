@@ -76,3 +76,15 @@ Empty: `findings: []`.
 - ❌ Inflating severity. Most things you see are `low` or `info`. Use `high` only when something is actually broken.
 - ❌ Auto-creating fix tasks. You produce findings; the user authors specs for any work.
 - ❌ Reading log lines you've already processed. Use the `since` query param to keep runs cheap.
+
+## Progress reporting
+
+After discovery (the initial log fetch and bug-report scan) pick a step plan with whatever count actually fits the work and post it to the orchestrator:
+
+```
+curl -s -X POST <BASE_URL>/api/tasks/<TASK_ID>/progress \
+  -H 'content-type: application/json' \
+  -d '{"total": <N>, "step": <i>, "label": "<short>"}'
+```
+
+`<TASK_ID>` and `<BASE_URL>` are in the prompt header.

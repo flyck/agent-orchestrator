@@ -18,7 +18,13 @@
 import type { EngineEvent, EngineSession } from "../engine/types";
 import { OpenCodeSession } from "../engine/opencode";
 import { getEngine } from "../engine/singleton";
-import { getTask, setTaskBaseRef, updateTaskStatus, type TaskRow } from "../db/tasks";
+import {
+  getTask,
+  setTaskBaseRef,
+  setTaskProgress,
+  updateTaskStatus,
+  type TaskRow,
+} from "../db/tasks";
 import { recordUsageEvent } from "../db/usageEvents";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
@@ -50,11 +56,48 @@ interface ActiveTask {
 }
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const SYSTEM_PROMPT = `You are an autonomous coding agent working on the \`agent-orchestrator\` repo at \`${REPO_ROOT}\`.
+
+function backendUrl(): string {
+  const port = Number(process.env.PORT ?? 3000);
+  return `http://localhost:${port}`;
+}
+
+function buildSystemPrompt(taskId: string): string {
+  return `You are an autonomous coding agent working on the \`agent-orchestrator\` repo at \`${REPO_ROOT}\`.
 
 Read the user's task carefully. Use the file-editing tools available to you to make the change. Keep the change scoped — touch only what the task asks for. Prefer surgical edits over rewrites.
 
-When you are done, summarize what you changed in 2-3 sentences. Do not commit; the user will review with \`git diff\` before deciding what to keep.`;
+When you are done, summarize what you changed in 2-3 sentences. Do not commit; the user will review with \`git diff\` before deciding what to keep.
+
+# Progress reporting
+
+The orchestrator gives the user a progress bar on this task's card. You report progress directly to the orchestrator's HTTP API. Both calls are fire-and-forget — failures should not block your work.
+
+Your task id is: \`${taskId}\`
+The orchestrator URL is: \`${backendUrl()}\`
+
+**Step 0 — discovery.** Spend a few tool calls reading the relevant files and understanding the codebase. Discovery has no measurable progress; do not report a step number for it.
+
+**Step 1 — plan.** Once you know what you'll do, list your steps. Pick whatever number actually fits the work — there is no minimum or maximum. A trivial change might be 2 steps; a wide refactor might be 12. Then post the *total* and the label of step 1:
+
+\`\`\`
+curl -s -X POST '${backendUrl()}/api/tasks/${taskId}/progress' \\
+  -H 'content-type: application/json' \\
+  -d '{"total": <N>, "step": 1, "label": "<short label of step 1>"}'
+\`\`\`
+
+**After each subsequent step finishes**, post:
+
+\`\`\`
+curl -s -X POST '${backendUrl()}/api/tasks/${taskId}/progress' \\
+  -H 'content-type: application/json' \\
+  -d '{"step": <i>, "label": "<short label>"}'
+\`\`\`
+
+The label is what the user reads on their card — keep it under ~40 chars and active-voice.
+
+When the last step is done, post one final update with \`step\` equal to \`total\`.`;
+}
 
 const active = new Map<string, ActiveTask>();
 
@@ -69,7 +112,10 @@ export function addListener(taskId: string, fn: (e: EngineEvent) => void): () =>
   return () => a.listeners.delete(fn);
 }
 
-export async function startRun(taskId: string): Promise<{ sessionId: string }> {
+export async function startRun(
+  taskId: string,
+  opts: { followUp?: string } = {},
+): Promise<{ sessionId: string }> {
   const task = getTask(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
   if (active.has(taskId)) {
@@ -81,7 +127,14 @@ export async function startRun(taskId: string): Promise<{ sessionId: string }> {
     taskId,
     workspace: task.workspace,
     title: task.title,
+    isFollowUp: !!opts.followUp,
   });
+
+  // If we're resuming a Ready task with new feedback, reset progress so the
+  // bar starts fresh and clear the terminal status.
+  if (opts.followUp) {
+    setTaskProgress(taskId, { step: null, total: null, label: null });
+  }
 
   // Snapshot the repo's HEAD now so the diff endpoint can scope changes to
   // "since this task started" — even if HEAD advances later (other tasks
@@ -271,7 +324,9 @@ export async function startRun(taskId: string): Promise<{ sessionId: string }> {
   // Send the initial message AFTER setting up the active record + pump so we
   // don't lose early events.
   try {
-    await session.send(buildInitialMessage(task), { system: SYSTEM_PROMPT });
+    await session.send(buildInitialMessage(task, opts.followUp), {
+      system: buildSystemPrompt(taskId),
+    });
     log.info("orchestrator.run.initial_message_sent", { taskId, sessionId: session.id });
   } catch (err) {
     log.error("orchestrator.run.send_failed", {
@@ -290,12 +345,24 @@ export async function startRun(taskId: string): Promise<{ sessionId: string }> {
   return { sessionId: session.id };
 }
 
-function buildInitialMessage(task: TaskRow): string {
-  return `# Task: ${task.title}
+function buildInitialMessage(task: TaskRow, followUp?: string): string {
+  const head = `# Task: ${task.title}
 
-${task.input_payload}
+${task.input_payload}`;
+  if (!followUp) return `${head}
 
 Begin.`;
+  return `${head}
+
+---
+
+# Follow-up from the user
+
+You finished a previous round and the user reviewed the result. They have new feedback, listed below. Read it carefully and revise the change. Discovery (re-reading any files you may have changed) is step 0; pick a fresh step plan and report progress as before.
+
+${followUp}
+
+Begin the revision.`;
 }
 
 export async function cancelRun(taskId: string): Promise<void> {

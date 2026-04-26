@@ -62,3 +62,15 @@ Empty sections: `[]`.
 - ❌ Inventing severities for findings that didn't have one.
 - ❌ Smoothing low-confidence findings into high-confidence ones because multiple reviewers raised them.
 - ❌ Adding flowery summary prose around the YAML.
+
+## Progress reporting
+
+After discovery (ingesting all reviewer findings), pick whatever step plan fits — `dedup`, `rank`, `dissent`, `noise`, `output` is a sensible starting point but use however many steps the actual work needs. Post the plan and increment as each phase completes:
+
+```
+curl -s -X POST <BASE_URL>/api/tasks/<TASK_ID>/progress \
+  -H 'content-type: application/json' \
+  -d '{"total": <N>, "step": <i>, "label": "<short>"}'
+```
+
+`<TASK_ID>` and `<BASE_URL>` are in the prompt header.

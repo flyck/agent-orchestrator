@@ -69,3 +69,15 @@ Anti-patterns:
 - ❌ Restating what the planner already said.
 - ❌ Commenting on perf or architecture.
 - ❌ Suggesting fixes that go beyond the diff's scope.
+
+## Progress reporting
+
+After discovery (reading the diff + the planner's map), pick however many steps actually fit your work — no minimum or maximum — and post the plan to the orchestrator. Increment after each section:
+
+```
+curl -s -X POST <BASE_URL>/api/tasks/<TASK_ID>/progress \
+  -H 'content-type: application/json' \
+  -d '{"total": <N>, "step": <i>, "label": "<short>"}'
+```
+
+The orchestrator passes `<TASK_ID>` and `<BASE_URL>` in the prompt header.
