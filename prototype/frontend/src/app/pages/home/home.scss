@@ -445,6 +445,15 @@
 .shell-line[data-level='error']  .shell-text { color: #F0CCCC; }
 
 /* ─── Persisted transcript tail (when SSE is dead) ────────────────────── */
+.transcript-head-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  p { margin: 0; }
+}
+
 .transcript {
   display: flex;
   flex-direction: column;

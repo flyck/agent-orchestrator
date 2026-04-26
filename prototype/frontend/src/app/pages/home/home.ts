@@ -653,7 +653,9 @@ export class HomePage {
         const series = cs.series.map((s) => {
           const xs = new Set(s.data.map((p) => p[0]));
           const pts = [...s.data];
-          if (!xs.has(from)) pts.push([from, 0]);
+          // Keep an endpoint if missing so the chart's X range reaches the
+          // expected end, but avoid inserting a zero at the very beginning
+          // (it creates a visible data point that confused users).
           if (!xs.has(endPoint)) pts.push([endPoint, 0]);
           pts.sort((a, b) => a[0] - b[0]);
           return { ...s, data: pts };

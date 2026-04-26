@@ -86,9 +86,19 @@ export class OpenCodeSession implements EngineSession {
   }
 
   async close(): Promise<void> {
+    // Detach our event subscription but DO NOT delete the opencode session.
+    // The session record + its full message history are what GET
+    // /session/:id/message returns later for the transcript-backfill
+    // panel; deleting here means a Ready task has nothing to show.
+    // opencode reaps stale sessions on its own schedule.
     if (this.closed) return;
     this.closed = true;
     this.bus.unsubscribe(this.internal.id);
+  }
+
+  /** Use this only when the session truly must be wiped from opencode. */
+  async destroy(): Promise<void> {
+    await this.close();
     try {
       await this.client.del(`/session/${this.internal.id}`);
     } catch {
