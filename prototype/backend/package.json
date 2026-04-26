@@ -1,0 +1,22 @@
+{
+  "name": "agent-orchestrator-backend",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "hono": "^4.12.15",
+    "nanoid": "^5.1.9",
+    "zod": "^4.3.6"
+  }
+}
