@@ -289,6 +289,34 @@
   font-size: 14px;
 }
 
+/* ─── In-card tab nav ─────────────────────────────────────────────────── */
+.detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+  margin: 8px 0 16px;
+}
+.detail-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--ink-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border-radius: 0;
+}
+.detail-tab:hover { color: var(--ink); background: transparent; }
+.detail-tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+.detail-tab .meta { background: var(--paper-soft); padding: 1px 6px; }
+
 .attention-block {
   background: var(--ink-amber-bg);
   border: 1px solid var(--ink-amber);

@@ -175,189 +175,252 @@
       }
     </div>
 
-    <dl class="time-meta">
-      <div>
-        <dt>created</dt>
-        <dd>
-          <span class="abs">{{ formatTs(sel.raw.created_at) }}</span>
-          <span class="rel meta">{{ relativeTs(sel.raw.created_at) }}</span>
-        </dd>
-      </div>
-      <div>
-        <dt>updated</dt>
-        <dd>
-          <span class="abs">{{ formatTs(sel.raw.updated_at) }}</span>
-          <span class="rel meta">{{ relativeTs(sel.raw.updated_at) }}</span>
-        </dd>
-      </div>
-      @if (terminalStatuses.has(sel.raw.status)) {
+    <!-- ─── In-card tab nav ────────────────────────────────────────── -->
+    <nav class="detail-tabs">
+      <button type="button"
+              class="detail-tab"
+              [class.active]="detailTab() === 'spec'"
+              (click)="setDetailTab('spec')">
+        Spec
+      </button>
+      <button type="button"
+              class="detail-tab"
+              [class.active]="detailTab() === 'stream'"
+              (click)="setDetailTab('stream')">
+        Stream
+        @if (streamConnected()) { <span class="dot running"></span> }
+      </button>
+      <button type="button"
+              class="detail-tab"
+              [class.active]="detailTab() === 'files'"
+              (click)="setDetailTab('files')">
+        Files
+        @if (diff() && diff()!.files.length > 0) {
+          <span class="meta">{{ diff()!.files.length }}</span>
+        }
+      </button>
+    </nav>
+
+    <!-- ═══ Spec tab ═══════════════════════════════════════════════ -->
+    @if (detailTab() === 'spec') {
+      <dl class="time-meta">
         <div>
-          <dt>finished</dt>
+          <dt>created</dt>
+          <dd>
+            <span class="abs">{{ formatTs(sel.raw.created_at) }}</span>
+            <span class="rel meta">{{ relativeTs(sel.raw.created_at) }}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>updated</dt>
           <dd>
             <span class="abs">{{ formatTs(sel.raw.updated_at) }}</span>
             <span class="rel meta">{{ relativeTs(sel.raw.updated_at) }}</span>
           </dd>
         </div>
-      }
-    </dl>
-
-    <!-- ─── Spec ────────────────────────────────────────────────────── -->
-    <section class="spec-section">
-      <header class="spec-head">
-        <p class="meta">spec ({{ sel.raw.input_kind }})</p>
-        @if (sel.raw.current_step !== null && sel.raw.total_steps !== null) {
-          <span class="meta">step {{ sel.raw.current_step }}/{{ sel.raw.total_steps }} · {{ sel.raw.step_label }}</span>
+        @if (terminalStatuses.has(sel.raw.status)) {
+          <div>
+            <dt>finished</dt>
+            <dd>
+              <span class="abs">{{ formatTs(sel.raw.updated_at) }}</span>
+              <span class="rel meta">{{ relativeTs(sel.raw.updated_at) }}</span>
+            </dd>
+          </div>
         }
-      </header>
-      <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
-    </section>
+      </dl>
 
-    <!-- ─── Live agent stream ──────────────────────────────────────── -->
-    <section class="stream-section">
-      <header class="stream-head">
-        <h3>Live stream</h3>
-        @if (streamConnected()) {
-          <span class="dot running"></span><span class="meta">streaming · {{ streamLines().length }} events</span>
+      <section class="spec-section">
+        <header class="spec-head">
+          <p class="meta">spec ({{ sel.raw.input_kind }})</p>
+          @if (sel.raw.current_step !== null && sel.raw.total_steps !== null) {
+            <span class="meta">step {{ sel.raw.current_step }}/{{ sel.raw.total_steps }} · {{ sel.raw.step_label }}</span>
+          }
+        </header>
+        <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
+      </section>
+    }
+
+    <!-- ═══ Stream tab ═════════════════════════════════════════════ -->
+    @if (detailTab() === 'stream') {
+      <section class="stream-section">
+        <header class="stream-head">
+          <h3>Live stream</h3>
+          @if (streamConnected()) {
+            <span class="dot running"></span><span class="meta">streaming · {{ streamLines().length }} events</span>
+          } @else {
+            <span class="dot pending"></span><span class="meta">disconnected</span>
+          }
+        </header>
+
+        @if (streamLines().length === 0) {
+          @if (transcriptTail().length > 0) {
+            <p class="meta small">Stream is dead — showing last {{ transcriptTail().length }} message(s) persisted in opencode for session {{ sel.raw.last_session_id?.slice(0, 12) }}…</p>
+            <div class="transcript">
+              @for (line of transcriptTail(); track $index) {
+                <article class="transcript-line" [attr.data-role]="line.role">
+                  <header class="transcript-head meta">
+                    {{ line.role }}
+                    @if (line.ts) { · {{ relativeTs(line.ts) }} }
+                  </header>
+                  <pre class="transcript-text">{{ line.text }}</pre>
+                </article>
+              }
+            </div>
+          } @else if (transcriptLoading()) {
+            <div class="shell"><div class="shell-line muted">loading transcript…</div></div>
+          } @else {
+            <div class="shell"><div class="shell-line muted">id: {{ sel.raw.id }} · waiting for events…</div></div>
+          }
         } @else {
-          <span class="dot pending"></span><span class="meta">disconnected</span>
-        }
-      </header>
-
-      @if (streamLines().length === 0) {
-        @if (transcriptTail().length > 0) {
-          <p class="meta small">Stream is dead — showing last {{ transcriptTail().length }} message(s) persisted in opencode for session {{ sel.raw.last_session_id?.slice(0, 12) }}…</p>
-          <div class="transcript">
-            @for (line of transcriptTail(); track $index) {
-              <article class="transcript-line" [attr.data-role]="line.role">
-                <header class="transcript-head meta">
-                  {{ line.role }}
-                  @if (line.ts) { · {{ relativeTs(line.ts) }} }
-                </header>
-                <pre class="transcript-text">{{ line.text }}</pre>
-              </article>
+          <div class="shell">
+            @for (line of streamLines(); track $index) {
+              <div class="shell-line" [attr.data-level]="line.level">
+                <span class="shell-tag">[{{ line.tag }}]</span><!--
+                -->@if (line.text) { <span class="shell-text">{{ line.text }}</span> }
+              </div>
             }
           </div>
-        } @else if (transcriptLoading()) {
-          <div class="shell"><div class="shell-line muted">loading transcript…</div></div>
-        } @else {
-          <div class="shell"><div class="shell-line muted">id: {{ sel.raw.id }} · waiting for events…</div></div>
         }
-      } @else {
-        <div class="shell">
-          @for (line of streamLines(); track $index) {
-            <div class="shell-line" [attr.data-level]="line.level">
-              <span class="shell-tag">[{{ line.tag }}]</span><!--
-              -->@if (line.text) { <span class="shell-text">{{ line.text }}</span> }
-            </div>
-          }
-        </div>
-      }
-    </section>
+      </section>
 
-    <!-- ─── Working-tree changes ──────────────────────────────────────── -->
-    @let d = diff();
-    <section class="diff-section">
-      <header class="diff-head">
-        <h3>Files changed</h3>
-        <span class="meta">
-          @if (d?.base_resolved) {
-            since this task started · base {{ d!.base.slice(0, 8) }}
-          } @else if (sel.raw.worktree_base_ref) {
-            base {{ sel.raw.worktree_base_ref.slice(0, 8) }} not found · falling back to HEAD
-          } @else {
-            no base captured · showing uncommitted only
-          }
-        </span>
-        <span class="diff-spacer"></span>
-        <button type="button" class="meta-action" (click)="refreshDiff()" [disabled]="diffLoading()">
-          {{ diffLoading() ? 'loading…' : 'refresh' }}
+      <div class="interject">
+        <input type="text"
+               [(ngModel)]="interjectionText"
+               [placeholder]="sel.status === 'open'
+                 ? 'Type a comment to interject — Enter to send'
+                 : 'Send back with feedback — moves the task back to Build'"
+               (keydown.enter)="sendInterjection()" />
+        <button type="button" class="primary" (click)="sendInterjection()">
+          {{ sel.status === 'open' ? 'Send' : 'Send back' }}
         </button>
-      </header>
+      </div>
+    }
 
-      @if (diffError()) {
-        <p class="finalize-err">{{ diffError() }}</p>
-      } @else if (!d) {
-        <p class="muted small">Loading…</p>
-      } @else if (d.files.length === 0) {
-        <p class="muted small">
-          Nothing to review — no files changed since this task's base
-          (or working tree is clean if no base was captured).
-        </p>
-      } @else {
-        <ul class="diff-files">
-          @for (f of d.files; track f.path) {
-            <li>
-              <span class="diff-status meta">{{ f.status }}</span>
-              <button class="diff-path link-button"
-                      type="button"
-                      (click)="openInIde(f.path)"
-                      [disabled]="!hasIdeCommand()"
-                      title="open this file in your IDE">
-                {{ f.path }}
-              </button>
-              <span class="diff-counts meta">+{{ f.added }} −{{ f.deleted }}</span>
-            </li>
-          }
-        </ul>
-        <div class="diff-toggle">
-          <button type="button" class="meta-action" (click)="togglePatch()">
-            {{ showPatch() ? 'hide patch' : 'show patch' }}
+    <!-- ═══ Files tab ══════════════════════════════════════════════ -->
+    @if (detailTab() === 'files') {
+      <div class="detail-meta">
+        @if (sel.worktreePath) {
+          <span class="meta">worktree</span>
+          <code class="mono">{{ sel.worktreePath }}</code>
+        } @else {
+          <span class="meta">working tree</span>
+          <code class="mono">repo root</code>
+        }
+        <span class="meta-spacer"></span>
+        @if (hasIdeCommand()) {
+          <button type="button" class="meta-action" (click)="openInIde()" title="ide_open_command">
+            open in IDE
           </button>
-          <span class="meta">{{ d.patch.length }} bytes</span>
-        </div>
-        @if (showPatch() && d.patch) {
-          <pre class="diff-patch mono"><code>{{ d.patch }}</code></pre>
-          @if (d.truncated) {
-            <p class="muted small">
-              Diff truncated at 400KB. Run <code>git diff {{ d.base }}</code> for the full patch.
-            </p>
+        } @else {
+          <button type="button" class="meta-action" disabled title="Set ide_open_command in Settings to enable">
+            open in IDE
+          </button>
+        }
+        @if (hasMagitCommand()) {
+          <button type="button" class="meta-action" (click)="openInMagit()" title="magit_open_command">
+            open magit
+          </button>
+        } @else {
+          <button type="button" class="meta-action" disabled title="Set magit_open_command in Settings to enable">
+            open magit
+          </button>
+        }
+        @if (openMessage()) {
+          <span class="meta open-msg">{{ openMessage() }}</span>
+        }
+      </div>
+
+      @let d = diff();
+      <section class="diff-section">
+        <header class="diff-head">
+          <h3>Files changed</h3>
+          <span class="meta">
+            @if (d?.base_resolved) {
+              since this task started · base {{ d!.base.slice(0, 8) }}
+            } @else if (sel.raw.worktree_base_ref) {
+              base {{ sel.raw.worktree_base_ref.slice(0, 8) }} not found · falling back to HEAD
+            } @else {
+              no base captured · showing uncommitted only
+            }
+          </span>
+          <span class="diff-spacer"></span>
+          <button type="button" class="meta-action" (click)="refreshDiff()" [disabled]="diffLoading()">
+            {{ diffLoading() ? 'loading…' : 'refresh' }}
+          </button>
+        </header>
+
+        @if (diffError()) {
+          <p class="finalize-err">{{ diffError() }}</p>
+        } @else if (!d) {
+          <p class="muted small">Loading…</p>
+        } @else if (d.files.length === 0) {
+          <p class="muted small">
+            Nothing to review — no files changed since this task's base
+            (or working tree is clean if no base was captured).
+          </p>
+        } @else {
+          <ul class="diff-files">
+            @for (f of d.files; track f.path) {
+              <li>
+                <span class="diff-status meta">{{ f.status }}</span>
+                <button class="diff-path link-button"
+                        type="button"
+                        (click)="openInIde(f.path)"
+                        [disabled]="!hasIdeCommand()"
+                        title="open this file in your IDE">
+                  {{ f.path }}
+                </button>
+                <span class="diff-counts meta">+{{ f.added }} −{{ f.deleted }}</span>
+              </li>
+            }
+          </ul>
+          <div class="diff-toggle">
+            <button type="button" class="meta-action" (click)="togglePatch()">
+              {{ showPatch() ? 'hide patch' : 'show patch' }}
+            </button>
+            <span class="meta">{{ d.patch.length }} bytes</span>
+          </div>
+          @if (showPatch() && d.patch) {
+            <pre class="diff-patch mono"><code>{{ d.patch }}</code></pre>
+            @if (d.truncated) {
+              <p class="muted small">
+                Diff truncated at 400KB. Run <code>git diff {{ d.base }}</code> for the full patch.
+              </p>
+            }
           }
         }
-      }
-    </section>
+      </section>
 
-    <div class="interject">
-      <input type="text"
-             [(ngModel)]="interjectionText"
-             [placeholder]="sel.status === 'open'
-               ? 'Type a comment to interject — Enter to send'
-               : 'Send back with feedback — moves the task back to Build'"
-             (keydown.enter)="sendInterjection()" />
-      <button type="button" class="primary" (click)="sendInterjection()">
-        {{ sel.status === 'open' ? 'Send' : 'Send back' }}
-      </button>
-    </div>
-
-    <!-- Finalize: shown for tasks the agent has completed (status=done OR
-         current_state in {ready, finalize}). User picks commit destination. -->
-    @if (sel.raw.status === 'done' || sel.state === 'ready' || sel.state === 'finalize') {
-      <div class="finalize">
-        <p class="meta">finalize · after manual review</p>
-        <p class="muted small">
-          The agent's edits sit uncommitted in your working tree. Review the diff in your IDE, then
-          pick how to land it. Either path runs <code>git add -A</code> and <code>git commit</code>;
-          new-branch additionally creates <code>agent/&lt;name&gt;</code> first.
-        </p>
-        <div class="finalize-row">
-          <button type="button" (click)="finalizeCurrent()" [disabled]="finalizing()">
-            Commit to current branch
-          </button>
-          <span class="meta or">or</span>
-          <input type="text"
-                 placeholder="new branch name (e.g. token-usage-row)"
-                 [ngModel]="finalizeBranch()"
-                 (ngModelChange)="finalizeBranch.set($event)" />
-          <button type="button"
-                  class="primary"
-                  (click)="finalizeNew()"
-                  [disabled]="finalizing() || !finalizeBranch().trim()">
-            Commit to new branch
-          </button>
+      <!-- Finalize: lives with the files since it's about landing them. -->
+      @if (sel.raw.status === 'done' || sel.state === 'ready' || sel.state === 'finalize') {
+        <div class="finalize">
+          <p class="meta">finalize · after manual review</p>
+          <p class="muted small">
+            The agent's edits sit uncommitted in your working tree. Review the diff in your IDE, then
+            pick how to land it. Either path runs <code>git add -A</code> and <code>git commit</code>;
+            new-branch additionally creates <code>agent/&lt;name&gt;</code> first.
+          </p>
+          <div class="finalize-row">
+            <button type="button" (click)="finalizeCurrent()" [disabled]="finalizing()">
+              Commit to current branch
+            </button>
+            <span class="meta or">or</span>
+            <input type="text"
+                   placeholder="new branch name (e.g. token-usage-row)"
+                   [ngModel]="finalizeBranch()"
+                   (ngModelChange)="finalizeBranch.set($event)" />
+            <button type="button"
+                    class="primary"
+                    (click)="finalizeNew()"
+                    [disabled]="finalizing() || !finalizeBranch().trim()">
+              Commit to new branch
+            </button>
+          </div>
+          @if (finalizing()) { <p class="meta">committing…</p> }
+          @if (finalizeResult()) { <p class="finalize-ok">{{ finalizeResult() }}</p> }
+          @if (finalizeError()) { <p class="finalize-err">{{ finalizeError() }}</p> }
         </div>
-        @if (finalizing()) { <p class="meta">committing…</p> }
-        @if (finalizeResult()) { <p class="finalize-ok">{{ finalizeResult() }}</p> }
-        @if (finalizeError()) { <p class="finalize-err">{{ finalizeError() }}</p> }
-      </div>
+      }
     }
   </section>
 }

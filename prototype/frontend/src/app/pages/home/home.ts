@@ -260,6 +260,15 @@ export class HomePage {
   });
   protected interjectionText = '';
 
+  // Tab within the detail card. Persisted in the URL as ?tab= so reload
+  // and direct-link both keep their place.
+  protected readonly detailTabs = ['spec', 'stream', 'files'] as const;
+  protected readonly detailTab = signal<(typeof this.detailTabs)[number]>('stream');
+  setDetailTab(tab: (typeof this.detailTabs)[number]) {
+    this.detailTab.set(tab);
+    this.syncQueryParams({ tab });
+  }
+
   // ─── Finalize ─────────────────────────────────────────────────────────
   protected readonly finalizeBranch = signal('');
   protected readonly finalizing = signal(false);
@@ -579,9 +588,7 @@ export class HomePage {
   private destroy$ = new Subject<void>();
 
   constructor() {
-    // Hydrate filter + selection from the URL. Only applies on initial nav
-    // — subsequent param changes from our own syncQueryParams calls are
-    // idempotent (the values already match the signals).
+    // Hydrate filter + selection + active detail tab from the URL.
     this.route.queryParamMap
       .pipe(takeUntil(this.destroy$))
       .subscribe((p) => {
@@ -589,6 +596,10 @@ export class HomePage {
         this.showClosed.set(closed === '1' || closed === 'true');
         const task = p.get('task');
         this.selectedId.set(task && task.length > 0 ? task : null);
+        const tab = p.get('tab');
+        if (tab === 'spec' || tab === 'stream' || tab === 'files') {
+          this.detailTab.set(tab);
+        }
       });
 
     // Settings — one-shot for poll display + IDE/magit availability.
