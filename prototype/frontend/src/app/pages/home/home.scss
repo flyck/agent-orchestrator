@@ -8,28 +8,31 @@
 
 /* ─── Manual-coding nudge banner ──────────────────────────────────────── */
 .nudge {
-  margin: 16px 0 0;
-  padding: 14px 18px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
   border: 1px solid var(--rule-strong);
   background: var(--paper-soft);
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: end;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
   .meta { margin: 0; }
   .nudge-body {
     font-family: var(--font-serif);
-    font-size: 16px;
-    line-height: 1.45;
-    margin: 4px 0 0;
+    font-size: 14px;
+    line-height: 1.35;
+    margin: 2px 0 0;
     color: var(--ink);
     max-width: 720px;
   }
   .nudge-dismiss {
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     background: var(--paper);
+    justify-self: end;
+    align-self: center;
+    padding: 6px 10px;
   }
 }
 
