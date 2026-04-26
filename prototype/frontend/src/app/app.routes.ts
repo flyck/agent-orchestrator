@@ -1,26 +1,22 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'review' },
+  { path: '', pathMatch: 'full', redirectTo: 'home' },
+  {
+    path: 'home',
+    loadComponent: () => import('./pages/home/home').then((m) => m.HomePage),
+    title: 'Home',
+  },
+  {
+    path: 'home/task/:id',
+    loadComponent: () =>
+      import('./pages/home/task-detail').then((m) => m.TaskDetailPage),
+    title: 'Task',
+  },
   {
     path: 'review',
     loadComponent: () => import('./pages/review/review').then((m) => m.ReviewPage),
     title: 'Review',
-  },
-  {
-    path: 'feature',
-    loadComponent: () => import('./pages/feature/feature').then((m) => m.FeaturePage),
-    title: 'Feature',
-  },
-  {
-    path: 'bugfix',
-    loadComponent: () => import('./pages/bugfix/bugfix').then((m) => m.BugfixPage),
-    title: 'Bugfix',
-  },
-  {
-    path: 'arch',
-    loadComponent: () => import('./pages/arch/arch').then((m) => m.ArchPage),
-    title: 'Arch Compare',
   },
   {
     path: 'background',
@@ -37,5 +33,5 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/cost/cost').then((m) => m.CostPage),
     title: 'Cost',
   },
-  { path: '**', redirectTo: 'review' },
+  { path: '**', redirectTo: 'home' },
 ];

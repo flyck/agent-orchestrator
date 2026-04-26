@@ -11,10 +11,8 @@ interface HealthResponse {
 }
 
 const TABS: { path: string; label: string }[] = [
+  { path: 'home',       label: 'Home' },
   { path: 'review',     label: 'Review' },
-  { path: 'feature',    label: 'Feature' },
-  { path: 'bugfix',     label: 'Bugfix' },
-  { path: 'arch',       label: 'Arch' },
   { path: 'background', label: 'Background' },
   { path: 'settings',   label: 'Settings' },
   { path: 'cost',       label: 'Cost' },

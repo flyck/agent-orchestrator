@@ -1,0 +1,156 @@
+<!-- ─── Token usage ─────────────────────────────────────────────────────── -->
+<section class="block usage">
+  <header class="block-head">
+    <div>
+      <p class="meta">spend</p>
+      <h2>Token usage by provider</h2>
+    </div>
+    <p class="muted small">
+      A line per provider where you have credentials. Nothing recorded yet — the engine adapter starts
+      writing usage rows once tasks run.
+    </p>
+  </header>
+
+  @if (usage().length === 0) {
+    <div class="usage-empty">
+      <svg viewBox="0 0 600 80" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="40" x2="600" y2="40" stroke="var(--rule)" stroke-dasharray="3 5" />
+        <text x="300" y="46" text-anchor="middle" fill="var(--ink-faint)" font-size="11"
+              font-family="Inter, sans-serif" letter-spacing="0.06em">
+          AWAITING DATA
+        </text>
+      </svg>
+    </div>
+  } @else {
+    <ul class="usage-list">
+      @for (u of usage(); track u.providerId) {
+        <li>
+          <span class="usage-label">{{ u.label }}</span>
+          <span class="mono">${{ u.spentUsd.toFixed(2) }}</span>
+          @if (u.budgetUsd) {
+            <span class="meta">/ ${{ u.budgetUsd.toFixed(2) }}</span>
+          }
+        </li>
+      }
+    </ul>
+  }
+</section>
+
+<!-- ─── Active tasks (pipeline) ─────────────────────────────────────────── -->
+<section class="block pipeline">
+  <header class="block-head">
+    <div>
+      <p class="meta">active tasks</p>
+      <h2>Pipeline</h2>
+    </div>
+    <div class="pipeline-controls">
+      <span class="meta">{{ openCount() }} open · {{ closedCount() }} closed</span>
+      <label class="toggle">
+        <input type="checkbox" [checked]="showClosed()" (change)="toggleClosed()" />
+        <span>show closed</span>
+      </label>
+      <button class="primary" disabled title="Spec editor lands in Phase 12">+ new task</button>
+    </div>
+  </header>
+
+  <div class="columns">
+    @for (state of states; track state) {
+      <div class="column" [attr.data-state]="state">
+        <div class="column-head">
+          <span class="state-name">{{ stateLabels[state] }}</span>
+          <span class="meta">{{ tasksByState()[state].length }}</span>
+        </div>
+
+        @if (tasksByState()[state].length === 0) {
+          <div class="column-empty">
+            <span class="meta">no tasks</span>
+          </div>
+        } @else {
+          @for (task of tasksByState()[state]; track task.id) {
+            <a class="task-card"
+               [class.attention]="task.needsAttention"
+               [class.closed]="task.status === 'closed'"
+               [routerLink]="['/home/task', task.id]">
+              <div class="task-card-head">
+                <span class="kind">{{ kindLabels[task.kind] }}</span>
+                @if (task.needsAttention) {
+                  <span class="dot waiting" title="agent needs your input"></span>
+                } @else if (task.status === 'closed') {
+                  <span class="dot done"></span>
+                } @else {
+                  <span class="dot running"></span>
+                }
+              </div>
+              <div class="task-title">{{ task.title }}</div>
+              <div class="progress">
+                <div class="progress-fill"
+                     [style.width.%]="task.progress * 100"></div>
+              </div>
+              @if (task.worktreePath) {
+                <div class="task-foot mono">{{ task.worktreePath }}</div>
+              }
+            </a>
+          }
+        }
+      </div>
+    }
+  </div>
+</section>
+
+<!-- ─── Backlog ─────────────────────────────────────────────────────────── -->
+<section class="block backlog">
+  <header class="block-head">
+    <div>
+      <p class="meta">next up</p>
+      <h2>Backlog</h2>
+    </div>
+    <p class="muted small">
+      Pick an item to start a task. You'll author the spec — these are pointers, not pre-filled drafts.
+    </p>
+  </header>
+
+  <div class="backlog-grid">
+    <article class="backlog-section">
+      <header class="backlog-section-head">
+        <h3>Related issues</h3>
+        <p class="meta">from connected integrations</p>
+      </header>
+      @if (relatedIssues().length === 0) {
+        <p class="muted">
+          Connect GitHub in Settings → Integrations to surface related issues from your repos. Coming in Phase 13.
+        </p>
+      } @else {
+        <ul class="backlog-list">
+          @for (item of relatedIssues(); track item.id) {
+            <li>
+              <button class="link-button" (click)="pickUp(item)">{{ item.title }}</button>
+              @if (item.detail) {<span class="meta"> — {{ item.detail }}</span>}
+            </li>
+          }
+        </ul>
+      }
+    </article>
+
+    <article class="backlog-section">
+      <header class="backlog-section-head">
+        <h3>Refactoring suggestions</h3>
+        <p class="meta">from background agents — moderate cadence</p>
+      </header>
+      @if (refactorSuggestions().length === 0) {
+        <p class="muted">
+          Enable background agents in Settings → Agents to surface refactoring suggestions here.
+          They obey the cadence policy in their definition (no PR spam).
+        </p>
+      } @else {
+        <ul class="backlog-list">
+          @for (item of refactorSuggestions(); track item.id) {
+            <li>
+              <button class="link-button" (click)="pickUp(item)">{{ item.title }}</button>
+              @if (item.detail) {<span class="meta"> — {{ item.detail }}</span>}
+            </li>
+          }
+        </ul>
+      }
+    </article>
+  </div>
+</section>

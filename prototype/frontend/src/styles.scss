@@ -15,6 +15,19 @@
   --rule-strong:  #BAB7AE;
   --ink-red:      #8B1E1E;
   --ink-red-bg:   #F5E9E7;
+  --ink-amber:    #A66A1F;   /* used only for "agent needs your attention" */
+  --ink-amber-bg: #F4E7CF;
+
+  /* Muted state tints — used on pipeline cards / columns. Low saturation
+     to stay compatible with the paper aesthetic; ink ratio still dominates. */
+  --state-spec-bg:        #EFE9D6;   /* warm sand */
+  --state-spec-edge:      #C9C0A1;
+  --state-plan-bg:        #DEE5D8;   /* muted sage */
+  --state-plan-edge:      #ADBAA2;
+  --state-build-bg:       #DCE3EC;   /* muted slate-blue, the longest live phase */
+  --state-build-edge:     #A6B0BD;
+  --state-ready-bg:       #E5DCC8;   /* warm cream-tan */
+  --state-ready-edge:     #B8A982;
 
   --font-serif: "Source Serif 4", "EB Garamond", Georgia, serif;
   --font-sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -121,5 +134,5 @@ hr {
 .dot.running  { background: var(--ink); }
 .dot.done     { background: var(--ink-muted); }
 .dot.errored  { background: var(--ink-red); }
-.dot.waiting  { background: var(--ink-red); }
+.dot.waiting  { background: var(--ink-amber); }   /* agent needs user input */
 .dot.pending  { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-faint); }
