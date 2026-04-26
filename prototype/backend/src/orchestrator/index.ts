@@ -303,14 +303,26 @@ export async function startRun(
       terminal = "error";
     } finally {
       log.info("orchestrator.run.terminal", { taskId, terminal, eventCount });
+      if (terminal === null) {
+        // The iterator exited without seeing session.idle/error — the queue
+        // got closed externally (bus reconnect raced, manual shutdown, etc.).
+        // Don't fake a "done" green-light; mark canceled so the user can
+        // resend instead of trusting a misleading green state.
+        log.warn("orchestrator.run.iterator_closed_unexpectedly", {
+          taskId,
+          eventCount,
+        });
+      }
       try {
         await session.close();
       } catch (e) {
         log.warn("orchestrator.run.close_failed", { taskId, error: String(e) });
       }
       active.delete(taskId);
-      const finalStatus = terminal === "error" ? "failed" : "done";
-      const finalState = terminal === "error" ? task.current_state : "ready";
+      const finalStatus =
+        terminal === "error" ? "failed" : terminal === null ? "canceled" : "done";
+      const finalState =
+        terminal === "error" || terminal === null ? task.current_state : "ready";
       updateTaskStatus(taskId, finalStatus, finalState);
       const lastErrorStr = lastError
         ? typeof lastError === "string"
