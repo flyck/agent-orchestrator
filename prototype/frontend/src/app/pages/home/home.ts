@@ -11,6 +11,8 @@ import {
 } from '../../services/tasks.service';
 import { CostService, type CostSummary } from '../../services/cost.service';
 import { RepoService, type DiffResponse } from '../../services/repo.service';
+import { TaskStreamService, type StreamEvent } from '../../services/task-stream.service';
+import type { Subscription } from 'rxjs';
 
 /**
  * Pipeline state, in order. Each task lives in exactly one state.
@@ -97,6 +99,79 @@ export function relativeTs(ms: number): string {
   return `${Math.round(diff / 86_400_000)}d ago`;
 }
 
+interface StreamLine {
+  ts: number;
+  tag: string;
+  text: string;
+  /** Severity affects visual treatment in the log. */
+  level: 'info' | 'tool' | 'text' | 'error' | 'status' | 'perm';
+}
+
+/**
+ * Convert one raw engine event into a single log line. The shell pane
+ * renders these directly. Text parts get the latest content (opencode
+ * emits cumulative text per part-update); tool calls collapse to a tag.
+ */
+export function formatStreamLine(ev: StreamEvent): StreamLine {
+  const ts = ev.ts;
+  const raw = ev.raw as { properties?: any };
+  const props = raw?.properties ?? {};
+  switch (ev.type) {
+    case 'message.part.updated': {
+      const part = props.part;
+      if (part?.type === 'text' && typeof part.text === 'string') {
+        const text = part.text.trim();
+        return { ts, tag: 'text', text, level: 'text' };
+      }
+      if (part?.type === 'tool' || part?.type === 'tool-invocation' || part?.type === 'tool-result') {
+        const name = part.tool ?? part.toolName ?? part.type;
+        const id = part.id ? ` ${String(part.id).slice(0, 8)}` : '';
+        return { ts, tag: 'tool', text: `${name}${id}`, level: 'tool' };
+      }
+      return { ts, tag: 'part', text: part?.type ?? '?', level: 'info' };
+    }
+    case 'message.updated': {
+      const info = props.info;
+      if (info?.role === 'assistant' && info?.finish) {
+        const tokens = info.tokens ?? {};
+        const cost = typeof info.cost === 'number' ? `$${info.cost.toFixed(4)}` : '?';
+        return {
+          ts,
+          tag: 'asst-done',
+          text: `finish=${info.finish} in=${tokens.input ?? 0} out=${tokens.output ?? 0} ${cost}`,
+          level: 'info',
+        };
+      }
+      if (info?.error) {
+        const msg = (info.error as { data?: { message?: string } })?.data?.message ?? 'error';
+        return { ts, tag: 'asst-error', text: String(msg).slice(0, 200), level: 'error' };
+      }
+      return { ts, tag: 'message', text: info?.role ?? '', level: 'info' };
+    }
+    case 'session.status': {
+      return { ts, tag: 'status', text: props.status?.type ?? '', level: 'status' };
+    }
+    case 'session.diff': {
+      return { ts, tag: 'diff', text: 'session emitted file diff', level: 'info' };
+    }
+    case 'session.idle': {
+      return { ts, tag: 'idle', text: 'session idle', level: 'status' };
+    }
+    case 'session.error': {
+      return { ts, tag: 'error', text: 'session error', level: 'error' };
+    }
+    case 'permission.asked': {
+      const perm = props.permission ?? props.tool?.toolName ?? '?';
+      return { ts, tag: 'perm', text: `${perm} (auto-granted)`, level: 'perm' };
+    }
+    case 'subscribed': {
+      return { ts, tag: 'sse', text: 'subscribed', level: 'status' };
+    }
+    default:
+      return { ts, tag: ev.type, text: '', level: 'info' };
+  }
+}
+
 function toViewTask(t: Task): ViewTask {
   // Closed = task has reached a terminal status (done/failed/canceled).
   const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
@@ -127,6 +202,7 @@ export class HomePage {
   private tasksApi = inject(TasksService);
   private costApi = inject(CostService);
   private repoApi = inject(RepoService);
+  private streamApi = inject(TaskStreamService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
@@ -189,6 +265,23 @@ export class HomePage {
   protected readonly showPatch = signal(false);
   protected readonly openMessage = signal<string | null>(null);
 
+  // ─── Live SSE stream for selected task ────────────────────────────────
+  // Capped ring buffer of recent events, rendered as the shell pane. Older
+  // events fall off so memory stays bounded across long-running tasks.
+  protected readonly streamEvents = signal<StreamEvent[]>([]);
+  protected readonly streamConnected = signal(false);
+  /** Most recent text emitted by the assistant, by part id. opencode emits
+   *  full part replacements per update — we keep the latest text per part
+   *  so the rendering stays stable. */
+  private partTexts = new Map<string, string>();
+  private streamSub: Subscription | null = null;
+  private static readonly STREAM_BUFFER_LIMIT = 250;
+
+  /** Derived: condense raw events into a human-readable line list. */
+  protected readonly streamLines = computed(() => {
+    return this.streamEvents().map((ev) => formatStreamLine(ev));
+  });
+
   togglePatch() {
     this.showPatch.update((v) => !v);
   }
@@ -204,13 +297,54 @@ export class HomePage {
     this.finalizeError.set(null);
     this.openMessage.set(null);
     this.syncQueryParams({ task: next });
-    if (next) this.refreshDiff();
-    else this.diff.set(null);
+    if (next) {
+      this.refreshDiff();
+      this.openStream(next);
+    } else {
+      this.diff.set(null);
+      this.closeStream();
+    }
+  }
+
+  private openStream(taskId: string) {
+    this.closeStream();
+    this.streamEvents.set([]);
+    this.partTexts.clear();
+    this.streamConnected.set(false);
+    this.streamSub = this.streamApi.open(taskId).subscribe({
+      next: (ev) => {
+        this.streamConnected.set(true);
+        // Track per-part text for the rolling assistant transcript.
+        if (ev.type === 'message.part.updated') {
+          const part = (ev.raw as {
+            properties?: { part?: { id?: string; type?: string; text?: string } };
+          }).properties?.part;
+          if (part?.type === 'text' && typeof part.text === 'string' && part.id) {
+            this.partTexts.set(part.id, part.text);
+          }
+        }
+        // Append to the capped ring buffer. Use update to keep change detection cheap.
+        this.streamEvents.update((arr) => {
+          const next = arr.length >= HomePage.STREAM_BUFFER_LIMIT ? arr.slice(1) : arr.slice();
+          next.push(ev);
+          return next;
+        });
+      },
+      complete: () => this.streamConnected.set(false),
+      error: () => this.streamConnected.set(false),
+    });
+  }
+
+  private closeStream() {
+    this.streamSub?.unsubscribe();
+    this.streamSub = null;
+    this.streamConnected.set(false);
   }
 
   closeDetail() {
     this.selectedId.set(null);
     this.syncQueryParams({ task: null });
+    this.closeStream();
   }
 
   private syncQueryParams(patch: Record<string, string | null>) {
@@ -365,10 +499,15 @@ export class HomePage {
         },
       },
       legend: {
+        show: true,
+        showForSingleSeries: true, // always show, even with one provider
         fontSize: '11px',
+        fontFamily: 'Inter, sans-serif',
         position: 'top',
         horizontalAlign: 'right',
-        markers: { strokeWidth: 0, size: 6 },
+        labels: { colors: '#1A1A18' },
+        markers: { strokeWidth: 0, size: 8 },
+        itemMargin: { horizontal: 12, vertical: 0 },
       },
       colors: ['#1A1A18', '#6E6E69', '#A66A1F', '#8B1E1E'],
       tooltip: {
@@ -467,6 +606,7 @@ export class HomePage {
     this.destroy$.next();
     this.destroy$.complete();
     this.rangeChanged.complete();
+    this.closeStream();
   }
 
   refreshTasks() {

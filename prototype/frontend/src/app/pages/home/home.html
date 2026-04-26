@@ -196,10 +196,41 @@
       }
     </dl>
 
-    <div class="shell">
-      <div class="shell-line muted">id: {{ sel.raw.id }}</div>
-      <div class="shell-line muted">⏵ <em>Live SSE stream from /api/tasks/{{ sel.raw.id }}/events lands here in the next iteration.</em></div>
-    </div>
+    <!-- ─── Spec ────────────────────────────────────────────────────── -->
+    <section class="spec-section">
+      <header class="spec-head">
+        <p class="meta">spec ({{ sel.raw.input_kind }})</p>
+        @if (sel.raw.current_step !== null && sel.raw.total_steps !== null) {
+          <span class="meta">step {{ sel.raw.current_step }}/{{ sel.raw.total_steps }} · {{ sel.raw.step_label }}</span>
+        }
+      </header>
+      <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
+    </section>
+
+    <!-- ─── Live agent stream ──────────────────────────────────────── -->
+    <section class="stream-section">
+      <header class="stream-head">
+        <h3>Live stream</h3>
+        @if (streamConnected()) {
+          <span class="dot running"></span><span class="meta">streaming · {{ streamLines().length }} events</span>
+        } @else {
+          <span class="dot pending"></span><span class="meta">disconnected</span>
+        }
+      </header>
+
+      @if (streamLines().length === 0) {
+        <div class="shell"><div class="shell-line muted">id: {{ sel.raw.id }} · waiting for events…</div></div>
+      } @else {
+        <div class="shell">
+          @for (line of streamLines(); track $index) {
+            <div class="shell-line" [attr.data-level]="line.level">
+              <span class="shell-tag">[{{ line.tag }}]</span><!--
+              -->@if (line.text) { <span class="shell-text">{{ line.text }}</span> }
+            </div>
+          }
+        </div>
+      }
+    </section>
 
     <!-- ─── Working-tree changes ──────────────────────────────────────── -->
     @let d = diff();
