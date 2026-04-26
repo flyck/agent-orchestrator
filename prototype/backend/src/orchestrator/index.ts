@@ -19,12 +19,16 @@ import type { EngineEvent, EngineSession } from "../engine/types";
 import { OpenCodeSession } from "../engine/opencode";
 import { getEngine } from "../engine/singleton";
 import {
+  clearNeedsFeedback,
   getTask,
+  setLastSessionId,
   setTaskBaseRef,
   setTaskProgress,
   updateTaskStatus,
   type TaskRow,
 } from "../db/tasks";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { recordUsageEvent } from "../db/usageEvents";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
@@ -62,70 +66,41 @@ function backendUrl(): string {
   return `http://localhost:${port}`;
 }
 
+const SHARED_PROMPT_PATH = fileURLToPath(
+  new URL("../../agents/builtin/_shared/systemprompt.md", import.meta.url),
+);
+
+/** Read once at startup; cheap, ~3KB, no file watching needed. */
+const SHARED_PROMPT_TEMPLATE = (() => {
+  try {
+    return readFileSync(SHARED_PROMPT_PATH, "utf8");
+  } catch (e) {
+    log.error("orchestrator.shared_prompt.read_failed", {
+      error: String(e),
+      path: SHARED_PROMPT_PATH,
+    });
+    return "";
+  }
+})();
+
+function renderSharedPrompt(taskId: string): string {
+  return SHARED_PROMPT_TEMPLATE.replaceAll("{{TASK_ID}}", taskId)
+    .replaceAll("{{BASE_URL}}", backendUrl())
+    .replaceAll("{{REPO_ROOT}}", REPO_ROOT);
+}
+
 function buildSystemPrompt(taskId: string): string {
-  return `You are an autonomous coding agent working on the \`agent-orchestrator\` repo at \`${REPO_ROOT}\`.
+  return `${renderSharedPrompt(taskId)}
+
+---
+
+# Role
+
+You are an autonomous coding agent working on the \`agent-orchestrator\` repo at \`${REPO_ROOT}\`.
 
 Read the user's task carefully. Use the file-editing tools available to you to make the change. Keep the change scoped — touch only what the task asks for. Prefer surgical edits over rewrites.
 
-When you are done, summarize what you changed in 2-3 sentences. Do not commit; the user will review with \`git diff\` before deciding what to keep.
-
-# Task notes file (read this first)
-
-Before doing anything else, check whether the file \`${REPO_ROOT}/.agent-notes/${taskId}.md\` exists. This file is your scratch pad across iterations on the same task — past you may have written breadcrumbs there, especially if the user sent the task back with feedback. If it exists, read it before starting discovery; it will save you time.
-
-If it doesn't exist, create it with the following sections (you will fill them in as you work):
-
-\`\`\`markdown
-# Task ${taskId}
-
-## Context (one paragraph: what is this task about, in your own words)
-
-## Files I've read
-(file-path — one line on what's relevant in it)
-
-## Architecture decisions
-(short bullets — choices you made and why)
-
-## Approach
-(what you're trying to do, in steps)
-
-## Open questions / blockers
-(things you weren't sure about; the user may answer here on re-run)
-
-## Changelog
-(append-only: dated bullets of what you did each iteration)
-\`\`\`
-
-Update sections as you learn things. Do not bloat — short bullets only. The Changelog gets a new entry every time you finish a step. The user does not commit this file (it's gitignored at \`.agent-notes/\`).
-
-# Progress reporting
-
-The orchestrator gives the user a progress bar on this task's card. You report progress directly to the orchestrator's HTTP API. Both calls are fire-and-forget — failures should not block your work.
-
-Your task id is: \`${taskId}\`
-The orchestrator URL is: \`${backendUrl()}\`
-
-**Step 0 — discovery.** Spend a few tool calls reading the relevant files and understanding the codebase. Discovery has no measurable progress; do not report a step number for it.
-
-**Step 1 — plan.** Once you know what you'll do, list your steps. Pick whatever number actually fits the work — there is no minimum or maximum. A trivial change might be 2 steps; a wide refactor might be 12. Then post the *total* and the label of step 1:
-
-\`\`\`
-curl -s -X POST '${backendUrl()}/api/tasks/${taskId}/progress' \\
-  -H 'content-type: application/json' \\
-  -d '{"total": <N>, "step": 1, "label": "<short label of step 1>"}'
-\`\`\`
-
-**After each subsequent step finishes**, post:
-
-\`\`\`
-curl -s -X POST '${backendUrl()}/api/tasks/${taskId}/progress' \\
-  -H 'content-type: application/json' \\
-  -d '{"step": <i>, "label": "<short label>"}'
-\`\`\`
-
-The label is what the user reads on their card — keep it under ~40 chars and active-voice.
-
-When the last step is done, post one final update with \`step\` equal to \`total\`.`;
+When you are done, summarize what you changed in 2-3 sentences. Do not commit; the user will review with \`git diff\` before deciding what to keep.`;
 }
 
 const active = new Map<string, ActiveTask>();
@@ -164,6 +139,13 @@ export async function startRun(
   if (opts.followUp) {
     setTaskProgress(taskId, { step: null, total: null, label: null });
   }
+  // Always clear the needs-feedback flag at run start; the agent gets a
+  // fresh chance to signal it again if the situation hasn't changed.
+  if (task.needs_feedback) {
+    clearNeedsFeedback(taskId);
+    task.needs_feedback = 0;
+    task.feedback_question = null;
+  }
 
   // Snapshot the repo's HEAD now so the diff endpoint can scope changes to
   // "since this task started" — even if HEAD advances later (other tasks
@@ -194,6 +176,7 @@ export async function startRun(
   let session: EngineSession;
   try {
     session = await engine.openSession({ title: task.title });
+    setLastSessionId(taskId, session.id);
     log.info("orchestrator.run.session_opened", { taskId, sessionId: session.id });
   } catch (err) {
     log.error("orchestrator.run.open_session_failed", {

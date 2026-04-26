@@ -49,6 +49,17 @@ export class OpenCodeAdapter implements EngineAdapter {
     }
   }
 
+  /**
+   * Backfill helper: fetch persisted messages for a session that may have
+   * already idled. Used by GET /api/tasks/:id/transcript so the user can
+   * see the tail of an agent's output even after the live stream is gone.
+   */
+  async getSessionMessages(sessionId: string, limit = 50): Promise<unknown[]> {
+    return this.server.client.getJson<unknown[]>(
+      `/session/${sessionId}/message?limit=${limit}`,
+    );
+  }
+
   async shutdown(): Promise<void> {
     await this.bus.shutdown();
     await this.server.shutdown();

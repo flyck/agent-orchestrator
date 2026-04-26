@@ -36,6 +36,9 @@ function applyMigrations(db: Database) {
   ensureColumn("tasks", "current_step", "INTEGER");
   ensureColumn("tasks", "total_steps", "INTEGER");
   ensureColumn("tasks", "step_label", "TEXT");
+  ensureColumn("tasks", "needs_feedback", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("tasks", "feedback_question", "TEXT");
+  ensureColumn("tasks", "last_session_id", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

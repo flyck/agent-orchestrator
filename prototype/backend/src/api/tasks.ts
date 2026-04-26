@@ -3,13 +3,16 @@ import { stream } from "hono/streaming";
 import { z } from "zod";
 import {
   createTask,
+  clearNeedsFeedback,
   deleteTask,
   getTask,
   listTasks,
+  setNeedsFeedback,
   setTaskProgress,
   type TaskWorkspace,
   type TaskStatus,
 } from "../db/tasks";
+import { getEngine } from "../engine/singleton";
 import { addListener, sendUserMessage, startRun, cancelRun } from "../orchestrator";
 import { finalizeTask } from "../orchestrator/finalize";
 import { log } from "../log";
@@ -41,6 +44,10 @@ const progressSchema = z.object({
 
 const continueSchema = z.object({
   message: z.string().min(1).max(20_000),
+});
+
+const needsFeedbackSchema = z.object({
+  question: z.string().min(1).max(1000),
 });
 
 export const tasks = new Hono();
@@ -143,6 +150,49 @@ tasks.post("/:id/continue", async (c) => {
   } catch (err) {
     log.error("api.tasks.continue.failed", { id, error: String(err) });
     return c.json({ error: "continue_failed", message: String(err) }, 500);
+  }
+});
+
+/** Agent signals it cannot proceed without user input. */
+tasks.post("/:id/needs-feedback", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = needsFeedbackSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_question", issues: parsed.error.issues }, 400);
+  }
+  const t = setNeedsFeedback(id, parsed.data.question);
+  log.info("api.tasks.needs_feedback", { id, question: parsed.data.question });
+  return c.json(t);
+});
+
+/** User dismissed the feedback request without giving feedback. */
+tasks.post("/:id/clear-feedback", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  return c.json(clearNeedsFeedback(id));
+});
+
+/**
+ * Backfill: when the live SSE stream is dead but the user wants to see
+ * what the agent said last, fetch the persisted transcript from opencode
+ * for the last session attached to this task.
+ */
+tasks.get("/:id/transcript", async (c) => {
+  const id = c.req.param("id");
+  const task = getTask(id);
+  if (!task) return c.json({ error: "not_found" }, 404);
+  if (!task.last_session_id) {
+    return c.json({ session_id: null, messages: [] });
+  }
+  try {
+    const engine = await getEngine();
+    const messages = await engine.getSessionMessages(task.last_session_id, 50);
+    return c.json({ session_id: task.last_session_id, messages });
+  } catch (err) {
+    log.warn("api.tasks.transcript.failed", { id, error: String(err) });
+    return c.json({ session_id: task.last_session_id, messages: [], error: String(err) }, 200);
   }
 });
 

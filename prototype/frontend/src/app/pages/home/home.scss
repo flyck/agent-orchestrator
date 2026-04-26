@@ -289,6 +289,21 @@
   font-size: 14px;
 }
 
+.attention-block {
+  background: var(--ink-amber-bg);
+  border: 1px solid var(--ink-amber);
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  .attention-question {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    line-height: 1.4;
+    margin: 4px 0 8px;
+    color: var(--ink);
+  }
+  .small { margin: 0; }
+}
+
 .detail-meta {
   display: flex;
   align-items: center;
@@ -400,6 +415,34 @@
 .shell-line[data-level='perm']   .shell-tag { color: #D9C68A; }
 .shell-line[data-level='status'] .shell-tag { color: #9DA9C2; }
 .shell-line[data-level='error']  .shell-text { color: #F0CCCC; }
+
+/* ─── Persisted transcript tail (when SSE is dead) ────────────────────── */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  padding: 10px 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+.transcript-line {
+  border-bottom: 1px dashed var(--rule);
+  padding-bottom: 8px;
+}
+.transcript-line:last-child { border-bottom: 0; padding-bottom: 0; }
+.transcript-line[data-role='user'] .transcript-head { color: var(--ink); }
+.transcript-line[data-role='assistant'] .transcript-head { color: var(--ink-muted); }
+.transcript-head { margin-bottom: 4px; }
+.transcript-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
 
 .interject {
   display: grid;

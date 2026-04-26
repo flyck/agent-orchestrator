@@ -107,6 +107,14 @@ interface StreamLine {
   level: 'info' | 'tool' | 'text' | 'error' | 'status' | 'perm';
 }
 
+/** Persisted message tail — what the user sees in the "last responses"
+ *  panel when the live stream isn't connected. */
+export interface TranscriptLine {
+  role: string;
+  text: string;
+  ts: number | null;
+}
+
 /**
  * Convert one raw engine event into a single log line. The shell pane
  * renders these directly. Text parts get the latest content (opencode
@@ -184,7 +192,7 @@ function toViewTask(t: Task): ViewTask {
     state,
     status: closed ? 'closed' : 'open',
     kind: inferKind(t.workspace),
-    needsAttention: false, // backend doesn't surface this yet
+    needsAttention: t.needs_feedback === 1,
     progress: deriveProgress(t),
     worktreePath: t.worktree_path,
   };
@@ -270,6 +278,9 @@ export class HomePage {
   // events fall off so memory stays bounded across long-running tasks.
   protected readonly streamEvents = signal<StreamEvent[]>([]);
   protected readonly streamConnected = signal(false);
+  /** Persisted-tail backfill: messages from opencode when live stream is dead. */
+  protected readonly transcriptTail = signal<TranscriptLine[]>([]);
+  protected readonly transcriptLoading = signal(false);
   /** Most recent text emitted by the assistant, by part id. opencode emits
    *  full part replacements per update — we keep the latest text per part
    *  so the rendering stays stable. */
@@ -300,10 +311,49 @@ export class HomePage {
     if (next) {
       this.refreshDiff();
       this.openStream(next);
+      // If the task is closed (Ready), the SSE stream won't have anything
+      // to deliver — so backfill the persisted opencode transcript so the
+      // user sees where the conversation ended.
+      const t = this.tasks().find((x) => x.raw.id === next);
+      if (t && t.status === 'closed' && t.raw.last_session_id) {
+        this.refreshTranscript(next);
+      } else {
+        this.transcriptTail.set([]);
+      }
     } else {
       this.diff.set(null);
+      this.transcriptTail.set([]);
       this.closeStream();
     }
+  }
+
+  refreshTranscript(taskId: string) {
+    this.transcriptLoading.set(true);
+    this.tasksApi.transcript(taskId).subscribe({
+      next: (r) => {
+        const lines: TranscriptLine[] = [];
+        for (const m of (r.messages ?? []) as Array<{
+          info?: { role?: string; time?: { created?: number } };
+          parts?: Array<{ type?: string; text?: string }>;
+        }>) {
+          const role = m.info?.role ?? 'unknown';
+          const text = (m.parts ?? [])
+            .filter((p) => p.type === 'text' && typeof p.text === 'string')
+            .map((p) => p.text!)
+            .join('')
+            .trim();
+          if (!text) continue;
+          lines.push({ role, text, ts: m.info?.time?.created ?? null });
+        }
+        // Tail only — last 6 messages keep it readable.
+        this.transcriptTail.set(lines.slice(-6));
+        this.transcriptLoading.set(false);
+      },
+      error: () => {
+        this.transcriptTail.set([]);
+        this.transcriptLoading.set(false);
+      },
+    });
   }
 
   private openStream(taskId: string) {

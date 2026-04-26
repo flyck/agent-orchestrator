@@ -36,6 +36,9 @@ export interface Task {
   current_step: number | null;
   total_steps: number | null;
   step_label: string | null;
+  needs_feedback: number;
+  feedback_question: string | null;
+  last_session_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -95,6 +98,16 @@ export class TasksService {
 
   delete(id: string): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`/api/tasks/${id}`);
+  }
+
+  clearFeedback(id: string): Observable<Task> {
+    return this.http.post<Task>(`/api/tasks/${id}/clear-feedback`, {});
+  }
+
+  transcript(id: string): Observable<{ session_id: string | null; messages: unknown[] }> {
+    return this.http.get<{ session_id: string | null; messages: unknown[] }>(
+      `/api/tasks/${id}/transcript`,
+    );
   }
 
   sendMessage(id: string, text: string): Observable<{ ok: boolean }> {

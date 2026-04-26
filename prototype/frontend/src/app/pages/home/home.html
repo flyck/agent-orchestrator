@@ -132,10 +132,15 @@
     </header>
 
     @if (sel.needsAttention) {
-      <p class="attention-note">
-        <span class="dot waiting"></span>
-        An agent is waiting on your input. Reply below to unblock it.
-      </p>
+      <aside class="attention-block">
+        <p class="meta">agent needs your feedback</p>
+        @if (sel.raw.feedback_question) {
+          <p class="attention-question">{{ sel.raw.feedback_question }}</p>
+        } @else {
+          <p class="attention-question">The agent stopped and signalled it needs your input.</p>
+        }
+        <p class="muted small">Type your reply below — Send Back will start a follow-up run with your message attached and clear this flag.</p>
+      </aside>
     }
 
     <div class="detail-meta">
@@ -219,7 +224,24 @@
       </header>
 
       @if (streamLines().length === 0) {
-        <div class="shell"><div class="shell-line muted">id: {{ sel.raw.id }} · waiting for events…</div></div>
+        @if (transcriptTail().length > 0) {
+          <p class="meta small">Stream is dead — showing last {{ transcriptTail().length }} message(s) persisted in opencode for session {{ sel.raw.last_session_id?.slice(0, 12) }}…</p>
+          <div class="transcript">
+            @for (line of transcriptTail(); track $index) {
+              <article class="transcript-line" [attr.data-role]="line.role">
+                <header class="transcript-head meta">
+                  {{ line.role }}
+                  @if (line.ts) { · {{ relativeTs(line.ts) }} }
+                </header>
+                <pre class="transcript-text">{{ line.text }}</pre>
+              </article>
+            }
+          </div>
+        } @else if (transcriptLoading()) {
+          <div class="shell"><div class="shell-line muted">loading transcript…</div></div>
+        } @else {
+          <div class="shell"><div class="shell-line muted">id: {{ sel.raw.id }} · waiting for events…</div></div>
+        }
       } @else {
         <div class="shell">
           @for (line of streamLines(); track $index) {

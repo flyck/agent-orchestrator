@@ -30,6 +30,9 @@ export interface TaskRow {
   current_step: number | null;
   total_steps: number | null;
   step_label: string | null;
+  needs_feedback: number; // sqlite stores 0/1
+  feedback_question: string | null;
+  last_session_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -113,6 +116,34 @@ export interface ProgressInput {
   step?: number | null;
   total?: number | null;
   label?: string | null;
+}
+
+export function setNeedsFeedback(
+  id: string,
+  question: string | null,
+  handle: Database = db(),
+): TaskRow | null {
+  handle
+    .prepare(
+      "UPDATE tasks SET needs_feedback = 1, feedback_question = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(question, Date.now(), id);
+  return getTask(id, handle);
+}
+
+export function clearNeedsFeedback(id: string, handle: Database = db()): TaskRow | null {
+  handle
+    .prepare(
+      "UPDATE tasks SET needs_feedback = 0, feedback_question = NULL, updated_at = ? WHERE id = ?",
+    )
+    .run(Date.now(), id);
+  return getTask(id, handle);
+}
+
+export function setLastSessionId(id: string, sessionId: string, handle: Database = db()): void {
+  handle
+    .prepare("UPDATE tasks SET last_session_id = ?, updated_at = ? WHERE id = ?")
+    .run(sessionId, Date.now(), id);
 }
 
 export function setTaskProgress(
