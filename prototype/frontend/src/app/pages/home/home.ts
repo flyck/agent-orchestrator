@@ -58,18 +58,35 @@ function progressForState(state: TaskState | null, status: string): number {
   }
 }
 
-function deriveProgress(t: Task): number {
-  // Agent-reported step / total takes precedence (it's what the agent
-  // actually thinks). Fall back to the coarse state-based mapping when
-  // the agent hasn't reported yet.
+function deriveProgress(t: Task): {
+  progress: number;
+  hasReportedProgress: boolean;
+  step: number;
+  total: number;
+} {
+  // Agent-reported step / total is the only honest signal. Without it we
+  // refuse to fake a percentage — the bar stays empty and the label says
+  // 0/0 (planning) so the user isn't misled by a bar stuck at 60%.
   if (
     typeof t.current_step === 'number' &&
     typeof t.total_steps === 'number' &&
     t.total_steps > 0
   ) {
-    return Math.max(0, Math.min(1, t.current_step / t.total_steps));
+    return {
+      progress: Math.max(0, Math.min(1, t.current_step / t.total_steps)),
+      hasReportedProgress: true,
+      step: t.current_step,
+      total: t.total_steps,
+    };
   }
-  return progressForState(t.current_state ?? null, t.status);
+  // Closed tasks: full bar. Otherwise: empty + 0/0.
+  const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
+  return {
+    progress: closed ? 1 : 0,
+    hasReportedProgress: false,
+    step: 0,
+    total: 0,
+  };
 }
 
 interface ViewTask {
@@ -78,8 +95,13 @@ interface ViewTask {
   status: 'open' | 'closed';
   kind: TaskKind;
   needsAttention: boolean;
+  /** 0..1 — only used when hasReportedProgress; otherwise ignored. */
   progress: number;
-  worktreePath: string | null;
+  /** True when the agent has reported a step plan. */
+  hasReportedProgress: boolean;
+  /** Step / total — shown explicitly. 0/0 means "discovering, no plan yet". */
+  step: number;
+  total: number;
 }
 
 /** ISO date + time, UTC. Hover shows the same; we just want unambiguous text. */
@@ -187,14 +209,17 @@ function toViewTask(t: Task): ViewTask {
   // be ready unless it's already in finalize.
   const baseState: PipelineState = (t.current_state ?? 'spec') as PipelineState;
   const state: PipelineState = closed && baseState !== 'finalize' ? 'ready' : baseState;
+  const p = deriveProgress(t);
   return {
     raw: t,
     state,
     status: closed ? 'closed' : 'open',
     kind: inferKind(t.workspace),
     needsAttention: t.needs_feedback === 1,
-    progress: deriveProgress(t),
-    worktreePath: t.worktree_path,
+    progress: p.progress,
+    hasReportedProgress: p.hasReportedProgress,
+    step: p.step,
+    total: p.total,
   };
 }
 
@@ -220,6 +245,20 @@ export class HomePage {
   protected readonly formatTs = formatTs;
   protected readonly relativeTs = relativeTs;
   protected readonly terminalStatuses = new Set(['done', 'failed', 'canceled']);
+
+  /** Ticks every second so the per-card "Xs in this stage" counters stay live
+   *  without waiting for the 5s task-list poll. Cheap — pure signal update,
+   *  no I/O. */
+  protected readonly nowTick = signal(Date.now());
+
+  /** Compact "Xs / Xm Ys / Xh Ym" format for stage timers. */
+  protected secondsInState(t: ViewTask): string {
+    const since = t.raw.state_entered_at ?? t.raw.updated_at;
+    const sec = Math.max(0, Math.round((this.nowTick() - since) / 1000));
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+    return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  }
 
   // ─── Real tasks ───────────────────────────────────────────────────────
   protected readonly tasks = signal<ViewTask[]>([]);
@@ -426,6 +465,16 @@ export class HomePage {
       },
       error: (e) =>
         this.finalizeError.set(`delete failed: ${e?.error?.message ?? e?.message ?? e}`),
+    });
+  }
+
+  forceCompleteSelectedTask() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.tasksApi.forceComplete(sel.raw.id).subscribe({
+      next: () => this.refreshTasks(),
+      error: (e) =>
+        this.finalizeError.set(`force-complete failed: ${e?.error?.message ?? e?.message ?? e}`),
     });
   }
 
@@ -638,6 +687,11 @@ export class HomePage {
       },
       error: () => this.prPollMinutes.set(null),
     });
+
+    // Live tick for the stage timers — every 1000ms.
+    timer(0, 1000)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => this.nowTick.set(Date.now()));
 
     // Tasks — refresh every 5s (covers SSE-less initial wiring).
     timer(0, 5000)

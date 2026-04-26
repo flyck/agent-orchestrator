@@ -33,6 +33,7 @@ export interface TaskRow {
   needs_feedback: number; // sqlite stores 0/1
   feedback_question: string | null;
   last_session_id: string | null;
+  state_entered_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -194,14 +195,27 @@ export function updateTaskStatus(
   current_state: TaskState | null = null,
   handle: Database = db(),
 ): TaskRow | null {
+  const now = Date.now();
   if (current_state) {
-    handle
-      .prepare("UPDATE tasks SET status = ?, current_state = ?, updated_at = ? WHERE id = ?")
-      .run(status, current_state, Date.now(), id);
+    // Bump state_entered_at only when the state actually changes; that way
+    // restarts/retries within the same state preserve the stage timer.
+    const prev = getTask(id, handle);
+    const stateChanged = prev?.current_state !== current_state;
+    if (stateChanged) {
+      handle
+        .prepare(
+          "UPDATE tasks SET status = ?, current_state = ?, state_entered_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(status, current_state, now, now, id);
+    } else {
+      handle
+        .prepare("UPDATE tasks SET status = ?, current_state = ?, updated_at = ? WHERE id = ?")
+        .run(status, current_state, now, id);
+    }
   } else {
     handle
       .prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?")
-      .run(status, Date.now(), id);
+      .run(status, now, id);
   }
   return getTask(id, handle);
 }

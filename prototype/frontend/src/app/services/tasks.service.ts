@@ -39,6 +39,7 @@ export interface Task {
   needs_feedback: number;
   feedback_question: string | null;
   last_session_id: string | null;
+  state_entered_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -94,6 +95,10 @@ export class TasksService {
 
   cancel(id: string): Observable<{ ok: boolean }> {
     return this.http.post<{ ok: boolean }>(`/api/tasks/${id}/cancel`, {});
+  }
+
+  forceComplete(id: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`/api/tasks/${id}/force-complete`, {});
   }
 
   delete(id: string): Observable<{ ok: boolean }> {

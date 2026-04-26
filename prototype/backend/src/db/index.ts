@@ -39,6 +39,10 @@ function applyMigrations(db: Database) {
   ensureColumn("tasks", "needs_feedback", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("tasks", "feedback_question", "TEXT");
   ensureColumn("tasks", "last_session_id", "TEXT");
+  // Stamped whenever current_state changes — drives the "Xs in this stage"
+  // counter on cards. Distinct from updated_at, which churns on every
+  // progress tick / SSE event / etc.
+  ensureColumn("tasks", "state_entered_at", "INTEGER");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

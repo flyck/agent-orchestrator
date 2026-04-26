@@ -216,16 +216,39 @@
   line-height: 1.35;
 }
 
-.step-label {
+.step-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 0 0 6px;
   font-size: 11px;
+}
+.step-counts {
+  font-size: 11px;
+  color: var(--ink);
+}
+.step-label {
+  margin: 0;
+  font-size: 11px;
   word-break: break-word;
+  color: var(--ink-muted);
 }
 
 .progress {
   height: 3px;
   background: var(--rule);
   position: relative;
+}
+/* Empty bar (no agent-reported plan yet) — render with a hairline texture
+   so the user sees "indeterminate" without us animating anything. */
+.progress.empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--rule),
+    var(--rule) 4px,
+    transparent 4px,
+    transparent 8px
+  );
 }
 .progress-fill {
   position: absolute;
@@ -280,6 +303,15 @@
 .detail-delete:hover {
   background: var(--ink-red-bg);
 }
+.detail-force {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-amber);
+  border-color: var(--ink-amber);
+  background: transparent;
+}
+.detail-force:hover { background: var(--ink-amber-bg); }
 
 .attention-note {
   display: flex;

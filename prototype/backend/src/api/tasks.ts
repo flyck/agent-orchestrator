@@ -14,7 +14,7 @@ import {
 } from "../db/tasks";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
-import { addListener, sendUserMessage, startRun, cancelRun } from "../orchestrator";
+import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
 import { finalizeTask } from "../orchestrator/finalize";
 import { log } from "../log";
 
@@ -271,6 +271,14 @@ tasks.get("/:id/transcript", async (c) => {
     log.warn("api.tasks.transcript.failed", { id, error: String(err) });
     return c.json({ session_id: task.last_session_id, messages: [], error: String(err) }, 200);
   }
+});
+
+tasks.post("/:id/force-complete", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  log.info("api.tasks.force_complete", { id });
+  await forceComplete(id);
+  return c.json({ ok: true });
 });
 
 tasks.post("/:id/cancel", async (c) => {

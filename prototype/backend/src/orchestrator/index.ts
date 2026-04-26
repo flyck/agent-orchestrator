@@ -447,3 +447,30 @@ export async function sendUserMessage(taskId: string, text: string): Promise<voi
   log.info("orchestrator.user_message", { taskId, len: text.length });
   await a.session.send(text);
 }
+
+/**
+ * Force-terminate a stuck run. Called when the pump is wedged waiting for
+ * a session.idle/error that never arrived (bus drop during a long tool
+ * call, opencode crash, etc). Closes the session — which closes the
+ * EventQueue — which lets the for-await exit cleanly with terminal=null,
+ * and the pump's finally then marks the task canceled so the user can
+ * see honest state instead of "running forever."
+ */
+export async function forceComplete(taskId: string): Promise<void> {
+  const a = active.get(taskId);
+  if (!a) {
+    log.info("orchestrator.force_complete.not_active", { taskId });
+    // If not in active map, just stamp the task done in DB so the UI clears.
+    updateTaskStatus(taskId, "done", "ready");
+    return;
+  }
+  log.info("orchestrator.force_complete.requested", { taskId });
+  try {
+    await a.session.close(); // unsubscribes from bus → queue closes → pump exits
+  } catch (e) {
+    log.warn("orchestrator.force_complete.close_failed", { taskId, error: String(e) });
+  }
+  // The pump's finally maps terminal=null to canceled; bump it to done so
+  // the user sees a clean "ready for review" instead of "canceled".
+  updateTaskStatus(taskId, "done", "ready");
+}

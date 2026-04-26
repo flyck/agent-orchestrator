@@ -96,18 +96,27 @@
                 }
               </div>
               <div class="task-title">{{ vt.raw.title }}</div>
-              @if (vt.raw.step_label && vt.raw.total_steps) {
-                <div class="step-label meta">
-                  step {{ vt.raw.current_step ?? 0 }}/{{ vt.raw.total_steps }} ·
-                  {{ vt.raw.step_label }}
-                </div>
-              }
-              <div class="progress">
+
+              <!-- step / total — explicit so the bar isn't the only signal.
+                   0/0 means the agent hasn't picked a plan yet ("discovering"). -->
+              <div class="step-line">
+                <span class="step-counts mono">{{ vt.step }}/{{ vt.total }}</span>
+                @if (vt.hasReportedProgress && vt.raw.step_label) {
+                  <span class="step-label meta">{{ vt.raw.step_label }}</span>
+                } @else if (vt.status === 'open') {
+                  <span class="step-label meta">discovering…</span>
+                }
+              </div>
+
+              <div class="progress" [class.empty]="!vt.hasReportedProgress && vt.status === 'open'">
                 <div class="progress-fill" [style.width.%]="vt.progress * 100"></div>
               </div>
-              @if (vt.worktreePath) {
-                <div class="task-foot mono">{{ vt.worktreePath }}</div>
-              }
+
+              <!-- Per-stage timer (replaces the noisy worktree path; that's
+                   in the Files tab). Live ticking via nowTick. -->
+              <div class="task-foot meta">
+                {{ secondsInState(vt) }} in {{ stateLabels[vt.state] }}
+              </div>
             </button>
           }
         }
@@ -126,6 +135,12 @@
         <h2>{{ sel.raw.title }}</h2>
       </div>
       <div class="detail-actions">
+        @if (sel.raw.status === 'running') {
+          <button class="detail-force" type="button" (click)="forceCompleteSelectedTask()"
+                  title="Mark as ready — use when the run is wedged but you can see the diff is correct">
+            force complete
+          </button>
+        }
         <button class="detail-delete" type="button" (click)="deleteSelectedTask()" title="Delete this task">delete</button>
         <button class="detail-close" type="button" (click)="closeDetail()">close</button>
       </div>
@@ -144,9 +159,9 @@
     }
 
     <div class="detail-meta">
-      @if (sel.worktreePath) {
+      @if (sel.raw.worktree_path) {
         <span class="meta">worktree</span>
-        <code class="mono">{{ sel.worktreePath }}</code>
+        <code class="mono">{{ sel.raw.worktree_path }}</code>
       } @else {
         <span class="meta">working tree</span>
         <code class="mono">repo root</code>
@@ -308,9 +323,9 @@
     <!-- ═══ Files tab ══════════════════════════════════════════════ -->
     @if (detailTab() === 'files') {
       <div class="detail-meta">
-        @if (sel.worktreePath) {
+        @if (sel.raw.worktree_path) {
           <span class="meta">worktree</span>
-          <code class="mono">{{ sel.worktreePath }}</code>
+          <code class="mono">{{ sel.raw.worktree_path }}</code>
         } @else {
           <span class="meta">working tree</span>
           <code class="mono">repo root</code>
