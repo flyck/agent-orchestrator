@@ -1,44 +1,42 @@
-<!-- ─── Manual-coding nudge ─────────────────────────────────────────────── -->
-@if (nudgeVisible()) {
-  <aside class="nudge">
-    <p class="meta">friendly reminder · per the manifesto</p>
-    <p class="nudge-body">
-      Code something manually today. The orchestrator is fast; staying sharp is faster than getting
-      sharp again. Skill atrophy is the real cost of agent-assisted work, not tokens.
-    </p>
-    <button class="nudge-dismiss" type="button" (click)="dismissNudge()">Dismiss for now</button>
-  </aside>
-}
+<!-- ─── Top row: nudge + usage chart, 50/50 split ───────────────────────── -->
+<section class="top-row">
+  @if (nudgeVisible()) {
+    <aside class="nudge">
+      <p class="meta">friendly reminder · per the manifesto</p>
+      <p class="nudge-body">
+        Code something manually today. The orchestrator is fast; staying sharp is faster than getting
+        sharp again. Skill atrophy is the real cost of agent-assisted work, not tokens.
+      </p>
+      <button class="nudge-dismiss" type="button" (click)="dismissNudge()">Dismiss for now</button>
+    </aside>
+  }
 
-<!-- ─── Token usage ─────────────────────────────────────────────────────── -->
-<section class="block usage">
-  <header class="block-head">
-    <div>
-      <p class="meta">spend</p>
-      <h2>Token usage by provider</h2>
+  <section class="block usage">
+    <header class="block-head">
+      <div>
+        <p class="meta">spend · last 7 days</p>
+        <h2>Token usage by provider</h2>
+      </div>
+    </header>
+
+    <div class="chart-wrap">
+      @let opts = usageOptions();
+      <apx-chart
+        [chart]="opts.chart!"
+        [series]="opts.series!"
+        [noData]="opts.noData!"
+        [stroke]="opts.stroke!"
+        [markers]="opts.markers!"
+        [grid]="opts.grid!"
+        [xaxis]="opts.xaxis!"
+        [yaxis]="opts.yaxis!"
+        [legend]="opts.legend!"
+        [colors]="opts.colors!"
+        [tooltip]="opts.tooltip!"
+        [dataLabels]="opts.dataLabels!"
+      />
     </div>
-    <p class="muted small">
-      A line per provider where you have credentials. Empty until tasks run and the engine adapter
-      records cost rows.
-    </p>
-  </header>
-
-  <div class="chart-wrap">
-    <apx-chart
-      [chart]="usageOptions.chart!"
-      [series]="usageOptions.series!"
-      [noData]="usageOptions.noData!"
-      [stroke]="usageOptions.stroke!"
-      [markers]="usageOptions.markers!"
-      [grid]="usageOptions.grid!"
-      [xaxis]="usageOptions.xaxis!"
-      [yaxis]="usageOptions.yaxis!"
-      [legend]="usageOptions.legend!"
-      [colors]="usageOptions.colors!"
-      [tooltip]="usageOptions.tooltip!"
-      [dataLabels]="usageOptions.dataLabels!"
-    />
-  </div>
+  </section>
 </section>
 
 <!-- ─── Active tasks (pipeline) ─────────────────────────────────────────── -->
@@ -50,6 +48,9 @@
     </div>
     <div class="pipeline-controls">
       <span class="meta">{{ openCount() }} open · {{ closedCount() }} closed</span>
+      @if (tasksError()) {
+        <span class="meta error">backend error: {{ tasksError() }}</span>
+      }
       <label class="toggle">
         <input type="checkbox" [checked]="showClosed()" (change)="toggleClosed()" />
         <span>show closed</span>
@@ -71,28 +72,28 @@
             <span class="meta">no tasks</span>
           </div>
         } @else {
-          @for (task of tasksByState()[state]; track task.id) {
+          @for (vt of tasksByState()[state]; track vt.raw.id) {
             <button class="task-card"
-                    [class.attention]="task.needsAttention"
-                    [class.closed]="task.status === 'closed'"
-                    [class.selected]="selectedId() === task.id"
-                    (click)="selectTask(task.id)">
+                    [class.attention]="vt.needsAttention"
+                    [class.closed]="vt.status === 'closed'"
+                    [class.selected]="selectedId() === vt.raw.id"
+                    (click)="selectTask(vt.raw.id)">
               <div class="task-card-head">
-                <span class="kind">{{ kindLabels[task.kind] }}</span>
-                @if (task.needsAttention) {
+                <span class="kind">{{ kindLabels[vt.kind] }}</span>
+                @if (vt.needsAttention) {
                   <span class="dot waiting" title="agent needs your input"></span>
-                } @else if (task.status === 'closed') {
+                } @else if (vt.status === 'closed') {
                   <span class="dot done"></span>
                 } @else {
                   <span class="dot running"></span>
                 }
               </div>
-              <div class="task-title">{{ task.title }}</div>
+              <div class="task-title">{{ vt.raw.title }}</div>
               <div class="progress">
-                <div class="progress-fill" [style.width.%]="task.progress * 100"></div>
+                <div class="progress-fill" [style.width.%]="vt.progress * 100"></div>
               </div>
-              @if (task.worktreePath) {
-                <div class="task-foot mono">{{ task.worktreePath }}</div>
+              @if (vt.worktreePath) {
+                <div class="task-foot mono">{{ vt.worktreePath }}</div>
               }
             </button>
           }
@@ -108,10 +109,13 @@
   <section class="block detail" [class.attention]="sel.needsAttention">
     <header class="detail-head">
       <div>
-        <p class="meta">{{ kindLabels[sel.kind] }} · {{ stateLabels[sel.state] }}</p>
-        <h2>{{ sel.title }}</h2>
+        <p class="meta">{{ kindLabels[sel.kind] }} · {{ stateLabels[sel.state] }} · {{ sel.raw.status }}</p>
+        <h2>{{ sel.raw.title }}</h2>
       </div>
-      <button class="detail-close" type="button" (click)="closeDetail()">close</button>
+      <div class="detail-actions">
+        <button class="detail-delete" type="button" (click)="deleteSelectedTask()" title="Delete this task">delete</button>
+        <button class="detail-close" type="button" (click)="closeDetail()">close</button>
+      </div>
     </header>
 
     @if (sel.needsAttention) {
@@ -130,23 +134,52 @@
     }
 
     <div class="shell">
-      @if (sel.shellLines && sel.shellLines.length) {
-        @for (line of sel.shellLines; track $index) {
-          <div class="shell-line">{{ line }}</div>
-        }
-      } @else {
-        <div class="shell-line muted">No agent activity yet.</div>
-      }
-      <div class="shell-line muted">⏵ <em>Live agent stream wires in once the WebSocket hub lands (Phase 7).</em></div>
+      <div class="shell-line muted">id: {{ sel.raw.id }}</div>
+      <div class="shell-line muted">created: {{ sel.raw.created_at }}</div>
+      <div class="shell-line muted">⏵ <em>Live SSE stream from /api/tasks/{{ sel.raw.id }}/events lands here in the next iteration.</em></div>
     </div>
 
-    <div class="interject">
-      <input type="text"
-             [(ngModel)]="interjectionText"
-             placeholder="Type a comment to interject — Enter to send"
-             (keydown.enter)="sendInterjection()" />
-      <button type="button" class="primary" (click)="sendInterjection()">Send</button>
-    </div>
+    @if (sel.status === 'open') {
+      <div class="interject">
+        <input type="text"
+               [(ngModel)]="interjectionText"
+               placeholder="Type a comment to interject — Enter to send"
+               (keydown.enter)="sendInterjection()" />
+        <button type="button" class="primary" (click)="sendInterjection()">Send</button>
+      </div>
+    }
+
+    <!-- Finalize: shown for tasks the agent has completed (status=done OR
+         current_state in {ready, finalize}). User picks commit destination. -->
+    @if (sel.raw.status === 'done' || sel.state === 'ready' || sel.state === 'finalize') {
+      <div class="finalize">
+        <p class="meta">finalize · after manual review</p>
+        <p class="muted small">
+          The agent's edits sit uncommitted in your working tree. Review the diff in your IDE, then
+          pick how to land it. Either path runs <code>git add -A</code> and <code>git commit</code>;
+          new-branch additionally creates <code>agent/&lt;name&gt;</code> first.
+        </p>
+        <div class="finalize-row">
+          <button type="button" (click)="finalizeCurrent()" [disabled]="finalizing()">
+            Commit to current branch
+          </button>
+          <span class="meta or">or</span>
+          <input type="text"
+                 placeholder="new branch name (e.g. token-usage-row)"
+                 [ngModel]="finalizeBranch()"
+                 (ngModelChange)="finalizeBranch.set($event)" />
+          <button type="button"
+                  class="primary"
+                  (click)="finalizeNew()"
+                  [disabled]="finalizing() || !finalizeBranch().trim()">
+            Commit to new branch
+          </button>
+        </div>
+        @if (finalizing()) { <p class="meta">committing…</p> }
+        @if (finalizeResult()) { <p class="finalize-ok">{{ finalizeResult() }}</p> }
+        @if (finalizeError()) { <p class="finalize-err">{{ finalizeError() }}</p> }
+      </div>
+    }
   </section>
 }
 

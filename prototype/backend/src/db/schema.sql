@@ -214,3 +214,21 @@ CREATE TABLE IF NOT EXISTS bug_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC);
+
+-- Per-(provider, model) usage events. Written when an assistant message
+-- finishes with a `cost`/`tokens` payload from opencode. Powers the home
+-- tab's usage chart and any future per-model performance drill-downs.
+CREATE TABLE IF NOT EXISTS usage_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts              INTEGER NOT NULL,
+  task_id         TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  session_id      TEXT,
+  provider_id     TEXT NOT NULL,
+  model_id        TEXT NOT NULL,
+  input_tokens    INTEGER NOT NULL DEFAULT 0,
+  output_tokens   INTEGER NOT NULL DEFAULT 0,
+  cost_usd_micros INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_ts          ON usage_events(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_provider_ts ON usage_events(provider_id, ts);

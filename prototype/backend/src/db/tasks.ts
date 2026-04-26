@@ -12,7 +12,7 @@ export type TaskStatus =
   | "failed"
   | "canceled"
   | "findings_pending";
-export type TaskState = "spec" | "plan" | "build" | "ready";
+export type TaskState = "spec" | "plan" | "build" | "ready" | "finalize";
 
 export interface TaskRow {
   id: string;
@@ -93,6 +93,11 @@ export function listTasks(
       `SELECT * FROM tasks ${whereSql} ORDER BY created_at DESC LIMIT ?`,
     )
     .all(...(params as never[]));
+}
+
+export function deleteTask(id: string, handle: Database = db()): boolean {
+  const r = handle.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  return r.changes > 0;
 }
 
 export function updateTaskStatus(

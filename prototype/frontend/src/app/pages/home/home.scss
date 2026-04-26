@@ -33,6 +33,21 @@
   }
 }
 
+.top-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: stretch;
+  border-top: 0;
+  padding: 24px 0 8px;
+  > .nudge { margin: 0; }
+  > .block { padding: 0; border-top: 0; }
+}
+
+@media (max-width: 900px) {
+  .top-row { grid-template-columns: 1fr; }
+}
+
 /* ─── Chart wrap ──────────────────────────────────────────────────────── */
 .chart-wrap {
   border: 1px solid var(--rule);
@@ -98,8 +113,14 @@
 
 .columns {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .columns { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 720px) {
+  .columns { grid-template-columns: 1fr; }
 }
 
 .column {
@@ -112,10 +133,11 @@
   gap: 10px;
   background: var(--paper);
 }
-.column[data-state='spec']  { border-top-color: var(--state-spec-edge); }
-.column[data-state='plan']  { border-top-color: var(--state-plan-edge); }
-.column[data-state='build'] { border-top-color: var(--state-build-edge); }
-.column[data-state='ready'] { border-top-color: var(--state-ready-edge); }
+.column[data-state='spec']     { border-top-color: var(--state-spec-edge); }
+.column[data-state='plan']     { border-top-color: var(--state-plan-edge); }
+.column[data-state='build']    { border-top-color: var(--state-build-edge); }
+.column[data-state='ready']    { border-top-color: var(--state-ready-edge); }
+.column[data-state='finalize'] { border-top-color: var(--rule-strong); }
 
 .column-head {
   display: flex;
@@ -159,10 +181,11 @@
   outline-offset: -1px;
 }
 
-.column[data-state='spec']  .task-card { background: var(--state-spec-bg); }
-.column[data-state='plan']  .task-card { background: var(--state-plan-bg); }
-.column[data-state='build'] .task-card { background: var(--state-build-bg); }
-.column[data-state='ready'] .task-card { background: var(--state-ready-bg); }
+.column[data-state='spec']     .task-card { background: var(--state-spec-bg); }
+.column[data-state='plan']     .task-card { background: var(--state-plan-bg); }
+.column[data-state='build']    .task-card { background: var(--state-build-bg); }
+.column[data-state='ready']    .task-card { background: var(--state-ready-bg); }
+.column[data-state='finalize'] .task-card { background: var(--paper-soft); }
 
 /* Override on attention — amber wins regardless of column */
 .task-card.attention {
@@ -232,12 +255,24 @@
   margin-bottom: 12px;
   h2 { margin: 4px 0 0; }
 }
-.detail-close {
+.detail-actions {
+  display: flex;
+  gap: 8px;
+}
+.detail-close,
+.detail-delete {
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: transparent;
   border-color: var(--rule-strong);
+}
+.detail-delete {
+  color: var(--ink-red);
+  border-color: var(--ink-red);
+}
+.detail-delete:hover {
+  background: var(--ink-red-bg);
 }
 
 .attention-note {
@@ -289,6 +324,39 @@
   gap: 8px;
   margin-top: 12px;
   input { width: 100%; }
+}
+
+/* ─── Finalize section ────────────────────────────────────────────────── */
+.finalize {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+  .small { font-size: 13px; max-width: 600px; margin: 4px 0 12px; }
+  .meta.error { color: var(--ink-red); }
+}
+.finalize-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  input { min-width: 220px; }
+  .or { padding: 0 4px; }
+}
+.finalize-ok {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+.finalize-err {
+  margin-top: 10px;
+  color: var(--ink-red);
+  font-size: 13px;
+}
+
+/* Pipeline-controls error chip */
+.pipeline-controls .meta.error {
+  color: var(--ink-red);
 }
 
 /* ─── Backlog ─────────────────────────────────────────────────────────── */

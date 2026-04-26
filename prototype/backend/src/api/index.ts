@@ -6,6 +6,7 @@ import { bugReports } from "./bug-reports";
 import { internal } from "./internal";
 import { integrations } from "./integrations";
 import { tasks } from "./tasks";
+import { cost } from "./cost";
 
 export const app = new Hono();
 
@@ -16,3 +17,4 @@ app.route("/api/bug-reports", bugReports);
 app.route("/api/internal", internal);
 app.route("/api/integrations", integrations);
 app.route("/api/tasks", tasks);
+app.route("/api/cost", cost);

@@ -39,3 +39,4 @@ logs/
 # Bun / Node
 bun.lockb
 .bun-cache/
+.claude/

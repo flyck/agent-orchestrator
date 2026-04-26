@@ -3,12 +3,14 @@ import { stream } from "hono/streaming";
 import { z } from "zod";
 import {
   createTask,
+  deleteTask,
   getTask,
   listTasks,
   type TaskWorkspace,
   type TaskStatus,
 } from "../db/tasks";
 import { addListener, sendUserMessage, startRun, cancelRun } from "../orchestrator";
+import { finalizeTask } from "../orchestrator/finalize";
 import { log } from "../log";
 
 const createSchema = z.object({
@@ -22,6 +24,12 @@ const createSchema = z.object({
 
 const messageSchema = z.object({
   text: z.string().min(1).max(20_000),
+});
+
+const finalizeSchema = z.object({
+  strategy: z.enum(["current", "new"]),
+  branch: z.string().min(1).max(80).optional(),
+  message: z.string().min(1).max(2000).optional(),
 });
 
 export const tasks = new Hono();
@@ -66,11 +74,46 @@ tasks.post("/:id/run", async (c) => {
   }
 });
 
+tasks.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+  const t = getTask(id);
+  if (!t) return c.json({ error: "not_found" }, 404);
+  // If active, abort first so the engine session releases cleanly.
+  try {
+    await cancelRun(id);
+  } catch {
+    /* not active is fine */
+  }
+  const ok = deleteTask(id);
+  log.info("api.tasks.deleted", { id, ok });
+  return c.json({ ok });
+});
+
 tasks.post("/:id/cancel", async (c) => {
   const id = c.req.param("id");
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   await cancelRun(id);
   return c.json({ ok: true });
+});
+
+tasks.post("/:id/finalize", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = finalizeSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_finalize", issues: parsed.error.issues }, 400);
+  }
+  if (parsed.data.strategy === "new" && !parsed.data.branch) {
+    return c.json({ error: "missing_branch", message: "strategy='new' requires `branch`" }, 400);
+  }
+  try {
+    const result = await finalizeTask(id, parsed.data);
+    return c.json(result);
+  } catch (err) {
+    log.error("api.tasks.finalize.failed", { id, error: String(err) });
+    return c.json({ error: "finalize_failed", message: String(err) }, 500);
+  }
 });
 
 tasks.post("/:id/messages", async (c) => {

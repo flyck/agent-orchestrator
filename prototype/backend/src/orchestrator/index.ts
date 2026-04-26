@@ -19,6 +19,7 @@ import type { EngineEvent, EngineSession } from "../engine/types";
 import { OpenCodeSession } from "../engine/opencode";
 import { getEngine } from "../engine/singleton";
 import { getTask, updateTaskStatus, type TaskRow } from "../db/tasks";
+import { recordUsageEvent } from "../db/usageEvents";
 import { log } from "../log";
 import { resolve } from "node:path";
 
@@ -138,15 +139,64 @@ export async function startRun(taskId: string): Promise<{ sessionId: string }> {
           });
         }
         if (ev.type === "session.idle") terminal = "idle";
-        // Surface any assistant-message error info too — opencode often puts
-        // model errors there rather than emitting session.error.
+        // Surface any assistant-message error info AND capture usage data
+        // when the assistant message finishes (cost + tokens are reported on
+        // message.updated for the assistant role once finish is set).
         if (ev.type === "message.updated") {
-          const info = (ev.raw as { properties?: { info?: { role?: string; error?: unknown } } }).properties?.info;
-          if (info?.role === "assistant" && info.error) {
-            log.error("orchestrator.run.assistant_error", {
-              taskId,
-              error: JSON.stringify(info.error).slice(0, 1500),
-            });
+          const info = (
+            ev.raw as {
+              properties?: {
+                info?: {
+                  role?: string;
+                  error?: unknown;
+                  finish?: string;
+                  cost?: number;
+                  tokens?: { input?: number; output?: number };
+                  modelID?: string;
+                  providerID?: string;
+                  time?: { completed?: number };
+                };
+              };
+            }
+          ).properties?.info;
+          if (info?.role === "assistant") {
+            if (info.error) {
+              log.error("orchestrator.run.assistant_error", {
+                taskId,
+                error: JSON.stringify(info.error).slice(0, 1500),
+              });
+            }
+            // Persist usage when the message completes with cost/tokens.
+            if (
+              info.finish &&
+              typeof info.cost === "number" &&
+              info.providerID &&
+              info.modelID
+            ) {
+              try {
+                recordUsageEvent({
+                  ts: info.time?.completed ?? ev.ts,
+                  task_id: taskId,
+                  session_id: ev.sessionId,
+                  provider_id: info.providerID,
+                  model_id: info.modelID,
+                  input_tokens: info.tokens?.input ?? 0,
+                  output_tokens: info.tokens?.output ?? 0,
+                  cost_usd: info.cost,
+                });
+                log.info("orchestrator.run.usage_recorded", {
+                  taskId,
+                  provider: info.providerID,
+                  model: info.modelID,
+                  cost_usd: info.cost,
+                });
+              } catch (err) {
+                log.warn("orchestrator.run.usage_record_failed", {
+                  taskId,
+                  error: String(err),
+                });
+              }
+            }
           }
         }
         for (const fn of a.listeners) {
