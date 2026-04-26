@@ -63,6 +63,11 @@ interface ActiveTask {
   /** Wall-clock of the last engine event we saw for this run. Drives
    *  the watchdog's "no events in N seconds" check. */
   lastEventTs: number;
+  /** Set when forceComplete is called. The pump's finally reads this and
+   *  uses status=done/state=ready instead of canceled — without this flag
+   *  the pump's finally and forceComplete race to write the task status,
+   *  and the loser's value sticks. */
+  forceCompleted?: boolean;
 }
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -106,7 +111,11 @@ You are an autonomous coding agent. Your working directory is \`${cwd}\`. Treat 
 
 Use the file-editing tools available to you. Keep the change scoped — touch only what the task asks for. Prefer surgical edits over rewrites.
 
-When you are done, summarize what you changed in 2-3 sentences. Do not commit; the orchestrator will commit the worktree's changes when the user clicks Finalize.`;
+# Do NOT run git
+
+Do not run \`git add\`, \`git commit\`, \`git push\`, \`git checkout\`, \`git branch\`, or any other git command. Even if your bash tool would let you. The orchestrator owns this worktree's branch and will commit your edits when the user clicks Finalize. If you commit yourself you'll create messages the user didn't write and confuse the finalize step. Just edit the files; leave them uncommitted.
+
+When you are done, summarize what you changed in 2-3 sentences. The user reviews via Finalize → Commit to current branch / new branch.`;
 }
 
 const active = new Map<string, ActiveTask>();
@@ -388,10 +397,22 @@ async function startRunInternal(
         log.warn("orchestrator.run.close_failed", { taskId, error: String(e) });
       }
       active.delete(taskId);
+      // If forceComplete was called, treat as a clean finish. Otherwise
+      // null terminal = canceled (queue closed externally), error =
+      // failed, idle = done.
+      const wasForced = a.forceCompleted === true;
       const finalStatus =
-        terminal === "error" ? "failed" : terminal === null ? "canceled" : "done";
+        terminal === "error"
+          ? "failed"
+          : wasForced
+            ? "done"
+            : terminal === null
+              ? "canceled"
+              : "done";
       const finalState =
-        terminal === "error" || terminal === null ? task.current_state : "ready";
+        terminal === "error" || (terminal === null && !wasForced)
+          ? task.current_state
+          : "ready";
       updateTaskStatus(taskId, finalStatus, finalState);
       // Tell the queue we're done so it can promote the next pending task.
       queue.release(taskId);
@@ -566,12 +587,15 @@ export async function forceComplete(taskId: string): Promise<void> {
     return;
   }
   log.info("orchestrator.force_complete.requested", { taskId });
+  // Mark BEFORE closing the session so the pump's finally (which races us
+  // because closing the session resolves the for-await iterator) sees
+  // the flag and skips writing canceled/spec.
+  a.forceCompleted = true;
   try {
     await a.session.close();
   } catch (e) {
     log.warn("orchestrator.force_complete.close_failed", { taskId, error: String(e) });
   }
-  updateTaskStatus(taskId, "done", "ready");
   // Defensive purge — the pump's finally also calls queue.release, but if
   // the pump is wedged hard enough it may not run promptly.
   queue.purge(taskId);

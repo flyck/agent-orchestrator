@@ -71,11 +71,15 @@ export async function finalizeTask(
   }
 
   // Path 2: worktree-based finalize.
-  // Step 1: commit the agent's edits inside the worktree.
+  // Step 1: commit the agent's edits inside the worktree. If the agent
+  // already committed (against orders — but the build agent's bash tool
+  // sometimes does this), commitInWorktree detects HEAD past base and
+  // succeeds with the existing SHA.
   const commitMsg = input.message ?? `${task.title}\n\n(via agent-orchestrator task ${task.id})`;
   const commit = commitInWorktree({
     worktreePath: task.worktree_path,
     message: commitMsg,
+    baseRef: task.worktree_base_ref ?? undefined,
   });
   trail.push(...commit.log);
   if (!commit.ok) {

@@ -136,7 +136,7 @@ export interface CommitInWorktreeResult {
   log: string[];
 }
 
-export function commitInWorktree(input: CommitInWorktreeInput): CommitInWorktreeResult {
+export function commitInWorktree(input: CommitInWorktreeInput & { baseRef?: string }): CommitInWorktreeResult {
   const trail: string[] = [];
   const sayRun = (label: string, r: { code: number; stdout: string; stderr: string }) => {
     const tail = (s: string) => s.trim().split("\n").slice(-3).join(" | ");
@@ -149,30 +149,57 @@ export function commitInWorktree(input: CommitInWorktreeInput): CommitInWorktree
 
   const status = git(input.worktreePath, ["status", "--porcelain"]);
   sayRun("git status --porcelain", status);
-  if (status.stdout.trim().length === 0) {
-    return { ok: false, sha: null, files: [], log: trail };
+  const dirty = status.stdout.trim().length > 0;
+
+  // Path A: dirty tree → stage + commit normally.
+  if (dirty) {
+    const add = git(input.worktreePath, ["add", "-A"]);
+    sayRun("git add -A", add);
+    const commit = git(input.worktreePath, ["commit", "-m", input.message]);
+    sayRun("git commit", commit);
+    if (commit.code !== 0) {
+      return { ok: false, sha: null, files: [], log: trail };
+    }
+    const sha = git(input.worktreePath, ["rev-parse", "HEAD"]);
+    sayRun("git rev-parse HEAD", sha);
+    const files = git(input.worktreePath, ["show", "--name-only", "--pretty=format:", "HEAD"]);
+    sayRun("git show --name-only HEAD", files);
+    return {
+      ok: true,
+      sha: sha.stdout.trim(),
+      files: files.stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean),
+      log: trail,
+    };
   }
 
-  const add = git(input.worktreePath, ["add", "-A"]);
-  sayRun("git add -A", add);
-
-  const commit = git(input.worktreePath, ["commit", "-m", input.message]);
-  sayRun("git commit", commit);
-  if (commit.code !== 0) {
-    return { ok: false, sha: null, files: [], log: trail };
+  // Path B: clean tree but the agent may have already committed (the
+  // build agent's bash tool can run `git commit` directly even though
+  // we ask it not to). Compare HEAD to base_ref; if HEAD has moved,
+  // the work is already on the agent branch — treat that as success.
+  if (input.baseRef) {
+    const sha = git(input.worktreePath, ["rev-parse", "HEAD"]);
+    sayRun("git rev-parse HEAD", sha);
+    const headSha = sha.stdout.trim();
+    if (headSha && headSha !== input.baseRef) {
+      const files = git(
+        input.worktreePath,
+        ["diff", `${input.baseRef}..HEAD`, "--name-only"],
+      );
+      sayRun(`git diff ${input.baseRef}..HEAD --name-only`, files);
+      trail.push(
+        "tree was clean but HEAD moved past base — treating agent's existing commit(s) as the change",
+      );
+      return {
+        ok: true,
+        sha: headSha,
+        files: files.stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean),
+        log: trail,
+      };
+    }
   }
 
-  const sha = git(input.worktreePath, ["rev-parse", "HEAD"]);
-  sayRun("git rev-parse HEAD", sha);
-
-  const files = git(input.worktreePath, ["show", "--name-only", "--pretty=format:", "HEAD"]);
-  sayRun("git show --name-only HEAD", files);
-  return {
-    ok: true,
-    sha: sha.stdout.trim(),
-    files: files.stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean),
-    log: trail,
-  };
+  // Truly nothing to commit.
+  return { ok: false, sha: null, files: [], log: trail };
 }
 
 /**
