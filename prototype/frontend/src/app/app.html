@@ -1,0 +1,29 @@
+@let h = health();
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◐</span>
+      <span class="brand-name">agent orchestrator</span>
+    </div>
+
+    <nav class="tabs">
+      @for (tab of tabs; track tab.path) {
+        <a class="tab" [routerLink]="tab.path" routerLinkActive="active">{{ tab.label }}</a>
+      }
+    </nav>
+
+    <div class="status">
+      @if (h?.ok) {
+        <span class="dot done"></span>
+        <span class="meta">backend ok</span>
+      } @else {
+        <span class="dot errored"></span>
+        <span class="meta">backend offline</span>
+      }
+    </div>
+  </header>
+
+  <main class="page">
+    <router-outlet />
+  </main>
+</div>

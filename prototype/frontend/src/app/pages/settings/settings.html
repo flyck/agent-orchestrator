@@ -1,0 +1,174 @@
+@let s = merged();
+
+<header class="page-head">
+  <p class="meta">workspace</p>
+  <h1>Settings</h1>
+</header>
+
+@if (loadError()) {
+  <p class="error">{{ loadError() }}</p>
+}
+
+@if (s) {
+  <section class="block">
+    <header class="block-head">
+      <h2>General</h2>
+      <p class="meta">concurrency, budgets, nudges</p>
+    </header>
+
+    <div class="grid">
+      <label>
+        <span class="label">Max parallel tasks</span>
+        <input type="number" min="1" max="16"
+               [ngModel]="s.max_parallel_tasks"
+               (ngModelChange)="setDraft('max_parallel_tasks', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Max agents per task</span>
+        <input type="number" min="1" max="16"
+               [ngModel]="s.max_agents_per_task"
+               (ngModelChange)="setDraft('max_agents_per_task', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Max parallel background agents</span>
+        <input type="number" min="1" max="8"
+               [ngModel]="s.max_parallel_background_agents"
+               (ngModelChange)="setDraft('max_parallel_background_agents', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Daily token budget (USD)</span>
+        <input type="number" min="0" step="0.5" placeholder="—"
+               [ngModel]="s.daily_token_budget_usd"
+               (ngModelChange)="setDraft('daily_token_budget_usd', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Manual coding nudge after N tasks</span>
+        <input type="number" min="0"
+               [ngModel]="s.manual_coding_nudge_after_n_tasks"
+               (ngModelChange)="setDraft('manual_coding_nudge_after_n_tasks', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Engine</span>
+        <input type="text" [value]="s.engine" disabled />
+      </label>
+    </div>
+  </section>
+
+  <section class="block">
+    <header class="block-head">
+      <h2>Repo context &amp; skills</h2>
+      <p class="meta">what agents read at task start</p>
+    </header>
+
+    <div class="grid">
+      <label class="check">
+        <input type="checkbox"
+               [ngModel]="s.repo_context_enabled"
+               (ngModelChange)="setDraft('repo_context_enabled', $event)" />
+        <span>Auto-read repo README, BACKLOG, CONTRIBUTING on task creation</span>
+      </label>
+
+      <label>
+        <span class="label">Skills directory</span>
+        <input type="text" placeholder="/path/to/skills"
+               [ngModel]="s.skills_directory"
+               (ngModelChange)="setDraft('skills_directory', $event)" />
+      </label>
+
+      <label>
+        <span class="label">README token budget</span>
+        <input type="number" min="0"
+               [ngModel]="s.readme_token_budget"
+               (ngModelChange)="setDraft('readme_token_budget', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Backlog token budget</span>
+        <input type="number" min="0"
+               [ngModel]="s.backlog_token_budget"
+               (ngModelChange)="setDraft('backlog_token_budget', $event)" />
+      </label>
+    </div>
+  </section>
+
+  <section class="block">
+    <header class="block-head">
+      <h2>Worktrees &amp; IDE</h2>
+      <p class="meta">where agent changes live</p>
+    </header>
+
+    <div class="grid">
+      <label>
+        <span class="label">Worktree root</span>
+        <input type="text" placeholder="~/.local/share/agent-orchestrator/worktrees"
+               [ngModel]="s.worktree_root"
+               (ngModelChange)="setDraft('worktree_root', $event)" />
+      </label>
+
+      <label>
+        <span class="label">Worktree max age (days)</span>
+        <input type="number" min="0"
+               [ngModel]="s.worktree_max_age_days"
+               (ngModelChange)="setDraft('worktree_max_age_days', $event)" />
+      </label>
+
+      <label>
+        <span class="label">IDE open command</span>
+        <input type="text" placeholder="$EDITOR or e.g. code"
+               [ngModel]="s.ide_open_command"
+               (ngModelChange)="setDraft('ide_open_command', $event)" />
+      </label>
+    </div>
+  </section>
+
+  <div class="actions">
+    @if (savingMessage()) {
+      <span class="meta">{{ savingMessage() }}</span>
+    }
+    <button (click)="discard()" [disabled]="!hasUnsaved()">Discard</button>
+    <button class="primary" (click)="save()" [disabled]="!hasUnsaved()">Save</button>
+  </div>
+
+  <section class="block">
+    <header class="block-head">
+      <h2>Agents</h2>
+      <p class="meta">{{ agents().length }} loaded · prompts in <code>agents/builtin/</code></p>
+    </header>
+
+    @if (agents().length === 0) {
+      <p class="muted">No agents synced yet.</p>
+    } @else {
+      <ul class="agent-list">
+        @for (a of agents(); track a.id) {
+          <li class="agent">
+            <div class="agent-head">
+              <span class="dot" [class.done]="a.enabled" [class.pending]="!a.enabled"></span>
+              <span class="agent-name">{{ a.name }}</span>
+              <span class="agent-tags meta">
+                {{ a.role }}
+                @if (a.is_builtin) { · builtin }
+                · {{ a.concurrency_class }}
+                @if (a.enabled) { · enabled } @else { · disabled }
+              </span>
+            </div>
+            <div class="agent-meta meta">
+              <code>{{ a.slug }}</code>
+              · icon <code>{{ a.icon }}</code>
+              · hash <code>{{ a.prompt_hash.slice(0, 8) }}</code>
+            </div>
+            <div class="agent-path mono">{{ a.file_path }}</div>
+          </li>
+        }
+      </ul>
+      <p class="muted small">
+        Edit any prompt by opening its file in your editor (the path above) — the
+        backend re-syncs on restart. UI editing lands in Phase 10.
+      </p>
+    }
+  </section>
+}
