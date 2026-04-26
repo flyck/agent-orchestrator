@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.bun/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.angular/
+.next/
+.turbo/
+
+# Local data
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Worktrees (per-task agent worktrees live outside the repo by default,
+# but keep this in case the user configures the worktree root inside)
+.worktrees/
+
+# Logs
+*.log
+logs/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Bun / Node
+bun.lockb
+.bun-cache/
