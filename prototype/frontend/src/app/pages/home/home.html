@@ -2,11 +2,13 @@
 <section class="top-row">
   @if (nudgeVisible()) {
     <aside class="nudge">
-      <p class="meta">friendly reminder · per the manifesto</p>
-      <p class="nudge-body">
-        Code something manually today. The orchestrator is fast; staying sharp is faster than getting
-        sharp again. Skill atrophy is the real cost of agent-assisted work, not tokens.
-      </p>
+      <div class="nudge-text">
+        <p class="meta">friendly reminder · per the manifesto</p>
+        <p class="nudge-body">
+          Code something manually today. The orchestrator is fast; staying sharp is faster than getting
+          sharp again. Skill atrophy is the real cost of agent-assisted work, not tokens.
+        </p>
+      </div>
       <button class="nudge-dismiss" type="button" (click)="dismissNudge()">Dismiss for now</button>
     </aside>
   }

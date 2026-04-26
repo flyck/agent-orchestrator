@@ -16,31 +16,41 @@
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 12px;
-  .meta { margin: 0; }
-  .nudge-body {
-    font-family: var(--font-serif);
-    font-size: 14px;
-    line-height: 1.35;
-    margin: 2px 0 0;
-    color: var(--ink);
-    max-width: 720px;
-  }
-  .nudge-dismiss {
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    background: var(--paper);
-    justify-self: end;
-    align-self: center;
-    padding: 6px 10px;
-  }
+  /* Two children only: text wrapper (1fr, left) + dismiss (auto, right).
+     Previously had three children with no explicit grid placement, which
+     left the dismiss button in row 2 col 1 (bottom-left). */
+}
+.nudge-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.nudge .meta { margin: 0; }
+.nudge-body {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.35;
+  margin: 0;
+  color: var(--ink);
+  max-width: 720px;
+}
+.nudge-dismiss {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--paper);
+  padding: 6px 10px;
+  align-self: center;
 }
 
 .top-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
-  align-items: stretch;
+  /* Don't stretch the nudge to chart height — each cell takes its
+     natural size, both pinned at the top of the row. */
+  align-items: start;
   border-top: 0;
   padding: 24px 0 8px;
   > .nudge { margin: 0; }

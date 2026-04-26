@@ -52,6 +52,10 @@ function* walkMarkdown(root: string): Generator<string> {
     return; // root doesn't exist — fine, custom/ may be missing on first run
   }
   for (const e of entries) {
+    // Skip directories prefixed with `_` (convention for shared / internal
+    // resources like _shared/systemprompt.md which is a prompt template,
+    // not an agent definition). Avoids the "missing frontmatter" sync error.
+    if (e.name.startsWith("_")) continue;
     const p = join(root, e.name);
     if (e.isDirectory()) {
       yield* walkMarkdown(p);

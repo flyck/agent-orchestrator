@@ -29,7 +29,23 @@ function defaultModelFromSettings(): ModelRef {
 }
 
 export async function getEngine(): Promise<OpenCodeAdapter> {
-  if (_engine) return _engine;
+  // If we have a cached adapter, verify the underlying opencode-serve is
+  // still reachable. The dev workflow (bun --hot, terminal cleanup,
+  // crashes, etc) can leave the singleton holding a reference to a dead
+  // child process — every subsequent fetch then errors with Bun's
+  // "Unable to connect" message and the user has to restart manually.
+  // Respawn on first failed health check so recovery is automatic.
+  if (_engine) {
+    if (await _engine.health()) return _engine;
+    log.warn("engine.health.failed_respawning");
+    try {
+      await _engine.shutdown();
+    } catch (e) {
+      log.warn("engine.shutdown.failed", { error: String(e) });
+    }
+    _engine = null;
+    _starting = null;
+  }
   if (_starting) return _starting;
   log.info("engine.start.requested");
   _starting = (async () => {
