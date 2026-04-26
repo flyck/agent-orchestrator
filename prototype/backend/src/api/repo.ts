@@ -195,8 +195,12 @@ repo.post("/open", async (c) => {
 
   const requested = parsed.data.path?.length ? parsed.data.path : root;
   const target = requested.startsWith("/") ? requested : join(root, requested);
-  if (!target.startsWith(root)) {
-    return c.json({ error: "path_outside_repo" }, 400);
+  // Accept either: paths inside the parent repo, or paths under the
+  // configured worktree root (where per-task worktrees live).
+  const { resolveWorktreeRoot } = await import("../orchestrator/worktree");
+  const worktreeRoot = resolveWorktreeRoot();
+  if (!target.startsWith(root) && !target.startsWith(worktreeRoot)) {
+    return c.json({ error: "path_outside_repo_or_worktree" }, 400);
   }
 
   // {path} placeholder: substitute everywhere it appears. If no placeholder,

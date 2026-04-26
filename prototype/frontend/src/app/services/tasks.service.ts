@@ -110,6 +110,28 @@ export class TasksService {
     );
   }
 
+  diff(id: string): Observable<{
+    repo_root: string;
+    base: string;
+    base_resolved: boolean;
+    branch?: string | null;
+    files: Array<{ path: string; status: string; added: number; deleted: number }>;
+    patch: string;
+    truncated: boolean;
+    fetched_at: number;
+  }> {
+    return this.http.get(`/api/tasks/${id}/diff`) as Observable<{
+      repo_root: string;
+      base: string;
+      base_resolved: boolean;
+      branch?: string | null;
+      files: Array<{ path: string; status: string; added: number; deleted: number }>;
+      patch: string;
+      truncated: boolean;
+      fetched_at: number;
+    }>;
+  }
+
   sendMessage(id: string, text: string): Observable<{ ok: boolean }> {
     return this.http.post<{ ok: boolean }>(`/api/tasks/${id}/messages`, { text });
   }

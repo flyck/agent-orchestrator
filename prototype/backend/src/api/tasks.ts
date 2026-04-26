@@ -13,6 +13,7 @@ import {
   type TaskStatus,
 } from "../db/tasks";
 import { getEngine } from "../engine/singleton";
+import { spawnSync } from "node:child_process";
 import { addListener, sendUserMessage, startRun, cancelRun } from "../orchestrator";
 import { finalizeTask } from "../orchestrator/finalize";
 import { log } from "../log";
@@ -172,6 +173,82 @@ tasks.post("/:id/clear-feedback", async (c) => {
   const id = c.req.param("id");
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json(clearNeedsFeedback(id));
+});
+
+/**
+ * Task-scoped diff. Runs git in the task's worktree if it has one; falls
+ * back to the parent repo otherwise (for tasks created before worktrees
+ * were wired). Diff is base-scoped: working tree vs the captured base SHA.
+ */
+tasks.get("/:id/diff", (c) => {
+  const id = c.req.param("id");
+  const task = getTask(id);
+  if (!task) return c.json({ error: "not_found" }, 404);
+
+  const cwd = task.worktree_path;
+  if (!cwd) {
+    return c.json(
+      {
+        error: "no_worktree",
+        message:
+          "This task predates per-task worktrees. Send Back will create one on the next run.",
+      },
+      400,
+    );
+  }
+
+  const base = task.worktree_base_ref ?? "HEAD";
+  const run = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
+
+  // File list: status (uncommitted in worktree) ∪ what's been committed
+  // since the base on the worktree branch.
+  const statusRes = run(["status", "--porcelain"]);
+  const map = new Map<string, { path: string; status: string; added: number; deleted: number }>();
+  for (const line of statusRes.stdout.split("\n")) {
+    if (!line) continue;
+    const path = line.slice(3);
+    map.set(path, { path, status: line.slice(0, 2), added: 0, deleted: 0 });
+  }
+  if (base !== "HEAD") {
+    const since = run(["diff", `${base}..HEAD`, "--name-status"]);
+    for (const line of since.stdout.split("\n")) {
+      const m = line.match(/^([A-Z])\s+(.+)$/);
+      if (!m) continue;
+      const [, code, p] = m;
+      if (!map.has(p!)) map.set(p!, { path: p!, status: `${code} `, added: 0, deleted: 0 });
+    }
+  }
+  const numstat = run(["diff", base, "--numstat"]);
+  for (const line of numstat.stdout.split("\n")) {
+    const m = line.match(/^(\d+|-)\s+(\d+|-)\s+(.+)$/);
+    if (!m) continue;
+    const [, addStr, delStr, p] = m;
+    const e = map.get(p!) ?? { path: p!, status: "  ", added: 0, deleted: 0 };
+    e.added = addStr === "-" ? 0 : Number(addStr);
+    e.deleted = delStr === "-" ? 0 : Number(delStr);
+    map.set(p!, e);
+  }
+  const files = [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+
+  const patchRes = run(["diff", base, "--no-color"]);
+  const MAX = 400_000;
+  let patch = patchRes.stdout;
+  let truncated = false;
+  if (patch.length > MAX) {
+    patch = patch.slice(0, MAX) + "\n\n…[truncated — diff too large]";
+    truncated = true;
+  }
+
+  return c.json({
+    repo_root: cwd,
+    base,
+    base_resolved: true,
+    branch: task.worktree_branch,
+    files,
+    patch,
+    truncated,
+    fetched_at: Date.now(),
+  });
 });
 
 /**

@@ -146,6 +146,19 @@ export function setLastSessionId(id: string, sessionId: string, handle: Database
     .run(sessionId, Date.now(), id);
 }
 
+export function setWorktree(
+  id: string,
+  fields: { path: string; branch: string; baseRef: string },
+  handle: Database = db(),
+): void {
+  handle
+    .prepare(
+      `UPDATE tasks SET worktree_path = ?, worktree_branch = ?, worktree_base_ref = ?,
+       updated_at = ? WHERE id = ?`,
+    )
+    .run(fields.path, fields.branch, fields.baseRef, Date.now(), id);
+}
+
 export function setTaskProgress(
   id: string,
   patch: ProgressInput,

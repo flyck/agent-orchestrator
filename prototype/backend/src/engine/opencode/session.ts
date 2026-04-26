@@ -20,6 +20,8 @@ export interface OpenCodeSessionInternal {
   defaultSystem: string;
   /** Default model — required for OpenAI/Anthropic providers. */
   defaultModel: ModelRef;
+  /** Optional working dir; passed as `directory` query on each call. */
+  cwd?: string;
 }
 
 /**
@@ -56,7 +58,10 @@ export class OpenCodeSession implements EngineSession {
     };
     const system = opts.system ?? this.internal.defaultSystem;
     if (system) body.system = system;
-    await this.client.postJson(`/session/${this.internal.id}/prompt_async`, body);
+    const url = this.internal.cwd
+      ? `/session/${this.internal.id}/prompt_async?directory=${encodeURIComponent(this.internal.cwd)}`
+      : `/session/${this.internal.id}/prompt_async`;
+    await this.client.postJson(url, body);
   }
 
   async cancel(): Promise<void> {
@@ -109,14 +114,19 @@ export class OpenCodeSession implements EngineSession {
 
 export async function createSession(
   client: OpenCodeClient,
-  spec: { title?: string; defaultSystem: string; defaultModel: ModelRef },
+  spec: { title?: string; defaultSystem: string; defaultModel: ModelRef; cwd?: string },
   bus: EventBus,
 ): Promise<OpenCodeSession> {
   // Auto-allow all permissions for orchestrator-driven sessions. The user
   // already authorized this work by creating the task; opencode's per-tool
   // permission gates would otherwise block tool use silently. If we ever
   // want a stricter mode, this becomes an opt-in toggle in OpenSessionSpec.
-  const created = (await client.postJson<CreateSessionResponse>("/session", {
+  // The `directory` query param tells opencode which dir to run the
+  // session against — that's how each task's worktree gets isolated.
+  const path = spec.cwd
+    ? `/session?directory=${encodeURIComponent(spec.cwd)}`
+    : "/session";
+  const created = (await client.postJson<CreateSessionResponse>(path, {
     title: spec.title,
     permission: [{ permission: "*", pattern: "*", action: "allow" }],
   })) as CreateSessionResponse;
@@ -128,6 +138,7 @@ export async function createSession(
       id: created.id,
       defaultSystem: spec.defaultSystem,
       defaultModel: spec.defaultModel,
+      cwd: spec.cwd,
     },
     client,
     bus,

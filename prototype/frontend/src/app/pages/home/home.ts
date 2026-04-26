@@ -518,6 +518,38 @@ export class HomePage {
       cs && cs.series.length > 0
         ? cs.series.map((s) => ({ name: s.provider_id, data: s.data as number[][] }))
         : []; // empty triggers noData
+
+    // Determine x-axis min/max from server range if available, otherwise
+    // derive from the selected range.
+    const xaxis: any = {
+      type: 'datetime',
+      axisBorder: { color: '#D8D6CF' },
+      axisTicks: { color: '#D8D6CF' },
+      labels: { style: { fontSize: '10px' } },
+    };
+
+    if (cs && Number.isFinite(cs.range?.from) && Number.isFinite(cs.range?.to)) {
+      const from = cs.range!.from!;
+      const to = cs.range!.to!;
+      xaxis.min = from;
+      xaxis.max = to > from ? to - 1 : to;
+    } else {
+      const now = Date.now();
+      const sel = this.selectedRange();
+      if (sel === 'today') {
+        const start = new Date();
+        start.setUTCHours(0, 0, 0, 0);
+        xaxis.min = start.getTime();
+        xaxis.max = now;
+      } else if (sel === '7d') {
+        xaxis.min = now - 7 * 24 * 60 * 60 * 1000;
+        xaxis.max = now;
+      } else {
+        xaxis.min = now - 30 * 24 * 60 * 60 * 1000;
+        xaxis.max = now;
+      }
+    }
+
     return {
       chart: {
         type: 'line',
@@ -545,12 +577,7 @@ export class HomePage {
         strokeDashArray: 3,
         xaxis: { lines: { show: false } },
       },
-      xaxis: {
-        type: 'datetime',
-        axisBorder: { color: '#D8D6CF' },
-        axisTicks: { color: '#D8D6CF' },
-        labels: { style: { fontSize: '10px' } },
-      },
+      xaxis,
       yaxis: {
         labels: {
           formatter: (v: number) => `$${v.toFixed(2)}`,
@@ -649,15 +676,18 @@ export class HomePage {
         }
         const from = cs.range?.from ?? 0;
         const to = cs.range?.to ?? 0;
-        const endPoint = to > from ? to - 1 : to;
         const series = cs.series.map((s) => {
-          const xs = new Set(s.data.map((p) => p[0]));
           const pts = [...s.data];
-          // Keep an endpoint if missing so the chart's X range reaches the
-          // expected end, but avoid inserting a zero at the very beginning
-          // (it creates a visible data point that confused users).
-          if (!xs.has(endPoint)) pts.push([endPoint, 0]);
           pts.sort((a, b) => a[0] - b[0]);
+
+          // Remove a leading zero datapoint that matches the period start.
+          // Some backends include an empty zero point at `from` which shows
+          // as an undesired marker at the left edge. Only drop it when it's
+          // exactly at `from` and its value is zero.
+          if (pts.length > 1 && Number.isFinite(from) && pts[0][0] === from && pts[0][1] === 0) {
+            pts.shift();
+          }
+
           return { ...s, data: pts };
         });
         this.costSummary.set({ ...cs, series });
@@ -679,25 +709,46 @@ export class HomePage {
   }
 
   refreshDiff() {
+    const sel = this.selectedTask();
+    if (!sel) return;
     this.diffLoading.set(true);
     this.diffError.set(null);
-    const sel = this.selectedTask();
-    const base = sel?.raw.worktree_base_ref ?? null;
-    this.repoApi.diff({ base }).subscribe({
+    // Prefer task-scoped diff (runs git in the task's worktree).
+    // Falls back to repo-wide diff for tasks created before worktrees.
+    this.tasksApi.diff(sel.raw.id).subscribe({
       next: (d) => {
-        this.diff.set(d);
+        this.diff.set(d as DiffResponse);
         this.diffLoading.set(false);
       },
-      error: (e) => {
-        this.diffError.set(e?.message ?? String(e));
-        this.diffLoading.set(false);
+      error: () => {
+        const base = sel.raw.worktree_base_ref ?? null;
+        this.repoApi.diff({ base }).subscribe({
+          next: (d) => {
+            this.diff.set(d);
+            this.diffLoading.set(false);
+          },
+          error: (e) => {
+            this.diffError.set(e?.message ?? String(e));
+            this.diffLoading.set(false);
+          },
+        });
       },
     });
   }
 
+  /** If the selected task has a worktree, open paths there; otherwise the
+   *  parent repo. `path` is a repo-relative file path or undefined for
+   *  the root open. */
   openInIde(path?: string) {
+    const sel = this.selectedTask();
+    const wt = sel?.raw.worktree_path;
+    const target = path
+      ? wt
+        ? `${wt}/${path}`
+        : path
+      : (wt ?? undefined);
     this.openMessage.set('opening…');
-    this.repoApi.open('ide', path).subscribe({
+    this.repoApi.open('ide', target).subscribe({
       next: (r) => this.openMessage.set(`launched ${r.cmd} ${r.target}`),
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
@@ -705,8 +756,10 @@ export class HomePage {
   }
 
   openInMagit() {
+    const sel = this.selectedTask();
+    const wt = sel?.raw.worktree_path ?? undefined;
     this.openMessage.set('opening magit…');
-    this.repoApi.open('magit').subscribe({
+    this.repoApi.open('magit', wt).subscribe({
       next: (r) => this.openMessage.set(`launched ${r.cmd} on ${r.target}`),
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),

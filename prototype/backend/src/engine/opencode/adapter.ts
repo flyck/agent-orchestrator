@@ -35,6 +35,7 @@ export class OpenCodeAdapter implements EngineAdapter {
         title: spec.title,
         defaultSystem: "",
         defaultModel: spec.model ?? this.defaultModel,
+        cwd: spec.cwd,
       },
       this.bus,
     );

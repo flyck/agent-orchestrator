@@ -24,9 +24,11 @@ import {
   setLastSessionId,
   setTaskBaseRef,
   setTaskProgress,
+  setWorktree,
   updateTaskStatus,
   type TaskRow,
 } from "../db/tasks";
+import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { recordUsageEvent } from "../db/usageEvents";
@@ -83,24 +85,24 @@ const SHARED_PROMPT_TEMPLATE = (() => {
   }
 })();
 
-function renderSharedPrompt(taskId: string): string {
+function renderSharedPrompt(taskId: string, cwd: string): string {
   return SHARED_PROMPT_TEMPLATE.replaceAll("{{TASK_ID}}", taskId)
     .replaceAll("{{BASE_URL}}", backendUrl())
-    .replaceAll("{{REPO_ROOT}}", REPO_ROOT);
+    .replaceAll("{{REPO_ROOT}}", cwd);
 }
 
-function buildSystemPrompt(taskId: string): string {
-  return `${renderSharedPrompt(taskId)}
+function buildSystemPrompt(taskId: string, cwd: string): string {
+  return `${renderSharedPrompt(taskId, cwd)}
 
 ---
 
 # Role
 
-You are an autonomous coding agent working on the \`agent-orchestrator\` repo at \`${REPO_ROOT}\`.
+You are an autonomous coding agent. Your working directory is \`${cwd}\`. Treat that path as the root of the project — read the files there to understand what kind of codebase it is (language, framework, conventions), then make the change the user is asking for.
 
-Read the user's task carefully. Use the file-editing tools available to you to make the change. Keep the change scoped — touch only what the task asks for. Prefer surgical edits over rewrites.
+Use the file-editing tools available to you. Keep the change scoped — touch only what the task asks for. Prefer surgical edits over rewrites.
 
-When you are done, summarize what you changed in 2-3 sentences. Do not commit; the user will review with \`git diff\` before deciding what to keep.`;
+When you are done, summarize what you changed in 2-3 sentences. Do not commit; the orchestrator will commit the worktree's changes when the user clicks Finalize.`;
 }
 
 const active = new Map<string, ActiveTask>();
@@ -147,18 +149,46 @@ export async function startRun(
     task.feedback_question = null;
   }
 
-  // Snapshot the repo's HEAD now so the diff endpoint can scope changes to
-  // "since this task started" — even if HEAD advances later (other tasks
-  // commit, user commits manually, etc).
-  if (!task.worktree_base_ref) {
-    const sha = captureHeadSha();
-    if (sha) {
-      setTaskBaseRef(taskId, sha);
-      task.worktree_base_ref = sha;
-      log.info("orchestrator.run.base_ref_captured", { taskId, sha: sha.slice(0, 12) });
-    } else {
-      log.warn("orchestrator.run.base_ref_missing", { taskId });
+  // ── Worktree setup ─────────────────────────────────────────────────
+  // First run: create a fresh worktree branched from the parent repo's
+  // current HEAD onto agent/<task>. Follow-up runs reuse the existing
+  // worktree so the agent picks up where it left off. The diff for the
+  // task is then naturally scoped to the worktree's branch — main can
+  // move on freely without polluting the view.
+  if (!task.worktree_path) {
+    const parentRoot = findRoot(import.meta.dir);
+    if (!parentRoot) {
+      const msg = "no .git found above backend dir — cannot create worktree";
+      log.error("orchestrator.run.worktree_no_repo", { taskId });
+      updateTaskStatus(taskId, "failed", task.current_state);
+      throw new Error(msg);
     }
+    const sha = captureHeadSha();
+    if (!sha) {
+      log.error("orchestrator.run.worktree_no_head", { taskId });
+      updateTaskStatus(taskId, "failed", task.current_state);
+      throw new Error("could not resolve parent HEAD for worktree base");
+    }
+    try {
+      const wt = createWorktree({ taskId, parentRoot, baseRef: sha });
+      setWorktree(taskId, { path: wt.path, branch: wt.branch, baseRef: wt.baseRef });
+      task.worktree_path = wt.path;
+      task.worktree_branch = wt.branch;
+      task.worktree_base_ref = wt.baseRef;
+    } catch (err) {
+      log.error("orchestrator.run.worktree_create_failed", {
+        taskId,
+        error: String(err),
+      });
+      updateTaskStatus(taskId, "failed", task.current_state);
+      throw err;
+    }
+  } else {
+    log.info("orchestrator.run.worktree_reused", {
+      taskId,
+      path: task.worktree_path,
+      branch: task.worktree_branch,
+    });
   }
 
   let engine;
@@ -175,9 +205,16 @@ export async function startRun(
 
   let session: EngineSession;
   try {
-    session = await engine.openSession({ title: task.title });
+    session = await engine.openSession({
+      title: task.title,
+      cwd: task.worktree_path ?? undefined,
+    });
     setLastSessionId(taskId, session.id);
-    log.info("orchestrator.run.session_opened", { taskId, sessionId: session.id });
+    log.info("orchestrator.run.session_opened", {
+      taskId,
+      sessionId: session.id,
+      cwd: task.worktree_path,
+    });
   } catch (err) {
     log.error("orchestrator.run.open_session_failed", {
       taskId,
@@ -348,8 +385,9 @@ export async function startRun(
   // Send the initial message AFTER setting up the active record + pump so we
   // don't lose early events.
   try {
+    const cwd = task.worktree_path ?? REPO_ROOT;
     await session.send(buildInitialMessage(task, opts.followUp), {
-      system: buildSystemPrompt(taskId),
+      system: buildSystemPrompt(taskId, cwd),
     });
     log.info("orchestrator.run.initial_message_sent", { taskId, sessionId: session.id });
   } catch (err) {
