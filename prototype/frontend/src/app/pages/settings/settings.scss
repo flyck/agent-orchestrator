@@ -55,6 +55,29 @@ label.span-2 .label code {
   font-size: 11px;
 }
 
+label.cmd-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  .cmd-input {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    button {
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+    }
+  }
+  .cmd-result {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding-top: 2px;
+  }
+  .cmd-result.error { color: var(--ink-red); }
+}
+
 .label {
   color: var(--ink-muted);
   font-size: 13px;

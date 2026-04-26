@@ -351,6 +351,7 @@ export class HomePage {
   }
 
   protected readonly hasIdeCommand = signal(false);
+  protected readonly hasEmacsCommand = signal(false);
   protected readonly hasMagitCommand = signal(false);
 
   selectTask(id: string) {
@@ -698,11 +699,12 @@ export class HomePage {
         }
       });
 
-    // Settings — one-shot for poll display + IDE/magit availability.
+    // Settings — one-shot for poll display + IDE/emacs/magit availability.
     this.settingsApi.get().subscribe({
       next: (s) => {
         this.prPollMinutes.set(s.pr_review_poll_interval_minutes);
         this.hasIdeCommand.set(!!s.ide_open_command?.trim());
+        this.hasEmacsCommand.set(!!s.emacs_open_command?.trim());
         this.hasMagitCommand.set(!!s.magit_open_command?.trim());
       },
       error: () => this.prPollMinutes.set(null),
@@ -831,6 +833,22 @@ export class HomePage {
       : (wt ?? undefined);
     this.openMessage.set('opening…');
     this.repoApi.open('ide', target).subscribe({
+      next: (r) => this.openMessage.set(`launched ${r.cmd} ${r.target}`),
+      error: (e) =>
+        this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
+    });
+  }
+
+  openInEmacs(path?: string) {
+    const sel = this.selectedTask();
+    const wt = sel?.raw.worktree_path;
+    const target = path
+      ? wt
+        ? `${wt}/${path}`
+        : path
+      : (wt ?? undefined);
+    this.openMessage.set('opening emacs…');
+    this.repoApi.open('emacs', target).subscribe({
       next: (r) => this.openMessage.set(`launched ${r.cmd} ${r.target}`),
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),

@@ -177,8 +177,17 @@
           open in IDE
         </button>
       } @else {
-        <button type="button" class="meta-action" disabled title="Set ide_open_command in Settings to enable">
+        <button type="button" class="meta-action" disabled title="Set ide_open_command in Settings → Worktrees & IDE to enable">
           open in IDE
+        </button>
+      }
+      @if (hasEmacsCommand()) {
+        <button type="button" class="meta-action" (click)="openInEmacs()" title="emacs_open_command">
+          open in emacs
+        </button>
+      } @else {
+        <button type="button" class="meta-action" disabled title="Set emacs_open_command in Settings → Worktrees & IDE to enable">
+          open in emacs
         </button>
       }
       @if (hasMagitCommand()) {
@@ -186,7 +195,7 @@
           open magit
         </button>
       } @else {
-        <button type="button" class="meta-action" disabled title="Set magit_open_command in Settings to enable">
+        <button type="button" class="meta-action" disabled title="Set magit_open_command in Settings → Worktrees & IDE to enable">
           open magit
         </button>
       }

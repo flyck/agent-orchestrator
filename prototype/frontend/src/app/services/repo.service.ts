@@ -37,7 +37,7 @@ export class RepoService {
     return this.http.get<DiffResponse>(url);
   }
 
-  open(command: 'ide' | 'magit', path?: string): Observable<OpenResponse> {
+  open(command: 'ide' | 'emacs' | 'magit', path?: string): Observable<OpenResponse> {
     return this.http.post<OpenResponse>('/api/repo/open', { command, path });
   }
 }

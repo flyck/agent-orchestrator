@@ -6,6 +6,7 @@
  * ───────────────────────────────────────────────────────────────────────── */
 
 :root {
+  /* Light (default) — paper aesthetic */
   --paper:        #FAFAF7;
   --paper-soft:   #F0EEE8;
   --ink:          #1A1A18;
@@ -32,6 +33,34 @@
   --font-serif: "Source Serif 4", "EB Garamond", Georgia, serif;
   --font-sans:  "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:  "IBM Plex Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Dark — driven by the OS preference. Inverted paper/ink ratio with the
+   same hairline structure; state tints kept low-saturation so they read
+   the same way (sand/sage/slate/tan, just darker). */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:        #16171A;
+    --paper-soft:   #1F2125;
+    --ink:          #E8E6DF;
+    --ink-muted:    #9D9A93;
+    --ink-faint:    #5C5A55;
+    --rule:         #2C2E33;
+    --rule-strong:  #44474D;
+    --ink-red:      #E69090;
+    --ink-red-bg:   #3A1F1F;
+    --ink-amber:    #E5B870;
+    --ink-amber-bg: #3A2D14;
+
+    --state-spec-bg:    #2A271D;   /* sand */
+    --state-spec-edge:  #66603F;
+    --state-plan-bg:    #1F2620;   /* sage */
+    --state-plan-edge:  #4A5A48;
+    --state-build-bg:   #1E232C;   /* slate */
+    --state-build-edge: #4A546A;
+    --state-ready-bg:   #2A2519;   /* tan */
+    --state-ready-edge: #6E5C32;
+  }
 }
 
 *, *::before, *::after { box-sizing: border-box; }

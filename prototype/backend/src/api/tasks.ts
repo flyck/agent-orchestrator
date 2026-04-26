@@ -112,13 +112,35 @@ tasks.delete("/:id", async (c) => {
   } catch {
     /* not active is fine */
   }
-  // Always purge from the in-memory queue — even if the task wasn't
-  // active in the orchestrator's pump, it may still be holding a queue
-  // slot or a pending entry. Without this the slot leaks.
+  // Purge from the in-memory queue (slot or pending) before cleanup.
   queuePurge(id);
+  // Clean up the per-task worktree + branch if any. Best-effort; failures
+  // are logged but don't block the row deletion. --force is used so any
+  // uncommitted edits are discarded — the user chose to delete the task,
+  // if they wanted the work they would have run Finalize first.
+  let worktreeCleaned = false;
+  if (t.worktree_path) {
+    try {
+      const { findRepoRoot, removeWorktree } = await import("../orchestrator/worktree");
+      const { spawnSync } = await import("node:child_process");
+      const parentRoot = findRepoRoot(import.meta.dir);
+      if (parentRoot) {
+        removeWorktree({ parentRoot, worktreePath: t.worktree_path, force: true });
+        if (t.worktree_branch) {
+          spawnSync("git", ["branch", "-D", t.worktree_branch], {
+            cwd: parentRoot,
+            encoding: "utf8",
+          });
+        }
+        worktreeCleaned = true;
+      }
+    } catch (e) {
+      log.warn("api.tasks.deleted.worktree_cleanup_failed", { id, error: String(e) });
+    }
+  }
   const ok = deleteTask(id);
-  log.info("api.tasks.deleted", { id, ok });
-  return c.json({ ok });
+  log.info("api.tasks.deleted", { id, ok, worktreeCleaned });
+  return c.json({ ok, worktreeCleaned });
 });
 
 /**

@@ -129,8 +129,9 @@ repo.get("/diff", async (c) => {
 });
 
 const openSchema = z.object({
-  /** "ide" uses ide_open_command; "magit" uses magit_open_command. */
-  command: z.enum(["ide", "magit"]).default("ide"),
+  /** "ide" uses ide_open_command; "emacs" uses emacs_open_command;
+   *  "magit" uses magit_open_command. */
+  command: z.enum(["ide", "emacs", "magit"]).default("ide"),
   /** Path passed to the command. If omitted, repo root is used. */
   path: z.string().max(1000).optional(),
 });
@@ -169,22 +170,24 @@ repo.post("/open", async (c) => {
   if (!parsed.success) return c.json({ error: "invalid_open_args" }, 400);
 
   const settings = readAllSettings();
-  const cmdline =
+  const which =
     parsed.data.command === "magit"
-      ? settings.magit_open_command?.trim()
-      : settings.ide_open_command?.trim();
-
+      ? "magit_open_command"
+      : parsed.data.command === "emacs"
+        ? "emacs_open_command"
+        : "ide_open_command";
+  const cmdline = settings[which]?.trim();
   if (!cmdline) {
-    const which =
-      parsed.data.command === "magit" ? "magit_open_command" : "ide_open_command";
+    const example =
+      parsed.data.command === "magit"
+        ? `'emacsclient --no-wait --eval (magit-status-setup-buffer "{path}")' (assumes emacs --daemon)`
+        : parsed.data.command === "emacs"
+          ? `'emacsclient --no-wait' (assumes emacs --daemon)`
+          : `'code' or 'cursor --reuse-window'`;
     return c.json(
       {
         error: "command_not_configured",
-        message:
-          `Set '${which}' in Settings → General first. ` +
-          (parsed.data.command === "magit"
-            ? `Example: 'emacsclient --no-wait --eval (magit-status-setup-buffer "{path}")' (assumes an emacs --daemon is running).`
-            : `Example: 'code' or 'cursor --reuse-window'.`),
+        message: `Set '${which}' in Settings → Worktrees & IDE first. Example: ${example}.`,
       },
       400,
     );

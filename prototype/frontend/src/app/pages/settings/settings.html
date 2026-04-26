@@ -124,22 +124,54 @@
                (ngModelChange)="setDraft('worktree_max_age_days', $event)" />
       </label>
 
-      <label>
+      <label class="span-2 cmd-row">
         <span class="label">IDE open command</span>
-        <input type="text" placeholder="e.g. code, or 'cursor --reuse-window'"
-               [ngModel]="s.ide_open_command"
-               (ngModelChange)="setDraft('ide_open_command', $event)" />
+        <div class="cmd-input">
+          <input type="text" placeholder="e.g. code, or 'cursor --reuse-window'"
+                 [ngModel]="s.ide_open_command"
+                 (ngModelChange)="setDraft('ide_open_command', $event)" />
+          <button type="button" (click)="testOpen('ide')"
+                  [disabled]="!s.ide_open_command.trim()">Test</button>
+        </div>
+        @if (testResult().command === 'ide') {
+          <span class="meta cmd-result" [class.error]="testResult().error">{{ testResult().message }}</span>
+        }
       </label>
 
-      <label class="span-2">
+      <label class="span-2 cmd-row">
+        <span class="label">
+          Emacs open command
+          <span class="meta"> · plain emacs editor; assumes <code>emacs --daemon</code></span>
+        </span>
+        <div class="cmd-input">
+          <input type="text"
+                 placeholder="emacsclient --no-wait"
+                 [ngModel]="s.emacs_open_command"
+                 (ngModelChange)="setDraft('emacs_open_command', $event)" />
+          <button type="button" (click)="testOpen('emacs')"
+                  [disabled]="!s.emacs_open_command.trim()">Test</button>
+        </div>
+        @if (testResult().command === 'emacs') {
+          <span class="meta cmd-result" [class.error]="testResult().error">{{ testResult().message }}</span>
+        }
+      </label>
+
+      <label class="span-2 cmd-row">
         <span class="label">
           Magit open command
-          <span class="meta"> · assumes <code>emacs --daemon</code> is running</span>
+          <span class="meta"> · git UI inside emacs; assumes <code>emacs --daemon</code></span>
         </span>
-        <input type="text"
-               placeholder='emacsclient --no-wait --eval (magit-status-setup-buffer "{path}")'
-               [ngModel]="s.magit_open_command"
-               (ngModelChange)="setDraft('magit_open_command', $event)" />
+        <div class="cmd-input">
+          <input type="text"
+                 placeholder='emacsclient --no-wait --eval (magit-status-setup-buffer "{path}")'
+                 [ngModel]="s.magit_open_command"
+                 (ngModelChange)="setDraft('magit_open_command', $event)" />
+          <button type="button" (click)="testOpen('magit')"
+                  [disabled]="!s.magit_open_command.trim()">Test</button>
+        </div>
+        @if (testResult().command === 'magit') {
+          <span class="meta cmd-result" [class.error]="testResult().error">{{ testResult().message }}</span>
+        }
       </label>
     </div>
   </section>
