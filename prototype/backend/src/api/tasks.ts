@@ -15,7 +15,7 @@ import {
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
-import { snapshot as queueSnapshot } from "../queue";
+import { snapshot as queueSnapshot, purge as queuePurge } from "../queue";
 import { finalizeTask } from "../orchestrator/finalize";
 import { log } from "../log";
 
@@ -112,6 +112,10 @@ tasks.delete("/:id", async (c) => {
   } catch {
     /* not active is fine */
   }
+  // Always purge from the in-memory queue — even if the task wasn't
+  // active in the orchestrator's pump, it may still be holding a queue
+  // slot or a pending entry. Without this the slot leaks.
+  queuePurge(id);
   const ok = deleteTask(id);
   log.info("api.tasks.deleted", { id, ok });
   return c.json({ ok });

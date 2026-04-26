@@ -3,6 +3,7 @@ import { db } from "./db";
 import { syncAgentsFromDisk } from "./agents/sync";
 import { installCrashHandlers, log } from "./log";
 import { bootScan as queueBootScan } from "./queue";
+import { resumeQueuedTasks, startWatchdog } from "./orchestrator";
 
 installCrashHandlers();
 
@@ -10,6 +11,7 @@ installCrashHandlers();
 db();
 
 queueBootScan();
+startWatchdog();
 
 const sync = syncAgentsFromDisk();
 log.info("agents.sync", {
@@ -26,3 +28,8 @@ const server = Bun.serve({
 });
 
 log.info("backend.listening", { url: `http://localhost:${server.port}` });
+
+// Re-submit any tasks left in `queued` status from a previous run. Done
+// after the server is listening so anything failing here doesn't block
+// the API surface from coming up.
+resumeQueuedTasks().catch((e) => log.error("backend.resume_queued.failed", { error: String(e) }));

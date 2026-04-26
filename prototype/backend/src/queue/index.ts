@@ -112,6 +112,31 @@ function dispatch(): void {
   }
 }
 
+/**
+ * Remove a task from both the active set AND the pending queue. Used by
+ * DELETE /api/tasks/:id and force-complete so the task's queue slot
+ * doesn't leak when its row is removed without a normal pump terminate.
+ * Idempotent.
+ */
+export function purge(taskId: string): void {
+  const wasActive = active.delete(taskId);
+  const beforePending = pending.length;
+  for (let i = pending.length - 1; i >= 0; i--) {
+    if (pending[i]!.taskId === taskId) pending.splice(i, 1);
+  }
+  if (wasActive || pending.length !== beforePending) {
+    log.info("queue.purge", {
+      taskId,
+      wasActive,
+      pendingRemoved: beforePending - pending.length,
+      active: active.size,
+      pending: pending.length,
+    });
+    // Slot may have freed; let the dispatcher promote the next entry.
+    dispatch();
+  }
+}
+
 export function snapshot(): {
   active: string[];
   pending: string[];
@@ -125,14 +150,16 @@ export function snapshot(): {
 }
 
 /**
- * On backend boot: any task left in `queued` status from a previous run
- * stays queued. We do NOT auto-resume it (the in-memory factory closure
- * is gone). The user can hit Send Back / Run to re-trigger. This sweeper
- * just logs the count so it's visible.
+ * On backend boot: log how many tasks were left queued from a previous
+ * run. The orchestrator's resumeQueuedTasks() then re-submits them so
+ * the dispatcher picks them back up.
  */
 export function bootScan(): void {
   const stuck = listTasks({ status: "queued" }).map((t: TaskRow) => t.id);
   if (stuck.length > 0) {
-    log.warn("queue.boot.orphaned_queued", { taskIds: stuck });
+    log.info("queue.boot.queued_at_startup", {
+      count: stuck.length,
+      taskIds: stuck,
+    });
   }
 }

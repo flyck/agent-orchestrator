@@ -60,6 +60,9 @@ interface ActiveTask {
   session: EngineSession;
   listeners: Set<(e: EngineEvent) => void>;
   pump: Promise<void>;
+  /** Wall-clock of the last engine event we saw for this run. Drives
+   *  the watchdog's "no events in N seconds" check. */
+  lastEventTs: number;
 }
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -246,6 +249,7 @@ async function startRunInternal(
     session,
     listeners: new Set(),
     pump: undefined as unknown as Promise<void>,
+    lastEventTs: Date.now(),
   };
   active.set(taskId, a);
 
@@ -258,6 +262,7 @@ async function startRunInternal(
     try {
       for await (const ev of session.events) {
         eventCount++;
+        a.lastEventTs = ev.ts;
         // Per-event progress log — keep cheap (type + count only).
         log.info("orchestrator.run.event", { taskId, n: eventCount, type: ev.type });
 
@@ -458,6 +463,87 @@ export async function cancelRun(taskId: string): Promise<void> {
   }
 }
 
+/**
+ * Watchdog: every 15s, scan active tasks. For any whose pump hasn't
+ * received an event in WATCHDOG_STALE_MS, query opencode directly to
+ * see whether the agent has actually finished. If so, force-complete
+ * so the user gets a real "ready" instead of a stuck "running".
+ *
+ * Catches the bus-drop-loses-terminal-event class of bug: opencode
+ * emitted session.idle while our SSE was reconnecting; we missed it;
+ * pump waits forever. The watchdog notices and recovers.
+ */
+const WATCHDOG_STALE_MS = 30_000;
+const WATCHDOG_INTERVAL_MS = 15_000;
+
+async function watchdogTick(): Promise<void> {
+  const now = Date.now();
+  for (const a of [...active.values()]) {
+    if (now - a.lastEventTs < WATCHDOG_STALE_MS) continue;
+    log.info("orchestrator.watchdog.checking", {
+      taskId: a.taskId,
+      sessionId: a.session.id,
+      silentMs: now - a.lastEventTs,
+    });
+    try {
+      const engine = await getEngine();
+      const messages = (await engine.getSessionMessages(a.session.id, 5)) as Array<{
+        info?: { role?: string; finish?: string; error?: unknown; cost?: number };
+      }>;
+      const last = messages.at(-1);
+      const lastInfo = last?.info;
+      if (lastInfo?.role === "assistant" && (lastInfo.finish || lastInfo.error)) {
+        log.warn("orchestrator.watchdog.recovered", {
+          taskId: a.taskId,
+          finish: lastInfo.finish,
+          hadError: !!lastInfo.error,
+        });
+        // Use the public force-complete path so the queue slot also
+        // releases and the next pending task can promote.
+        await forceComplete(a.taskId);
+      } else {
+        log.info("orchestrator.watchdog.still_working", { taskId: a.taskId });
+      }
+    } catch (err) {
+      log.warn("orchestrator.watchdog.poll_failed", {
+        taskId: a.taskId,
+        error: String(err),
+      });
+    }
+  }
+}
+
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+export function startWatchdog(): void {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => {
+    watchdogTick().catch((e) => log.error("orchestrator.watchdog.tick_failed", { error: String(e) }));
+  }, WATCHDOG_INTERVAL_MS);
+  log.info("orchestrator.watchdog.started", { intervalMs: WATCHDOG_INTERVAL_MS });
+}
+
+/**
+ * On backend boot: any task left in `queued` status from the previous
+ * run can be promoted back into the in-memory queue so the dispatcher
+ * resumes them automatically. We re-submit each via startRun, which
+ * re-routes through the queue.
+ */
+export async function resumeQueuedTasks(): Promise<void> {
+  // Imported lazily to avoid a circular dep at module init.
+  const { listTasks } = await import("../db/tasks");
+  const queued = listTasks({ status: "queued" });
+  if (queued.length === 0) return;
+  log.info("orchestrator.boot.resume_queued", { count: queued.length });
+  for (const t of queued) {
+    try {
+      await startRun(t.id);
+      log.info("orchestrator.boot.resumed", { taskId: t.id });
+    } catch (e) {
+      log.error("orchestrator.boot.resume_failed", { taskId: t.id, error: String(e) });
+    }
+  }
+}
+
 export async function sendUserMessage(taskId: string, text: string): Promise<void> {
   const a = active.get(taskId);
   if (!a) throw new Error(`task not running: ${taskId}`);
@@ -466,28 +552,27 @@ export async function sendUserMessage(taskId: string, text: string): Promise<voi
 }
 
 /**
- * Force-terminate a stuck run. Called when the pump is wedged waiting for
- * a session.idle/error that never arrived (bus drop during a long tool
- * call, opencode crash, etc). Closes the session — which closes the
- * EventQueue — which lets the for-await exit cleanly with terminal=null,
- * and the pump's finally then marks the task canceled so the user can
- * see honest state instead of "running forever."
+ * Force-terminate a stuck run. Closes the engine session (which closes
+ * the EventQueue → pump exits → pump finally calls queue.release), then
+ * stamps the task done. Also purges from the queue in case the task was
+ * a pending entry (slot would otherwise leak).
  */
 export async function forceComplete(taskId: string): Promise<void> {
   const a = active.get(taskId);
   if (!a) {
     log.info("orchestrator.force_complete.not_active", { taskId });
-    // If not in active map, just stamp the task done in DB so the UI clears.
+    queue.purge(taskId);
     updateTaskStatus(taskId, "done", "ready");
     return;
   }
   log.info("orchestrator.force_complete.requested", { taskId });
   try {
-    await a.session.close(); // unsubscribes from bus → queue closes → pump exits
+    await a.session.close();
   } catch (e) {
     log.warn("orchestrator.force_complete.close_failed", { taskId, error: String(e) });
   }
-  // The pump's finally maps terminal=null to canceled; bump it to done so
-  // the user sees a clean "ready for review" instead of "canceled".
   updateTaskStatus(taskId, "done", "ready");
+  // Defensive purge — the pump's finally also calls queue.release, but if
+  // the pump is wedged hard enough it may not run promptly.
+  queue.purge(taskId);
 }
