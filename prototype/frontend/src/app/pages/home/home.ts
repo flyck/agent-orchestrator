@@ -590,6 +590,14 @@ export class HomePage {
   protected readonly costSummary = signal<CostSummary | null>(null);
   protected readonly costLoading = signal(true);
 
+  // Mirrors the OS-level prefers-color-scheme so the ApexChart palette
+  // tracks the rest of the page (which uses CSS @media). Apex doesn't
+  // read CSS variables, so we feed it explicit colors per scheme.
+  protected readonly darkMode = signal(
+    typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-color-scheme: dark)').matches === true,
+  );
+
   // Selected range for the usage chart. Possible values: 'today', '7d', '30d'
   protected readonly selectedRange = signal<'today' | '7d' | '30d'>('today');
   private readonly rangeChanged = new Subject<void>();
@@ -600,6 +608,15 @@ export class HomePage {
 
   protected readonly usageOptions = computed<ApexOptions>(() => {
     const cs = this.costSummary();
+    const dark = this.darkMode();
+    // Palette mirrors the CSS variables in styles.scss for both schemes.
+    const ink = dark ? '#E8E6DF' : '#1A1A18';
+    const inkMuted = dark ? '#9D9A93' : '#6E6E69';
+    const inkFaint = dark ? '#5C5A55' : '#A3A19A';
+    const rule = dark ? '#2C2E33' : '#D8D6CF';
+    const seriesColors = dark
+      ? ['#E8E6DF', '#9D9A93', '#E5B870', '#E69090']
+      : ['#1A1A18', '#6E6E69', '#A66A1F', '#8B1E1E'];
     const series =
       cs && cs.series.length > 0
         ? cs.series.map((s) => ({ name: s.provider_id, data: s.data as number[][] }))
@@ -609,8 +626,8 @@ export class HomePage {
     // derive from the selected range.
     const xaxis: any = {
       type: 'datetime',
-      axisBorder: { color: '#D8D6CF' },
-      axisTicks: { color: '#D8D6CF' },
+      axisBorder: { color: rule },
+      axisTicks: { color: rule },
       labels: { style: { fontSize: '10px' } },
     };
 
@@ -642,7 +659,7 @@ export class HomePage {
         height: 200,
         toolbar: { show: false },
         zoom: { enabled: false },
-        foreColor: '#6E6E69',
+        foreColor: inkMuted,
         fontFamily: 'Inter, system-ui, sans-serif',
         animations: { enabled: false },
         background: 'transparent',
@@ -654,12 +671,12 @@ export class HomePage {
           : 'Loading…',
         align: 'center',
         verticalAlign: 'middle',
-        style: { color: '#A3A19A', fontSize: '11px', fontFamily: 'Inter, sans-serif' },
+        style: { color: inkFaint, fontSize: '11px', fontFamily: 'Inter, sans-serif' },
       },
       stroke: { curve: 'straight', width: 1.5 },
       markers: { size: 3, strokeWidth: 0, hover: { size: 4 } },
       grid: {
-        borderColor: '#D8D6CF',
+        borderColor: rule,
         strokeDashArray: 3,
         xaxis: { lines: { show: false } },
       },
@@ -677,13 +694,13 @@ export class HomePage {
         fontFamily: 'Inter, sans-serif',
         position: 'top',
         horizontalAlign: 'right',
-        labels: { colors: '#1A1A18' },
+        labels: { colors: ink },
         markers: { strokeWidth: 0, size: 8 },
         itemMargin: { horizontal: 12, vertical: 0 },
       },
-      colors: ['#1A1A18', '#6E6E69', '#A66A1F', '#8B1E1E'],
+      colors: seriesColors,
       tooltip: {
-        theme: 'light',
+        theme: dark ? 'dark' : 'light',
         x: { format: 'MMM dd' },
         y: { formatter: (v: number) => `$${v.toFixed(4)}` },
       },
@@ -737,6 +754,16 @@ export class HomePage {
     timer(0, 1000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => this.nowTick.set(Date.now()));
+
+    // Track OS color-scheme changes so the ApexChart palette flips with
+    // the rest of the page (CSS handles itself via @media). Listener is
+    // detached on destroy; older Safari uses the deprecated addListener.
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const onChange = (e: MediaQueryListEvent) => this.darkMode.set(e.matches);
+      mq.addEventListener?.('change', onChange);
+      this.destroy$.subscribe(() => mq.removeEventListener?.('change', onChange));
+    }
 
     // Queue snapshot — every 3s while the Home is open. Cheap (in-memory).
     timer(0, 3000)
