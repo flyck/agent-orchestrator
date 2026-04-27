@@ -1,8 +1,24 @@
-import { Component, EventEmitter, inject, Output, signal } from '@angular/core';
+import { Component, computed, EventEmitter, inject, Output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TasksService, type TaskWorkspace } from '../services/tasks.service';
 
-const SPEC_TEMPLATE = `## Goal
+/** User-creatable kinds in this dialog. Excludes `review`, `background`,
+ *  and `internal` — those are created by other flows (Review tab, the
+ *  background queue, internal orchestration). */
+type DialogKind = Extract<TaskWorkspace, 'feature' | 'bugfix' | 'arch_compare'>;
+
+/**
+ * Per-kind spec templates. Different kinds prompt for different things —
+ * Bugfix renames Goal→"Bug summary" and adds Repro steps + Expected vs.
+ * Observed, per docs/05 Phase 12.
+ *
+ * Section bodies start with an angle-bracket placeholder (e.g.
+ * `<concrete, checkable: when X happens, Y>`). We treat any section whose
+ * body is whitespace OR consists only of placeholders/bullets-with-only-
+ * placeholders as "empty" for the soft-completeness hint.
+ */
+const TEMPLATES: Record<DialogKind, string> = {
+  feature: `## Goal
 
 <one paragraph: what outcome are we after?>
 
@@ -21,10 +37,101 @@ const SPEC_TEMPLATE = `## Goal
 ## Open questions
 
 - <known unknowns; the agent may answer here on re-run>
-`;
+`,
+  bugfix: `## Bug summary
+
+<one paragraph: what's broken and where you noticed it?>
+
+## Repro steps
+
+1. <step one>
+2. <step two>
+3. <…>
+
+## Expected vs. observed
+
+- Expected: <what should happen>
+- Observed: <what actually happens>
+
+## Scope
+
+- <files / modules likely to change — best guess; agent may correct>
+
+## Open questions
+
+- <known unknowns; the agent may answer here on re-run>
+`,
+  arch_compare: `## Goal
+
+<one paragraph: which architectural choice are we evaluating?>
+
+## Current architecture
+
+<short description of what's in place today>
+
+## Proposed architecture
+
+<short description of the alternative under consideration>
+
+## Decision criteria
+
+- <what makes one option better than the other for our case>
+
+## Open questions
+
+- <known unknowns; the agent may answer here on re-run>
+`,
+};
+
+/** Strip angle-bracket placeholders + leading bullets/numbers from a section
+ *  body so we can decide whether the user has actually written anything.
+ *  Returns true if the section is "empty" (untouched template). */
+function isSectionEmpty(body: string): boolean {
+  const cleaned = body
+    .split('\n')
+    .map((l) => l.trim())
+    // Drop bare list markers ("-", "1.") and angle-bracket placeholders.
+    .map((l) =>
+      l
+        .replace(/^[-*]\s*/, '')
+        .replace(/^\d+\.\s*/, '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/^Expected:\s*$/i, '')
+        .replace(/^Observed:\s*$/i, '')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join('');
+  return cleaned.length === 0;
+}
+
+/** Parse `## Heading` blocks out of the spec markdown and return the names
+ *  of any whose body is still empty per `isSectionEmpty`. Order preserved
+ *  so hints render in the same order as the template. */
+function emptySectionNames(spec: string): string[] {
+  const lines = spec.split('\n');
+  const out: string[] = [];
+  let currentHeading: string | null = null;
+  let buffer: string[] = [];
+  const flush = () => {
+    if (currentHeading && isSectionEmpty(buffer.join('\n'))) out.push(currentHeading);
+  };
+  for (const line of lines) {
+    const m = line.match(/^##\s+(.+?)\s*$/);
+    if (m) {
+      flush();
+      currentHeading = m[1];
+      buffer = [];
+    } else {
+      buffer.push(line);
+    }
+  }
+  flush();
+  return out;
+}
 
 interface KindOption {
-  value: TaskWorkspace;
+  value: DialogKind;
   label: string;
 }
 
@@ -50,7 +157,7 @@ const KINDS: KindOption[] = [
         <div class="form">
           <label class="label-row">
             <span class="label">Kind</span>
-            <select [(ngModel)]="kind" name="kind">
+            <select [ngModel]="kind()" (ngModelChange)="setKind($event)" name="kind">
               @for (k of kinds; track k.value) {
                 <option [value]="k.value">{{ k.label }}</option>
               }
@@ -72,6 +179,20 @@ const KINDS: KindOption[] = [
                       [(ngModel)]="spec"
                       spellcheck="false"></textarea>
           </label>
+
+          <!-- Soft completeness hints. Empty sections (still containing
+               the angle-bracket template placeholders) surface here. They
+               never block submission — per docs/10, discipline is the
+               user's; we just whisper. -->
+          @if (emptySections().length > 0) {
+            <div class="hints">
+              @for (name of emptySections(); track name) {
+                <p class="hint meta">
+                  <span class="hint-section">{{ name }}</span> empty — proceed without?
+                </p>
+              }
+            </div>
+          }
 
           @if (status()) {
             <p class="status" [class.error]="error()">{{ status() }}</p>
@@ -147,6 +268,22 @@ const KINDS: KindOption[] = [
         color: var(--ink-muted);
       }
       .status.error { color: var(--ink-red); }
+      .hints {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 0 0;
+        border-top: 1px solid var(--rule);
+      }
+      .hint {
+        margin: 0;
+        font-size: 12px;
+        color: var(--ink-faint);
+      }
+      .hint-section {
+        color: var(--ink-muted);
+        font-weight: 500;
+      }
       footer {
         display: flex;
         gap: 8px;
@@ -165,8 +302,13 @@ export class NewTaskDialog {
   protected readonly kinds = KINDS;
 
   protected readonly title = signal('');
-  protected readonly spec = signal(SPEC_TEMPLATE);
-  protected readonly kind = signal<TaskWorkspace>('feature');
+  protected readonly spec = signal(TEMPLATES.feature);
+  protected readonly kind = signal<DialogKind>('feature');
+
+  /** Soft hints listing section names whose body is still the template
+   *  placeholder. Recomputed on every spec keystroke (cheap — small string,
+   *  one regex pass per line). */
+  protected readonly emptySections = computed(() => emptySectionNames(this.spec()));
 
   /** Emitted with the new task id once create+run succeed, so the parent
    *  page can select it (drives ?task=<id> + opens the detail panel). */
@@ -174,11 +316,22 @@ export class NewTaskDialog {
 
   show() {
     this.title.set('');
-    this.spec.set(SPEC_TEMPLATE);
     this.kind.set('feature');
+    this.spec.set(TEMPLATES.feature);
     this.status.set(null);
     this.error.set(false);
     this.open.set(true);
+  }
+
+  /** Switch kind. If the user hasn't touched the spec yet (current text is
+   *  exactly one of the kind templates), swap to the new kind's template
+   *  so the section headers match. Otherwise leave the spec alone — we
+   *  don't trash the user's drafted content. */
+  setKind(k: DialogKind) {
+    const current = this.spec();
+    const untouched = Object.values(TEMPLATES).includes(current);
+    this.kind.set(k);
+    if (untouched) this.spec.set(TEMPLATES[k]);
   }
 
   cancel() {
