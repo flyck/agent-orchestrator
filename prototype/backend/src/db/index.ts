@@ -43,6 +43,12 @@ function applyMigrations(db: Database) {
   // counter on cards. Distinct from updated_at, which churns on every
   // progress tick / SSE event / etc.
   ensureColumn("tasks", "state_entered_at", "INTEGER");
+  // Difficulty score (1–10) assigned by the scoring agent at task creation.
+  // NULL while pending; the scoring run is fire-and-forget so the create
+  // endpoint can return immediately. The user can override post-hoc.
+  ensureColumn("tasks", "difficulty", "INTEGER");
+  ensureColumn("tasks", "difficulty_justification", "TEXT");
+  ensureColumn("tasks", "difficulty_overridden_by_user", "INTEGER NOT NULL DEFAULT 0");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

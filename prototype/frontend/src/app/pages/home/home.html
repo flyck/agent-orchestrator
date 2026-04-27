@@ -91,7 +91,15 @@
                     [class.selected]="selectedId() === vt.raw.id"
                     (click)="selectTask(vt.raw.id)">
               <div class="task-card-head">
-                <span class="kind">{{ kindLabels[vt.kind] }}</span>
+                <span class="card-head-left">
+                  <span class="kind">{{ kindLabels[vt.kind] }}</span>
+                  @if (vt.raw.difficulty !== null) {
+                    <span class="difficulty mono"
+                          [title]="vt.raw.difficulty_justification ?? 'auto-scored difficulty'">
+                      d{{ vt.raw.difficulty }}
+                    </span>
+                  }
+                </span>
                 @if (vt.needsAttention) {
                   <span class="dot waiting" title="agent needs your input"></span>
                 } @else if (vt.status === 'closed') {
@@ -136,7 +144,13 @@
   <section class="block detail" [class.attention]="sel.needsAttention">
     <header class="detail-head">
       <div>
-        <p class="meta">{{ kindLabels[sel.kind] }} · {{ stateLabels[sel.state] }} · {{ sel.raw.status }}</p>
+        <p class="meta">
+          {{ kindLabels[sel.kind] }} · {{ stateLabels[sel.state] }} · {{ sel.raw.status }}
+          @if (sel.raw.difficulty !== null) {
+            · <span class="mono"
+                    [title]="sel.raw.difficulty_justification ?? 'auto-scored difficulty'">d{{ sel.raw.difficulty }}</span>
+          }
+        </p>
         <h2>{{ sel.raw.title }}</h2>
       </div>
       <div class="detail-actions">

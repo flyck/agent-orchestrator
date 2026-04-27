@@ -34,6 +34,9 @@ export interface TaskRow {
   feedback_question: string | null;
   last_session_id: string | null;
   state_entered_at: number | null;
+  difficulty: number | null;
+  difficulty_justification: string | null;
+  difficulty_overridden_by_user: number; // sqlite 0/1
   created_at: number;
   updated_at: number;
 }
@@ -145,6 +148,32 @@ export function setLastSessionId(id: string, sessionId: string, handle: Database
   handle
     .prepare("UPDATE tasks SET last_session_id = ?, updated_at = ? WHERE id = ?")
     .run(sessionId, Date.now(), id);
+}
+
+/**
+ * Stamp the difficulty score on a task. `byUser=true` flags the row as a
+ * manual override so the scoring agent never clobbers it on re-runs.
+ */
+export function setTaskDifficulty(
+  id: string,
+  difficulty: number,
+  justification: string | null,
+  byUser = false,
+  handle: Database = db(),
+): TaskRow | null {
+  // Don't overwrite a user override with an agent score.
+  if (!byUser) {
+    const prev = getTask(id, handle);
+    if (prev?.difficulty_overridden_by_user === 1) return prev;
+  }
+  handle
+    .prepare(
+      `UPDATE tasks SET difficulty = ?, difficulty_justification = ?,
+                        difficulty_overridden_by_user = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .run(difficulty, justification, byUser ? 1 : 0, Date.now(), id);
+  return getTask(id, handle);
 }
 
 export function setWorktree(

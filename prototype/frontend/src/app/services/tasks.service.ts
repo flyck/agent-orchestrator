@@ -40,6 +40,9 @@ export interface Task {
   feedback_question: string | null;
   last_session_id: string | null;
   state_entered_at: number | null;
+  difficulty: number | null;
+  difficulty_justification: string | null;
+  difficulty_overridden_by_user: number;
   created_at: number;
   updated_at: number;
 }

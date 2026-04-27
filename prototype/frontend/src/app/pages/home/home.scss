@@ -216,11 +216,26 @@
   justify-content: space-between;
   align-items: center;
 }
+.card-head-left {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
 .kind {
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-muted);
+}
+/* Difficulty chip — auto-scored 1–10. Hover surfaces the agent's
+   justification. Hidden when difficulty is null (scoring failed or
+   still pending — we don't fake a "—" placeholder). */
+.difficulty {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  letter-spacing: 0.03em;
+  cursor: help;
 }
 
 .task-title {

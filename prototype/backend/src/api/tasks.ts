@@ -8,6 +8,7 @@ import {
   getTask,
   listTasks,
   setNeedsFeedback,
+  setTaskDifficulty,
   setTaskProgress,
   type TaskWorkspace,
   type TaskStatus,
@@ -17,6 +18,7 @@ import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
 import { snapshot as queueSnapshot, purge as queuePurge } from "../queue";
 import { finalizeTask } from "../orchestrator/finalize";
+import { scoreTask } from "../orchestrator/scoring";
 import { log } from "../log";
 
 const createSchema = z.object({
@@ -48,6 +50,11 @@ const continueSchema = z.object({
   message: z.string().min(1).max(20_000),
 });
 
+const difficultySchema = z.object({
+  difficulty: z.number().int().min(1).max(10),
+  justification: z.string().max(280).optional(),
+});
+
 const needsFeedbackSchema = z.object({
   question: z.string().min(1).max(1000),
 });
@@ -77,6 +84,12 @@ tasks.post("/", async (c) => {
   }
   const t = createTask(parsed.data);
   log.info("api.tasks.created", { id: t.id, workspace: t.workspace, title: t.title });
+  // Fire-and-forget difficulty score. The user shouldn't wait on the LLM
+  // for a snappy "task created" — score arrives a few seconds later and
+  // the UI picks it up on the next 5s task-list poll.
+  scoreTask(t.id).catch((err) =>
+    log.warn("api.tasks.score_failed", { id: t.id, error: String(err) }),
+  );
   return c.json(t, 201);
 });
 
@@ -204,6 +217,41 @@ tasks.post("/:id/needs-feedback", async (c) => {
   const t = setNeedsFeedback(id, parsed.data.question);
   log.info("api.tasks.needs_feedback", { id, question: parsed.data.question });
   return c.json(t);
+});
+
+/**
+ * Manual difficulty override. Marks the task as user-overridden so the
+ * scoring agent can't clobber it on a re-run.
+ */
+tasks.post("/:id/difficulty", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = difficultySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_difficulty", issues: parsed.error.issues }, 400);
+  }
+  const t = setTaskDifficulty(
+    id,
+    parsed.data.difficulty,
+    parsed.data.justification ?? "Set manually by user.",
+    true,
+  );
+  log.info("api.tasks.difficulty_overridden", { id, difficulty: parsed.data.difficulty });
+  return c.json(t);
+});
+
+/** Re-run scoring. Useful when scoring failed at creation (engine down)
+ *  or when the user has edited calibration and wants a fresh score. */
+tasks.post("/:id/rescore", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  log.info("api.tasks.rescore_requested", { id });
+  // Fire-and-forget so the request returns fast.
+  scoreTask(id).catch((err) =>
+    log.warn("api.tasks.rescore_failed", { id, error: String(err) }),
+  );
+  return c.json({ ok: true });
 });
 
 /** User dismissed the feedback request without giving feedback. */
