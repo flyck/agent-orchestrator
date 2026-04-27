@@ -16,7 +16,7 @@ import { getTask, setTaskDifficulty, type TaskRow } from "../db/tasks";
 import { log } from "../log";
 
 const CALIBRATION_PATH = fileURLToPath(
-  new URL("../../agents/builtin/scoring/calibration.md", import.meta.url),
+  new URL("../../agents/builtin/_scoring/calibration.md", import.meta.url),
 );
 
 /** Read once at module load; cheap, ~1KB. The user can hot-edit by

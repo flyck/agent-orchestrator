@@ -21,6 +21,7 @@ import { getEngine } from "../engine/singleton";
 import {
   clearNeedsFeedback,
   getTask,
+  incrementReviewCycles,
   setLastSessionId,
   setTaskBaseRef,
   setTaskProgress,
@@ -30,6 +31,13 @@ import {
 } from "../db/tasks";
 import { incrementCompletedSinceNudge, readAllSettings } from "../db/settings";
 import { listSkills, renderSkillsSection } from "./skills";
+import {
+  buildReviewerMessage,
+  buildReviewerSystemPrompt,
+  MAX_REVIEW_CYCLES,
+  openReviewerSession,
+  parseReviewerDecision,
+} from "./reviewer";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
 import { readFileSync } from "node:fs";
@@ -59,17 +67,46 @@ function captureHeadSha(): string | null {
 
 interface ActiveTask {
   taskId: string;
+  /** The currently-open session — this swaps when the lifecycle
+   *  controller transitions phases (coder → reviewer → coder). The
+   *  watchdog and forceComplete both read this slot, so it must always
+   *  reflect the in-flight session. */
   session: EngineSession;
   listeners: Set<(e: EngineEvent) => void>;
+  /** The lifecycle controller's promise. Resolves when the task ends
+   *  (done / failed / canceled). Stored so callers can await it in
+   *  tests; nothing else touches it. */
   pump: Promise<void>;
   /** Wall-clock of the last engine event we saw for this run. Drives
    *  the watchdog's "no events in N seconds" check. */
   lastEventTs: number;
-  /** Set when forceComplete is called. The pump's finally reads this and
-   *  uses status=done/state=ready instead of canceled — without this flag
-   *  the pump's finally and forceComplete race to write the task status,
-   *  and the loser's value sticks. */
+  /** Set when forceComplete is called. The lifecycle reads this between
+   *  phases (and at the end of the active phase) and bails to done/ready
+   *  instead of continuing. */
   forceCompleted?: boolean;
+  /** Which agent owns the current session. Drives the lifecycle
+   *  controller's branch on terminal. */
+  phase: "code" | "review";
+  /** How many times the reviewer has sent the task back to the coder
+   *  in *this run*. Capped by MAX_REVIEW_CYCLES. */
+  cycleCount: number;
+  /** The reviewer's last `feedback:` text — passed back to the coder
+   *  on send-back, and surfaced to the next reviewer pass so it can
+   *  judge whether the issue was addressed. */
+  lastReviewerFeedback?: string;
+}
+
+/** What the pump returned when its session reached a terminal state. */
+interface PumpResult {
+  /** `idle` = clean finish, `error` = session.error event, `null` =
+   *  iterator closed externally (cancel / queue tear-down). */
+  terminal: "idle" | "error" | null;
+  eventCount: number;
+  lastError: unknown;
+  /** Concatenated assistant text, in arrival order. Only the latest
+   *  text per part id is kept (opencode emits cumulative replacements
+   *  per part-update). The reviewer phase parses this. */
+  assistantText: string;
 }
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
@@ -266,183 +303,15 @@ async function startRunInternal(
     listeners: new Set(),
     pump: undefined as unknown as Promise<void>,
     lastEventTs: Date.now(),
+    phase: "code",
+    cycleCount: 0,
   };
   active.set(taskId, a);
 
-  // Pump events from the session into all listeners. Track terminal events
-  // so we transition the task accordingly.
-  a.pump = (async () => {
-    let lastError: unknown = null;
-    let eventCount = 0;
-    let terminal: "idle" | "error" | null = null;
-    try {
-      for await (const ev of session.events) {
-        eventCount++;
-        a.lastEventTs = ev.ts;
-        // Per-event progress log — keep cheap (type + count only).
-        log.info("orchestrator.run.event", { taskId, n: eventCount, type: ev.type });
-
-        // Safety net: if opencode still asks for permission despite the
-        // session-create ruleset, auto-grant. The user authored the task;
-        // we treat that as authorization for any tool call the agent needs.
-        if (ev.type === "permission.asked" && session instanceof OpenCodeSession) {
-          const reqId = (ev.raw as { properties?: { id?: string } }).properties?.id;
-          if (reqId) {
-            log.info("orchestrator.run.permission_auto_grant", { taskId, reqId });
-            session
-              .respondToPermission(reqId, "always")
-              .catch((err) =>
-                log.error("orchestrator.run.permission_grant_failed", {
-                  taskId,
-                  reqId,
-                  error: String(err),
-                }),
-              );
-          }
-        }
-
-        if (ev.type === "session.error") {
-          terminal = "error";
-          lastError = ev.raw;
-          log.error("orchestrator.run.session_error_payload", {
-            taskId,
-            payload: JSON.stringify(ev.raw).slice(0, 1500),
-          });
-        }
-        if (ev.type === "session.idle") terminal = "idle";
-        // Surface any assistant-message error info AND capture usage data
-        // when the assistant message finishes (cost + tokens are reported on
-        // message.updated for the assistant role once finish is set).
-        if (ev.type === "message.updated") {
-          const info = (
-            ev.raw as {
-              properties?: {
-                info?: {
-                  role?: string;
-                  error?: unknown;
-                  finish?: string;
-                  cost?: number;
-                  tokens?: { input?: number; output?: number };
-                  modelID?: string;
-                  providerID?: string;
-                  time?: { completed?: number };
-                };
-              };
-            }
-          ).properties?.info;
-          if (info?.role === "assistant") {
-            if (info.error) {
-              log.error("orchestrator.run.assistant_error", {
-                taskId,
-                error: JSON.stringify(info.error).slice(0, 1500),
-              });
-            }
-            // Persist usage when the message completes with cost/tokens.
-            if (
-              info.finish &&
-              typeof info.cost === "number" &&
-              info.providerID &&
-              info.modelID
-            ) {
-              try {
-                recordUsageEvent({
-                  ts: info.time?.completed ?? ev.ts,
-                  task_id: taskId,
-                  session_id: ev.sessionId,
-                  provider_id: info.providerID,
-                  model_id: info.modelID,
-                  input_tokens: info.tokens?.input ?? 0,
-                  output_tokens: info.tokens?.output ?? 0,
-                  cost_usd: info.cost,
-                });
-                log.info("orchestrator.run.usage_recorded", {
-                  taskId,
-                  provider: info.providerID,
-                  model: info.modelID,
-                  cost_usd: info.cost,
-                });
-              } catch (err) {
-                log.warn("orchestrator.run.usage_record_failed", {
-                  taskId,
-                  error: String(err),
-                });
-              }
-            }
-          }
-        }
-        for (const fn of a.listeners) {
-          try {
-            fn(ev);
-          } catch (e) {
-            log.warn("orchestrator.listener_error", { taskId, error: String(e) });
-          }
-        }
-        if (terminal) break;
-      }
-    } catch (err) {
-      log.error("orchestrator.run.pump_failed", {
-        taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      lastError = err;
-      terminal = "error";
-    } finally {
-      log.info("orchestrator.run.terminal", { taskId, terminal, eventCount });
-      if (terminal === null) {
-        // The iterator exited without seeing session.idle/error — the queue
-        // got closed externally (bus reconnect raced, manual shutdown, etc.).
-        // Don't fake a "done" green-light; mark canceled so the user can
-        // resend instead of trusting a misleading green state.
-        log.warn("orchestrator.run.iterator_closed_unexpectedly", {
-          taskId,
-          eventCount,
-        });
-      }
-      try {
-        await session.close();
-      } catch (e) {
-        log.warn("orchestrator.run.close_failed", { taskId, error: String(e) });
-      }
-      active.delete(taskId);
-      // If forceComplete was called, treat as a clean finish. Otherwise
-      // null terminal = canceled (queue closed externally), error =
-      // failed, idle = done.
-      const wasForced = a.forceCompleted === true;
-      const finalStatus =
-        terminal === "error"
-          ? "failed"
-          : wasForced
-            ? "done"
-            : terminal === null
-              ? "canceled"
-              : "done";
-      const finalState =
-        terminal === "error" || (terminal === null && !wasForced)
-          ? task.current_state
-          : "ready";
-      updateTaskStatus(taskId, finalStatus, finalState);
-      // Bump the manual-coding nudge counter on real completions only —
-      // failed/canceled runs don't count, so the user sees the nudge after
-      // N actually-shipped tasks. Force-complete counts too: user decided
-      // it was done.
-      if (finalStatus === "done") {
-        try {
-          const n = incrementCompletedSinceNudge();
-          log.info("orchestrator.run.nudge_counter_bumped", { taskId, completed: n });
-        } catch (err) {
-          log.warn("orchestrator.run.nudge_counter_failed", { taskId, error: String(err) });
-        }
-      }
-      // Tell the queue we're done so it can promote the next pending task.
-      queue.release(taskId);
-      const lastErrorStr = lastError
-        ? typeof lastError === "string"
-          ? lastError.slice(0, 800)
-          : JSON.stringify(lastError).slice(0, 800)
-        : null;
-      log.info("orchestrator.run.done", { taskId, finalStatus, lastError: lastErrorStr });
-    }
-  })();
+  // Lifecycle controller: pumps the current session, then decides
+  // whether to switch to the reviewer, send back to the coder, or
+  // finalize. Replaces the old single-session pump.
+  a.pump = runLifecycle(a, task);
 
   // Send the initial message AFTER setting up the active record + pump so we
   // don't lose early events.
@@ -467,6 +336,400 @@ async function startRunInternal(
   }
 
   return { sessionId: session.id };
+}
+
+/**
+ * Pump the active task's CURRENT session until it reaches a terminal
+ * state. Forwards events to listeners, auto-grants permissions, persists
+ * usage data, and accumulates assistant text (so the reviewer phase can
+ * parse the YAML decision). Does NOT close the session or finalize the
+ * task — that's the lifecycle controller's job.
+ */
+async function pumpUntilTerminal(a: ActiveTask): Promise<PumpResult> {
+  const taskId = a.taskId;
+  const session = a.session; // snapshot at start; switching mid-pump is the
+                             // controller's job, not ours
+  const phaseLabel = a.phase;
+  let lastError: unknown = null;
+  let eventCount = 0;
+  let terminal: "idle" | "error" | null = null;
+
+  // Per-part text accumulator. opencode emits cumulative text per
+  // part-update — keep latest text per part id, then concat in arrival
+  // order at the end. Same pattern as scoring.ts.
+  const partOrder: string[] = [];
+  const partText = new Map<string, string>();
+
+  try {
+    for await (const ev of session.events) {
+      eventCount++;
+      a.lastEventTs = ev.ts;
+      log.info("orchestrator.run.event", {
+        taskId,
+        phase: phaseLabel,
+        n: eventCount,
+        type: ev.type,
+      });
+
+      // Auto-grant permissions — same as before.
+      if (ev.type === "permission.asked" && session instanceof OpenCodeSession) {
+        const reqId = (ev.raw as { properties?: { id?: string } }).properties?.id;
+        if (reqId) {
+          log.info("orchestrator.run.permission_auto_grant", { taskId, reqId });
+          session
+            .respondToPermission(reqId, "always")
+            .catch((err) =>
+              log.error("orchestrator.run.permission_grant_failed", {
+                taskId,
+                reqId,
+                error: String(err),
+              }),
+            );
+        }
+      }
+
+      // Capture assistant text parts for downstream parsing.
+      if (ev.type === "message.part.updated") {
+        const part = (
+          ev.raw as {
+            properties?: { part?: { id?: string; type?: string; text?: string } };
+          }
+        ).properties?.part;
+        if (part?.type === "text" && typeof part.text === "string" && part.id) {
+          if (!partText.has(part.id)) partOrder.push(part.id);
+          partText.set(part.id, part.text);
+        }
+      }
+
+      if (ev.type === "session.error") {
+        terminal = "error";
+        lastError = ev.raw;
+        log.error("orchestrator.run.session_error_payload", {
+          taskId,
+          payload: JSON.stringify(ev.raw).slice(0, 1500),
+        });
+      }
+      if (ev.type === "session.idle") terminal = "idle";
+
+      // Surface assistant errors AND record usage on completion.
+      if (ev.type === "message.updated") {
+        const info = (
+          ev.raw as {
+            properties?: {
+              info?: {
+                role?: string;
+                error?: unknown;
+                finish?: string;
+                cost?: number;
+                tokens?: { input?: number; output?: number };
+                modelID?: string;
+                providerID?: string;
+                time?: { completed?: number };
+              };
+            };
+          }
+        ).properties?.info;
+        if (info?.role === "assistant") {
+          if (info.error) {
+            log.error("orchestrator.run.assistant_error", {
+              taskId,
+              error: JSON.stringify(info.error).slice(0, 1500),
+            });
+          }
+          if (
+            info.finish &&
+            typeof info.cost === "number" &&
+            info.providerID &&
+            info.modelID
+          ) {
+            try {
+              recordUsageEvent({
+                ts: info.time?.completed ?? ev.ts,
+                task_id: taskId,
+                session_id: ev.sessionId,
+                provider_id: info.providerID,
+                model_id: info.modelID,
+                input_tokens: info.tokens?.input ?? 0,
+                output_tokens: info.tokens?.output ?? 0,
+                cost_usd: info.cost,
+              });
+              log.info("orchestrator.run.usage_recorded", {
+                taskId,
+                phase: phaseLabel,
+                provider: info.providerID,
+                model: info.modelID,
+                cost_usd: info.cost,
+              });
+            } catch (err) {
+              log.warn("orchestrator.run.usage_record_failed", {
+                taskId,
+                error: String(err),
+              });
+            }
+          }
+        }
+      }
+
+      for (const fn of a.listeners) {
+        try {
+          fn(ev);
+        } catch (e) {
+          log.warn("orchestrator.listener_error", { taskId, error: String(e) });
+        }
+      }
+      if (terminal) break;
+    }
+  } catch (err) {
+    log.error("orchestrator.run.pump_failed", {
+      taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    lastError = err;
+    terminal = "error";
+  }
+
+  log.info("orchestrator.run.terminal", { taskId, phase: phaseLabel, terminal, eventCount });
+  if (terminal === null) {
+    log.warn("orchestrator.run.iterator_closed_unexpectedly", {
+      taskId,
+      phase: phaseLabel,
+      eventCount,
+    });
+  }
+
+  const assistantText = partOrder.map((id) => partText.get(id) ?? "").join("");
+  return { terminal, eventCount, lastError, assistantText };
+}
+
+/** Best-effort session close. Errors are swallowed (logged) so they
+ *  can't poison the lifecycle controller's branch decisions. */
+async function safeClose(session: EngineSession, taskId: string, why: string): Promise<void> {
+  try {
+    await session.close();
+  } catch (e) {
+    log.warn("orchestrator.run.close_failed", { taskId, why, error: String(e) });
+  }
+}
+
+/** Stamp the task's terminal status + state, bump the nudge counter on
+ *  real success, and emit the run.done log. */
+function finalizeTask(
+  task: TaskRow,
+  finalStatus: "done" | "failed" | "canceled",
+  finalState: TaskRow["current_state"],
+  lastError: unknown,
+): void {
+  const taskId = task.id;
+  updateTaskStatus(taskId, finalStatus, finalState);
+  if (finalStatus === "done") {
+    try {
+      const n = incrementCompletedSinceNudge();
+      log.info("orchestrator.run.nudge_counter_bumped", { taskId, completed: n });
+    } catch (err) {
+      log.warn("orchestrator.run.nudge_counter_failed", { taskId, error: String(err) });
+    }
+  }
+  const lastErrorStr = lastError
+    ? typeof lastError === "string"
+      ? lastError.slice(0, 800)
+      : JSON.stringify(lastError).slice(0, 800)
+    : null;
+  log.info("orchestrator.run.done", { taskId, finalStatus, lastError: lastErrorStr });
+}
+
+/**
+ * The lifecycle controller. Loops: pump current session → decide next
+ * step based on phase + terminal + forceCompleted. Handles three phase
+ * transitions:
+ *
+ *   code idle  → switch to reviewer (state=review)
+ *   review idle, accept    → finalize done (state=ready)
+ *   review idle, send_back → switch back to coder with feedback
+ *                            (state=code, increment review_cycles)
+ *
+ * Errors in the reviewer phase are fail-open: if the reviewer can't
+ * be opened or its output can't be parsed, we treat it as accept. The
+ * user reviews the diff themselves anyway — we don't want a wedged
+ * reviewer to block a working coder change.
+ *
+ * Cap on cycles is MAX_REVIEW_CYCLES (defined in reviewer.ts). Once
+ * hit, send_back is forced to accept.
+ */
+async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
+  const taskId = task.id;
+  let lastError: unknown = null;
+
+  try {
+    while (true) {
+      // Pump the current session. After this returns, a.session has
+      // either reached a terminal state or been closed externally
+      // (forceComplete / cancelRun).
+      const r = await pumpUntilTerminal(a);
+      lastError = r.lastError ?? lastError;
+
+      // forceComplete short-circuits everything: user said it's done.
+      if (a.forceCompleted === true) {
+        await safeClose(a.session, taskId, "force_completed");
+        finalizeTask(task, "done", "ready", lastError);
+        return;
+      }
+
+      // Iterator closed externally with no terminal event → canceled.
+      if (r.terminal === null) {
+        await safeClose(a.session, taskId, "canceled");
+        finalizeTask(task, "canceled", task.current_state, lastError);
+        return;
+      }
+
+      // Session error in either phase fails the whole task. (Reviewer
+      // errors are downgraded to accept further down — but a session-
+      // level error means the engine itself failed, not just bad output.)
+      if (r.terminal === "error" && a.phase === "code") {
+        await safeClose(a.session, taskId, "code_error");
+        finalizeTask(task, "failed", task.current_state, lastError);
+        return;
+      }
+
+      // Reviewer session error → fail-open to done. Logged so the user
+      // can see this happened.
+      if (r.terminal === "error" && a.phase === "review") {
+        log.warn("orchestrator.reviewer.session_error_treated_as_accept", { taskId });
+        await safeClose(a.session, taskId, "review_error_accept");
+        finalizeTask(task, "done", "ready", lastError);
+        return;
+      }
+
+      // r.terminal === "idle" — clean finish for this phase. Branch on phase.
+      if (a.phase === "code") {
+        await safeClose(a.session, taskId, "code_done");
+        // Try to switch to reviewer. On any failure, accept the coder's
+        // work and finalize done.
+        try {
+          await switchToReviewer(a, task);
+          continue; // pump the reviewer next iteration
+        } catch (err) {
+          log.warn("orchestrator.reviewer.start_failed_treated_as_accept", {
+            taskId,
+            error: String(err),
+          });
+          finalizeTask(task, "done", "ready", lastError);
+          return;
+        }
+      }
+
+      // a.phase === "review", clean idle.
+      await safeClose(a.session, taskId, "review_done");
+      const decision = parseReviewerDecision(r.assistantText);
+
+      if (decision.action === "accept") {
+        log.info("orchestrator.reviewer.accept", {
+          taskId,
+          cycleCount: a.cycleCount,
+          notes: decision.notes ? decision.notes.slice(0, 280) : undefined,
+        });
+        finalizeTask(task, "done", "ready", lastError);
+        return;
+      }
+
+      // send_back. If we've already burned the cycle budget, force accept.
+      if (a.cycleCount >= MAX_REVIEW_CYCLES) {
+        log.warn("orchestrator.reviewer.cycle_cap_hit_forcing_accept", {
+          taskId,
+          cycleCount: a.cycleCount,
+          max: MAX_REVIEW_CYCLES,
+        });
+        finalizeTask(task, "done", "ready", lastError);
+        return;
+      }
+
+      // Bump counter, store feedback, restart coder with feedback as the
+      // follow-up message. On any failure starting the coder, finalize done.
+      try {
+        incrementReviewCycles(taskId);
+      } catch (err) {
+        log.warn("orchestrator.reviewer.increment_failed", { taskId, error: String(err) });
+      }
+      a.cycleCount += 1;
+      a.lastReviewerFeedback = decision.feedback;
+
+      try {
+        await switchToCoder(a, task, decision.feedback);
+        continue; // pump the new coder session
+      } catch (err) {
+        log.warn("orchestrator.coder.restart_failed_treated_as_done", {
+          taskId,
+          error: String(err),
+        });
+        finalizeTask(task, "done", "ready", lastError);
+        return;
+      }
+    }
+  } finally {
+    active.delete(taskId);
+    queue.release(taskId);
+  }
+}
+
+/**
+ * Open a reviewer session and send it the spec + diff. Updates a.session
+ * + a.phase + the task's current_state in one shot. Caller wraps in a
+ * try/catch (we re-throw on engine-side failures so the lifecycle can
+ * fail-open to accept).
+ */
+async function switchToReviewer(a: ActiveTask, task: TaskRow): Promise<void> {
+  const taskId = task.id;
+  const session = await openReviewerSession(task, taskId, buildSystemPrompt);
+  setLastSessionId(taskId, session.id);
+  a.session = session;
+  a.phase = "review";
+  a.lastEventTs = Date.now();
+  updateTaskStatus(taskId, "running", "review");
+
+  const cwd = task.worktree_path ?? REPO_ROOT;
+  const message = buildReviewerMessage({
+    task,
+    cycleCount: a.cycleCount,
+    priorFeedback: a.lastReviewerFeedback,
+  });
+  const systemPrompt = buildReviewerSystemPrompt(renderSharedPrompt(taskId, cwd));
+  await session.send(message, { system: systemPrompt });
+  log.info("orchestrator.reviewer.message_sent", {
+    taskId,
+    sessionId: session.id,
+    cycleCount: a.cycleCount,
+  });
+}
+
+/**
+ * Open a fresh coder session in the same worktree, prepending the
+ * reviewer's feedback as the follow-up message. Updates a.session +
+ * a.phase + the task's current_state.
+ */
+async function switchToCoder(a: ActiveTask, task: TaskRow, feedback: string): Promise<void> {
+  const taskId = task.id;
+  const engine = await getEngine();
+  const session = await engine.openSession({
+    title: task.title,
+    cwd: task.worktree_path ?? undefined,
+  });
+  setLastSessionId(taskId, session.id);
+  a.session = session;
+  a.phase = "code";
+  a.lastEventTs = Date.now();
+  // Reset progress so the bar starts fresh for this iteration.
+  setTaskProgress(taskId, { step: null, total: null, label: null });
+  updateTaskStatus(taskId, "running", "code");
+
+  const cwd = task.worktree_path ?? REPO_ROOT;
+  const followUp = `The reviewer flagged issues with your previous pass. Address them and revise.\n\n## Reviewer feedback\n\n${feedback}`;
+  await session.send(buildInitialMessage(task, followUp), {
+    system: buildSystemPrompt(taskId, cwd),
+  });
+  log.info("orchestrator.coder.restarted_after_review", {
+    taskId,
+    sessionId: session.id,
+    cycleCount: a.cycleCount,
+  });
 }
 
 function buildInitialMessage(task: TaskRow, followUp?: string): string {
