@@ -28,7 +28,8 @@ import {
   updateTaskStatus,
   type TaskRow,
 } from "../db/tasks";
-import { incrementCompletedSinceNudge } from "../db/settings";
+import { incrementCompletedSinceNudge, readAllSettings } from "../db/settings";
+import { listSkills, renderSkillsSection } from "./skills";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
 import { readFileSync } from "node:fs";
@@ -102,6 +103,11 @@ function renderSharedPrompt(taskId: string, cwd: string): string {
 }
 
 function buildSystemPrompt(taskId: string, cwd: string): string {
+  // Per-run skills lookup — cheap (one stat + a few reads), and lets the
+  // user drop a new skill into the directory without restarting backend.
+  const settings = readAllSettings();
+  const skillsSection = renderSkillsSection(listSkills(settings.skills_directory));
+
   return `${renderSharedPrompt(taskId, cwd)}
 
 ---
@@ -116,7 +122,7 @@ Use the file-editing tools available to you. Keep the change scoped — touch on
 
 Do not run \`git add\`, \`git commit\`, \`git push\`, \`git checkout\`, \`git branch\`, or any other git command. Even if your bash tool would let you. The orchestrator owns this worktree's branch and will commit your edits when the user clicks Finalize. If you commit yourself you'll create messages the user didn't write and confuse the finalize step. Just edit the files; leave them uncommitted.
 
-When you are done, summarize what you changed in 2-3 sentences. The user reviews via Finalize → Commit to current branch / new branch.`;
+When you are done, summarize what you changed in 2-3 sentences. The user reviews via Finalize → Commit to current branch / new branch.${skillsSection}`;
 }
 
 const active = new Map<string, ActiveTask>();
