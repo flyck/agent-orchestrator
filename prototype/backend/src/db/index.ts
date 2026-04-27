@@ -49,6 +49,18 @@ function applyMigrations(db: Database) {
   ensureColumn("tasks", "difficulty", "INTEGER");
   ensureColumn("tasks", "difficulty_justification", "TEXT");
   ensureColumn("tasks", "difficulty_overridden_by_user", "INTEGER NOT NULL DEFAULT 0");
+  // Task metadata for reflection / metrics:
+  // - review_cycles: bumped by the orchestrator each time the reviewer
+  //   sends the task back to the coder. 0 means "reviewer accepted on
+  //   first pass" (or hasn't run yet).
+  // - user_sendbacks: bumped when the user clicks Send back with feedback
+  //   (the existing /continue endpoint).
+  // - user_rating + user_rating_comment: optional post-hoc tag the user
+  //   sets in the Ready state to flag a bad experience. Free-form comment.
+  ensureColumn("tasks", "review_cycles", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("tasks", "user_sendbacks", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("tasks", "user_rating", "TEXT");
+  ensureColumn("tasks", "user_rating_comment", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

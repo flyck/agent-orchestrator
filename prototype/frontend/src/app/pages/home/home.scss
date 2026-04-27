@@ -708,6 +708,40 @@
   &.past { background: var(--ink-muted); }
 }
 
+/* Header chips for review cycles, user send-backs, bad-experience flag. */
+.detail-head .rating-bad {
+  color: var(--ink-red);
+  font-weight: 500;
+}
+
+/* ─── Bad-experience rating block ─────────────────────────────────────── */
+.rating {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  textarea {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    resize: vertical;
+  }
+}
+.rating-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.rating-comment {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+  white-space: pre-wrap;
+}
+
 /* ─── Finalize section ────────────────────────────────────────────────── */
 .finalize {
   margin-top: 16px;

@@ -532,6 +532,49 @@ export class HomePage {
     if (!sel) return;
     this.newTaskDialog()?.showEdit(sel.raw.id, sel.raw.input_payload);
   }
+
+  // ─── Bad-experience rating ────────────────────────────────────────────
+  // The user can flag a task in the Ready state as a bad experience with
+  // a free-form comment. Drives metrics-by-difficulty (we can later
+  // surface "models with high bad-rate at difficulty N" in the cost view).
+  protected readonly ratingFormOpen = signal(false);
+  protected readonly ratingComment = signal('');
+  protected readonly ratingSaving = signal(false);
+  protected readonly ratingError = signal<string | null>(null);
+  openRatingForm() {
+    const sel = this.selectedTask();
+    this.ratingComment.set(sel?.raw.user_rating_comment ?? '');
+    this.ratingError.set(null);
+    this.ratingFormOpen.set(true);
+  }
+  cancelRatingForm() {
+    if (this.ratingSaving()) return;
+    this.ratingFormOpen.set(false);
+  }
+  saveBadRating() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.ratingSaving.set(true);
+    this.ratingError.set(null);
+    this.tasksApi.setRating(sel.raw.id, 'bad', this.ratingComment().trim() || null).subscribe({
+      next: () => {
+        this.ratingSaving.set(false);
+        this.ratingFormOpen.set(false);
+        this.refreshTasks();
+      },
+      error: (e) => {
+        this.ratingSaving.set(false);
+        this.ratingError.set(`Save failed: ${e?.error?.message ?? e?.message ?? e}`);
+      },
+    });
+  }
+  clearRating() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.tasksApi.setRating(sel.raw.id, null, null).subscribe({
+      next: () => this.refreshTasks(),
+    });
+  }
   onTaskCreated(id: string) {
     // Same callback fires in both create and edit-spec modes. In create
     // mode we want to switch to the live stream; in edit mode we stay

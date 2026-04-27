@@ -53,6 +53,13 @@ export interface Task {
   difficulty: number | null;
   difficulty_justification: string | null;
   difficulty_overridden_by_user: number;
+  /** Bumped by the orchestrator each time the reviewer agent sends back to coder. */
+  review_cycles: number;
+  /** Bumped each time the user clicks Send back with feedback. */
+  user_sendbacks: number;
+  /** Optional post-hoc tag set in the Ready state. */
+  user_rating: 'bad' | null;
+  user_rating_comment: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -183,6 +190,15 @@ export class TasksService {
   /** Newest-first list of past spec revisions. */
   listRevisions(id: string): Observable<{ revisions: SpecRevision[] }> {
     return this.http.get<{ revisions: SpecRevision[] }>(`/api/tasks/${id}/revisions`);
+  }
+
+  /** Set or clear the post-hoc rating. `rating=null` clears it. */
+  setRating(
+    id: string,
+    rating: 'bad' | null,
+    comment: string | null,
+  ): Observable<Task> {
+    return this.http.post<Task>(`/api/tasks/${id}/rating`, { rating, comment });
   }
 }
 

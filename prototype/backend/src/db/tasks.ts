@@ -52,6 +52,15 @@ export interface TaskRow {
   difficulty: number | null;
   difficulty_justification: string | null;
   difficulty_overridden_by_user: number; // sqlite 0/1
+  /** How many times the reviewer agent sent the task back to the coder
+   *  during this task. 0 = first-pass accepted (or reviewer not run yet). */
+  review_cycles: number;
+  /** How many times the user clicked Send back with feedback. */
+  user_sendbacks: number;
+  /** Optional post-hoc tag set in the Ready state. Currently only 'bad' is
+   *  meaningful; null when unset. Free-form comment paired with it. */
+  user_rating: "bad" | null;
+  user_rating_comment: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -194,6 +203,57 @@ export function setLastSessionId(id: string, sessionId: string, handle: Database
   handle
     .prepare("UPDATE tasks SET last_session_id = ?, updated_at = ? WHERE id = ?")
     .run(sessionId, Date.now(), id);
+}
+
+/** Bump review_cycles by 1. Called by the orchestrator each time the
+ *  reviewer sends the task back to the coder. Returns the new value. */
+export function incrementReviewCycles(
+  id: string,
+  handle: Database = db(),
+): number {
+  const row = handle
+    .query<{ v: number | null }, [string]>(
+      "SELECT review_cycles AS v FROM tasks WHERE id = ?",
+    )
+    .get(id);
+  const next = (row?.v ?? 0) + 1;
+  handle
+    .prepare("UPDATE tasks SET review_cycles = ?, updated_at = ? WHERE id = ?")
+    .run(next, Date.now(), id);
+  return next;
+}
+
+/** Bump user_sendbacks by 1. Called from the /continue endpoint when the
+ *  user sends a task back with feedback. Returns the new value. */
+export function incrementUserSendbacks(
+  id: string,
+  handle: Database = db(),
+): number {
+  const row = handle
+    .query<{ v: number | null }, [string]>(
+      "SELECT user_sendbacks AS v FROM tasks WHERE id = ?",
+    )
+    .get(id);
+  const next = (row?.v ?? 0) + 1;
+  handle
+    .prepare("UPDATE tasks SET user_sendbacks = ?, updated_at = ? WHERE id = ?")
+    .run(next, Date.now(), id);
+  return next;
+}
+
+/** Set or clear the user's rating + comment. `rating=null` removes the tag. */
+export function setUserRating(
+  id: string,
+  rating: "bad" | null,
+  comment: string | null,
+  handle: Database = db(),
+): TaskRow | null {
+  handle
+    .prepare(
+      "UPDATE tasks SET user_rating = ?, user_rating_comment = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(rating, comment, Date.now(), id);
+  return getTask(id, handle);
 }
 
 /**

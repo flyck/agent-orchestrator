@@ -150,6 +150,15 @@
             · <span class="mono"
                     [title]="sel.raw.difficulty_justification ?? 'auto-scored difficulty'">d{{ sel.raw.difficulty }}</span>
           }
+          @if (sel.raw.review_cycles > 0) {
+            · <span class="mono" title="reviewer agent send-backs">r{{ sel.raw.review_cycles }}</span>
+          }
+          @if (sel.raw.user_sendbacks > 0) {
+            · <span class="mono" title="user send-backs with feedback">u{{ sel.raw.user_sendbacks }}</span>
+          }
+          @if (sel.raw.user_rating === 'bad') {
+            · <span class="rating-bad" [title]="sel.raw.user_rating_comment ?? 'flagged as bad experience'">flagged</span>
+          }
         </p>
         <h2>{{ sel.raw.title }}</h2>
       </div>
@@ -492,6 +501,42 @@
           }
         }
       </section>
+
+      <!-- Bad-experience rating: surfaces in Ready so the user can flag a
+           shitty run with a comment. Persists per-task; quietly visible
+           in headers afterwards. -->
+      @if (sel.raw.status === 'done' || sel.state === 'ready' || sel.state === 'finalize') {
+        <div class="rating">
+          @if (sel.raw.user_rating === 'bad') {
+            <p class="meta">rated · bad experience</p>
+            @if (sel.raw.user_rating_comment) {
+              <p class="rating-comment">{{ sel.raw.user_rating_comment }}</p>
+            }
+            <div class="rating-row">
+              <button type="button" class="meta-action" (click)="openRatingForm()">edit comment</button>
+              <button type="button" class="meta-action" (click)="clearRating()">clear flag</button>
+            </div>
+          } @else if (ratingFormOpen()) {
+            <p class="meta">flag this task as a bad experience</p>
+            <textarea rows="3"
+                      placeholder="What went wrong? (e.g. agent rewrote unrelated files; reviewer missed a regression)"
+                      [ngModel]="ratingComment()"
+                      (ngModelChange)="ratingComment.set($event)"></textarea>
+            <div class="rating-row">
+              <button type="button" (click)="cancelRatingForm()" [disabled]="ratingSaving()">cancel</button>
+              <button type="button" class="primary" (click)="saveBadRating()" [disabled]="ratingSaving()">
+                {{ ratingSaving() ? 'saving…' : 'save flag' }}
+              </button>
+            </div>
+            @if (ratingError()) { <p class="finalize-err">{{ ratingError() }}</p> }
+          } @else {
+            <button type="button" class="meta-action" (click)="openRatingForm()"
+                    title="Mark this task as a bad experience with a comment — quiet, not destructive">
+              flag bad experience
+            </button>
+          }
+        </div>
+      }
 
       <!-- Finalize: lives with the files since it's about landing them. -->
       @if (sel.raw.status === 'done' || sel.state === 'ready' || sel.state === 'finalize') {

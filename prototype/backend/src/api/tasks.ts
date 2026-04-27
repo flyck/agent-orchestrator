@@ -6,10 +6,12 @@ import {
   clearNeedsFeedback,
   deleteTask,
   getTask,
+  incrementUserSendbacks,
   listTasks,
   setNeedsFeedback,
   setTaskDifficulty,
   setTaskProgress,
+  setUserRating,
   updateTaskSpec,
   type TaskWorkspace,
   type TaskStatus,
@@ -63,6 +65,12 @@ const needsFeedbackSchema = z.object({
 
 const specSchema = z.object({
   spec: z.string().min(1).max(50_000),
+});
+
+const ratingSchema = z.object({
+  /** null clears the rating; 'bad' marks a bad experience. */
+  rating: z.enum(["bad"]).nullable(),
+  comment: z.string().max(2000).nullable().optional(),
 });
 
 export const tasks = new Hono();
@@ -199,6 +207,9 @@ tasks.post("/:id/continue", async (c) => {
     return c.json({ error: "invalid_message", issues: parsed.error.issues }, 400);
   }
   log.info("api.tasks.continue", { id, len: parsed.data.message.length });
+  // User-initiated send-back — count it. Distinct from review_cycles
+  // (which the reviewer agent bumps when it sends back automatically).
+  incrementUserSendbacks(id);
   try {
     const r = await startRun(id, { followUp: parsed.data.message });
     if (!r) {
@@ -293,6 +304,24 @@ tasks.get("/:id/revisions", (c) => {
   const id = c.req.param("id");
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ revisions: listSpecRevisions(id) });
+});
+
+/**
+ * Set or clear the user's post-hoc rating for this task.
+ *   { rating: "bad", comment: "…" }  → flag as a bad experience
+ *   { rating: null }                 → clear any previous rating
+ */
+tasks.post("/:id/rating", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = ratingSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_rating", issues: parsed.error.issues }, 400);
+  }
+  const t = setUserRating(id, parsed.data.rating, parsed.data.comment ?? null);
+  log.info("api.tasks.rating_set", { id, rating: parsed.data.rating });
+  return c.json(t);
 });
 
 /**
