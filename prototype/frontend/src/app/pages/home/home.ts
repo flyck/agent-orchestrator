@@ -486,14 +486,30 @@ export class HomePage {
 
   /** Spec-editor dialog. The "+ new task" button calls show() on it,
    *  and on success we auto-select the new task so the user lands on
-   *  its detail panel and can watch the live stream immediately. */
+   *  its detail panel and can watch the live stream immediately.
+   *  The "edit spec" action on an existing task calls showEdit() on
+   *  the same dialog (edit mode); on save it stays on the spec tab. */
   protected readonly newTaskDialog = viewChild<NewTaskDialog>('newTaskDialog');
   openNewTaskDialog() {
     this.newTaskDialog()?.show();
   }
+  /** Open the dialog in edit-spec mode for the currently-selected task. */
+  editSelectedSpec() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.newTaskDialog()?.showEdit(sel.raw.id, sel.raw.input_payload);
+  }
   onTaskCreated(id: string) {
+    // Same callback fires in both create and edit-spec modes. In create
+    // mode we want to switch to the live stream; in edit mode we stay
+    // on the spec tab so the user sees their just-saved revision.
+    const wasEdit = this.selectedId() === id;
     this.refreshTasks();
     this.selectedId.set(id);
+    if (wasEdit) {
+      this.syncQueryParams({ task: id });
+      return;
+    }
     this.detailTab.set('stream');
     this.syncQueryParams({ task: id, tab: 'stream' });
     this.openStream(id);

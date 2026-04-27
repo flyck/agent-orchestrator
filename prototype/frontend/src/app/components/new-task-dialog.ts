@@ -148,29 +148,36 @@ const KINDS: KindOption[] = [
   template: `
     @if (open()) {
       <div class="overlay" (click)="cancel()"></div>
-      <div class="dialog" role="dialog" aria-label="New task">
+      <div class="dialog" role="dialog" [attr.aria-label]="editingId() ? 'Edit spec' : 'New task'">
         <header>
           <p class="meta">spec · per the manifesto, you author this</p>
-          <h2>New task</h2>
+          <h2>{{ editingId() ? 'Edit spec' : 'New task' }}</h2>
         </header>
 
         <div class="form">
-          <label class="label-row">
-            <span class="label">Kind</span>
-            <select [ngModel]="kind()" (ngModelChange)="setKind($event)" name="kind">
-              @for (k of kinds; track k.value) {
-                <option [value]="k.value">{{ k.label }}</option>
-              }
-            </select>
-          </label>
+          @if (!editingId()) {
+            <label class="label-row">
+              <span class="label">Kind</span>
+              <select [ngModel]="kind()" (ngModelChange)="setKind($event)" name="kind">
+                @for (k of kinds; track k.value) {
+                  <option [value]="k.value">{{ k.label }}</option>
+                }
+              </select>
+            </label>
 
-          <label class="label-row">
-            <span class="label">Title</span>
-            <input type="text" name="title"
-                   [(ngModel)]="title"
-                   placeholder="One-line summary, e.g. 'Add Today/Week/Month range buttons to usage chart'"
-                   maxlength="500" />
-          </label>
+            <label class="label-row">
+              <span class="label">Title</span>
+              <input type="text" name="title"
+                     [(ngModel)]="title"
+                     placeholder="One-line summary, e.g. 'Add Today/Week/Month range buttons to usage chart'"
+                     maxlength="500" />
+            </label>
+          } @else {
+            <p class="meta editing-context">
+              editing <code class="mono">{{ editingId() }}</code> — saves a new revision.
+              The agent does not auto-pick this up; click "Send back" on the task to apply.
+            </p>
+          }
 
           <label class="label-row stretch">
             <span class="label">Spec</span>
@@ -201,8 +208,9 @@ const KINDS: KindOption[] = [
 
         <footer>
           <button type="button" (click)="cancel()" [disabled]="busy()">Cancel</button>
-          <button type="button" class="primary" (click)="submit()" [disabled]="busy() || !title().trim()">
-            {{ busy() ? 'Creating…' : 'Create & run' }}
+          <button type="button" class="primary" (click)="submit()"
+                  [disabled]="busy() || (!editingId() && !title().trim())">
+            {{ submitLabel() }}
           </button>
         </footer>
       </div>
@@ -268,6 +276,14 @@ const KINDS: KindOption[] = [
         color: var(--ink-muted);
       }
       .status.error { color: var(--ink-red); }
+      .editing-context {
+        margin: 0 0 4px;
+        padding: 6px 10px;
+        background: var(--paper-soft);
+        border: 1px solid var(--rule);
+        font-size: 12px;
+      }
+      .editing-context code { font-size: 11.5px; }
       .hints {
         display: flex;
         flex-direction: column;
@@ -304,20 +320,40 @@ export class NewTaskDialog {
   protected readonly title = signal('');
   protected readonly spec = signal(TEMPLATES.feature);
   protected readonly kind = signal<DialogKind>('feature');
+  /** When set, the dialog is in edit-spec mode for that task id. Null = create. */
+  protected readonly editingId = signal<string | null>(null);
 
   /** Soft hints listing section names whose body is still the template
    *  placeholder. Recomputed on every spec keystroke (cheap — small string,
    *  one regex pass per line). */
   protected readonly emptySections = computed(() => emptySectionNames(this.spec()));
 
-  /** Emitted with the new task id once create+run succeed, so the parent
-   *  page can select it (drives ?task=<id> + opens the detail panel). */
+  /** Submit-button label tracks mode and busy state. */
+  protected readonly submitLabel = computed(() => {
+    if (this.busy()) return this.editingId() ? 'Saving…' : 'Creating…';
+    return this.editingId() ? 'Save revision' : 'Create & run';
+  });
+
+  /** Emitted with the new task id once create+run succeed (create mode),
+   *  or the edited task id once save succeeds (edit mode). The parent
+   *  page can use this to refresh / select the task. */
   @Output() created = new EventEmitter<string>();
 
   show() {
+    this.editingId.set(null);
     this.title.set('');
     this.kind.set('feature');
     this.spec.set(TEMPLATES.feature);
+    this.status.set(null);
+    this.error.set(false);
+    this.open.set(true);
+  }
+
+  /** Open in edit-spec mode, pre-filled with the current spec. */
+  showEdit(taskId: string, currentSpec: string) {
+    this.editingId.set(taskId);
+    this.title.set('');
+    this.spec.set(currentSpec);
     this.status.set(null);
     this.error.set(false);
     this.open.set(true);
@@ -340,6 +376,15 @@ export class NewTaskDialog {
   }
 
   submit() {
+    const editingId = this.editingId();
+    if (editingId) {
+      this.submitEdit(editingId);
+      return;
+    }
+    this.submitCreate();
+  }
+
+  private submitCreate() {
     const title = this.title().trim();
     if (!title) return;
     this.busy.set(true);
@@ -376,5 +421,23 @@ export class NewTaskDialog {
           this.status.set(`Create failed: ${e?.error?.message ?? e?.message ?? e}`);
         },
       });
+  }
+
+  private submitEdit(taskId: string) {
+    this.busy.set(true);
+    this.error.set(false);
+    this.status.set('saving revision…');
+    this.tasksApi.updateSpec(taskId, this.spec()).subscribe({
+      next: () => {
+        this.busy.set(false);
+        this.open.set(false);
+        this.created.emit(taskId);
+      },
+      error: (e) => {
+        this.busy.set(false);
+        this.error.set(true);
+        this.status.set(`Save failed: ${e?.error?.message ?? e?.message ?? e}`);
+      },
+    });
   }
 }

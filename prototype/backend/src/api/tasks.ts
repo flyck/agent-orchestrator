@@ -10,9 +10,11 @@ import {
   setNeedsFeedback,
   setTaskDifficulty,
   setTaskProgress,
+  updateTaskSpec,
   type TaskWorkspace,
   type TaskStatus,
 } from "../db/tasks";
+import { listSpecRevisions } from "../db/specRevisions";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
@@ -57,6 +59,10 @@ const difficultySchema = z.object({
 
 const needsFeedbackSchema = z.object({
   question: z.string().min(1).max(1000),
+});
+
+const specSchema = z.object({
+  spec: z.string().min(1).max(50_000),
 });
 
 export const tasks = new Hono();
@@ -259,6 +265,34 @@ tasks.post("/:id/clear-feedback", async (c) => {
   const id = c.req.param("id");
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json(clearNeedsFeedback(id));
+});
+
+/**
+ * Replace the task's spec markdown. Writes a new spec_revisions row so
+ * the history is preserved. The agent does not auto-pick up the new
+ * spec — the user can rerun via Send Back if they want it applied.
+ *
+ * Per docs/10: hard-blocking edits in any state would conflict with
+ * "no friction"; the user owns the spec and can edit any time.
+ */
+tasks.put("/:id/spec", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = specSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_spec", issues: parsed.error.issues }, 400);
+  }
+  const t = updateTaskSpec(id, parsed.data.spec);
+  log.info("api.tasks.spec_updated", { id, len: parsed.data.spec.length });
+  return c.json(t);
+});
+
+/** Newest-first list of past spec revisions for this task. */
+tasks.get("/:id/revisions", (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  return c.json({ revisions: listSpecRevisions(id) });
 });
 
 /**

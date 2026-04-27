@@ -444,9 +444,18 @@
 .spec-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
+  .spec-head-spacer { flex: 1; }
+  .meta-action {
+    background: transparent;
+    border: 1px solid var(--rule-strong);
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--ink-muted);
+  }
+  .meta-action:hover { color: var(--ink); border-color: var(--ink); }
 }
 .spec-body {
   background: var(--paper-soft);

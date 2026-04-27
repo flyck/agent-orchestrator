@@ -275,8 +275,15 @@
       <section class="spec-section">
         <header class="spec-head">
           <p class="meta">spec ({{ sel.raw.input_kind }})</p>
+          <span class="spec-head-spacer"></span>
           @if (sel.raw.current_step !== null && sel.raw.total_steps !== null) {
             <span class="meta">step {{ sel.raw.current_step }}/{{ sel.raw.total_steps }} · {{ sel.raw.step_label }}</span>
+          }
+          @if (sel.raw.input_kind === 'spec') {
+            <button type="button" class="meta-action" (click)="editSelectedSpec()"
+                    title="Open the spec editor; saves a new revision. Click 'Send back' on the task to apply.">
+              edit spec
+            </button>
           }
         </header>
         <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>

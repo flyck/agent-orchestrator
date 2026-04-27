@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 import { db } from "./index";
+import { appendSpecRevision } from "./specRevisions";
 
 export type TaskWorkspace = "review" | "feature" | "bugfix" | "arch_compare" | "background" | "internal";
 export type TaskQueue = "foreground" | "background";
@@ -54,27 +55,58 @@ export interface CreateTaskInput {
 export function createTask(input: CreateTaskInput, handle: Database = db()): TaskRow {
   const id = `tsk_${nanoid(16)}`;
   const now = Date.now();
-  handle
-    .prepare(
-      `INSERT INTO tasks (id, workspace, queue, title, input_kind, input_payload,
-                          repo_path, worktree_path, worktree_branch, worktree_base_ref,
-                          status, current_state, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?)`,
-    )
-    .run(
-      id,
-      input.workspace,
-      input.queue ?? "foreground",
-      input.title,
-      input.input_kind,
-      input.input_payload,
-      input.repo_path ?? null,
-      "queued",
-      input.initial_state ?? "spec",
-      now,
-      now,
-    );
+  // Insert + initial spec revision in one transaction so the row never
+  // exists without a matching revision (the spec tab assumes at least
+  // version 1 is present once a task is visible).
+  const tx = handle.transaction(() => {
+    handle
+      .prepare(
+        `INSERT INTO tasks (id, workspace, queue, title, input_kind, input_payload,
+                            repo_path, worktree_path, worktree_branch, worktree_base_ref,
+                            status, current_state, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.workspace,
+        input.queue ?? "foreground",
+        input.title,
+        input.input_kind,
+        input.input_payload,
+        input.repo_path ?? null,
+        "queued",
+        input.initial_state ?? "spec",
+        now,
+        now,
+      );
+    // Only spec-kind inputs warrant revision history. Diff/path/prompt
+    // tasks (Review tab inputs etc.) don't carry user-edited prose.
+    if (input.input_kind === "spec") {
+      appendSpecRevision(id, input.input_payload, handle);
+    }
+  });
+  tx();
   return getTask(id, handle)!;
+}
+
+/**
+ * Replace the task's spec markdown and append a new revision row. Returns
+ * the updated task. The agent does NOT auto-pick up the new spec — the
+ * user can click "Send Back" to rerun with the latest spec as feedback.
+ */
+export function updateTaskSpec(
+  id: string,
+  specMd: string,
+  handle: Database = db(),
+): TaskRow | null {
+  const tx = handle.transaction(() => {
+    handle
+      .prepare("UPDATE tasks SET input_payload = ?, updated_at = ? WHERE id = ?")
+      .run(specMd, Date.now(), id);
+    appendSpecRevision(id, specMd, handle);
+  });
+  tx();
+  return getTask(id, handle);
 }
 
 export function getTask(id: string, handle: Database = db()): TaskRow | null {

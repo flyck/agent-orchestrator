@@ -163,4 +163,23 @@ export class TasksService {
   finalize(id: string, input: FinalizeInput): Observable<FinalizeResult> {
     return this.http.post<FinalizeResult>(`/api/tasks/${id}/finalize`, input);
   }
+
+  /** Replace the task's spec markdown. Backend appends a new
+   *  spec_revisions row; the agent does NOT auto-pick this up. */
+  updateSpec(id: string, spec: string): Observable<Task> {
+    return this.http.put<Task>(`/api/tasks/${id}/spec`, { spec });
+  }
+
+  /** Newest-first list of past spec revisions. */
+  listRevisions(id: string): Observable<{ revisions: SpecRevision[] }> {
+    return this.http.get<{ revisions: SpecRevision[] }>(`/api/tasks/${id}/revisions`);
+  }
+}
+
+export interface SpecRevision {
+  id: number;
+  task_id: string;
+  version: number;
+  spec_md: string;
+  created_at: number;
 }
