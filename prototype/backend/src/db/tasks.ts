@@ -13,7 +13,21 @@ export type TaskStatus =
   | "failed"
   | "canceled"
   | "findings_pending";
-export type TaskState = "spec" | "plan" | "build" | "ready" | "finalize";
+/** Pipeline states.
+ *
+ * `code` and `review` split the old monolithic `build` state — the coder
+ * agent runs in `code`, then a reviewer runs in `review`, then the user
+ * accepts in `ready` / `finalize`. `build` is retained as a legacy alias
+ * for tasks created before the split; the frontend renders it as `code`.
+ */
+export type TaskState =
+  | "spec"
+  | "plan"
+  | "code"
+  | "review"
+  | "build"
+  | "ready"
+  | "finalize";
 
 export interface TaskRow {
   id: string;

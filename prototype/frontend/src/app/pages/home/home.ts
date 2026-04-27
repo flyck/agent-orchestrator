@@ -17,19 +17,32 @@ import type { Subscription } from 'rxjs';
 
 /**
  * Pipeline state, in order. Each task lives in exactly one state.
- * Implement+Review run interleaved as a single phase ("Build"). After the
- * agent goes Ready, the user reviews in their IDE and clicks one of the
- * two finalize options (commit current / commit new branch).
+ * `code` and `review` split the old `build` phase: the coder writes,
+ * then a reviewer agent reads the diff and either accepts or sends
+ * the task back to coding. After Ready, the user finalizes with a
+ * commit-strategy choice.
  */
-export const PIPELINE_STATES = ['spec', 'plan', 'build', 'ready', 'finalize'] as const;
+export const PIPELINE_STATES = ['spec', 'plan', 'code', 'review', 'ready', 'finalize'] as const;
 export type PipelineState = (typeof PIPELINE_STATES)[number];
+
+/** Who drives this state — used by the state strip to render a robot
+ *  (agent) or engineer (human) icon over each node. */
+export const STATE_ROLE: Record<PipelineState, 'human' | 'agent'> = {
+  spec: 'human',
+  plan: 'agent',
+  code: 'agent',
+  review: 'agent',
+  ready: 'human',
+  finalize: 'human',
+};
 
 export type TaskKind = 'feature' | 'bugfix' | 'arch';
 
 const STATE_LABELS: Record<PipelineState, string> = {
   spec: 'Spec',
   plan: 'Plan',
-  build: 'Implement & Review',
+  code: 'Code',
+  review: 'Review',
   ready: 'Ready',
   finalize: 'Finalize',
 };
@@ -52,11 +65,20 @@ function progressForState(state: TaskState | null, status: string): number {
   switch (state) {
     case 'spec': return 0.15;
     case 'plan': return 0.35;
-    case 'build': return 0.65;
+    case 'code':
+    case 'build': return 0.55;
+    case 'review': return 0.75;
     case 'ready': return 0.9;
     case 'finalize': return 0.95;
     default: return 0;
   }
+}
+
+/** Map a raw backend state to a pipeline-state display value. Legacy
+ *  `build` rows render as `code`; everything else is identity. */
+function normalizeState(s: TaskState | null): PipelineState {
+  if (s === 'build') return 'code';
+  return (s ?? 'spec') as PipelineState;
 }
 
 function deriveProgress(t: Task): {
@@ -207,8 +229,9 @@ function toViewTask(t: Task): ViewTask {
   // Closed = task has reached a terminal status (done/failed/canceled).
   const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
   // Map raw state to pipeline state. If the task is "done" its column should
-  // be ready unless it's already in finalize.
-  const baseState: PipelineState = (t.current_state ?? 'spec') as PipelineState;
+  // be ready unless it's already in finalize. `build` is a legacy alias for
+  // `code` (states pre-dating the code/review split).
+  const baseState: PipelineState = normalizeState(t.current_state);
   const state: PipelineState = closed && baseState !== 'finalize' ? 'ready' : baseState;
   const p = deriveProgress(t);
   return {
@@ -242,10 +265,20 @@ export class HomePage {
 
   protected readonly states = PIPELINE_STATES;
   protected readonly stateLabels = STATE_LABELS;
+  protected readonly stateRole = STATE_ROLE;
   protected readonly kindLabels = KIND_LABELS;
   protected readonly formatTs = formatTs;
   protected readonly relativeTs = relativeTs;
   protected readonly terminalStatuses = new Set(['done', 'failed', 'canceled']);
+
+  /** True when state `s` precedes the current state in the pipeline order. */
+  isPastState(s: PipelineState, current: PipelineState): boolean {
+    return PIPELINE_STATES.indexOf(s) < PIPELINE_STATES.indexOf(current);
+  }
+  /** True when state `s` comes after the current state. */
+  isFutureState(s: PipelineState, current: PipelineState): boolean {
+    return PIPELINE_STATES.indexOf(s) > PIPELINE_STATES.indexOf(current);
+  }
 
   /** Ticks every second so the per-card "Xs in this stage" counters stay live
    *  without waiting for the 5s task-list poll. Cheap — pure signal update,
@@ -274,7 +307,7 @@ export class HomePage {
 
   protected readonly tasksByState = computed(() => {
     const groups: Record<PipelineState, ViewTask[]> = {
-      spec: [], plan: [], build: [], ready: [], finalize: [],
+      spec: [], plan: [], code: [], review: [], ready: [], finalize: [],
     };
     for (const t of this.visibleTasks()) groups[t.state].push(t);
     // Ready column gets a deterministic order (newest-updated first) so

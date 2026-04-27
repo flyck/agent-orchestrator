@@ -18,7 +18,17 @@ export type TaskStatus =
   | 'failed'
   | 'canceled'
   | 'findings_pending';
-export type TaskState = 'spec' | 'plan' | 'build' | 'ready' | 'finalize';
+/** Pipeline states. `code` and `review` split the old `build` state; we
+ *  keep `build` for tasks that pre-date the split (frontend renders it as
+ *  `code` for display purposes). */
+export type TaskState =
+  | 'spec'
+  | 'plan'
+  | 'code'
+  | 'review'
+  | 'build'
+  | 'ready'
+  | 'finalize';
 
 export interface Task {
   id: string;

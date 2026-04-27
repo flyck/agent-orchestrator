@@ -258,7 +258,7 @@ async function startRunInternal(
     throw err;
   }
 
-  updateTaskStatus(taskId, "running", "build");
+  updateTaskStatus(taskId, "running", "code");
 
   const a: ActiveTask = {
     taskId,
