@@ -565,9 +565,25 @@ export class HomePage {
   }
 
   // ─── Manual-coding nudge banner ───────────────────────────────────────
-  protected readonly nudgeVisible = signal(true);
+  // Driven by the backend counter: backend bumps `completed_since_last_nudge`
+  // on every successful task termination; banner is shown once that hits
+  // the configured threshold. Dismiss zeroes the counter server-side.
+  // `threshold = 0` disables the nudge entirely.
+  protected readonly nudgeCompleted = signal(0);
+  protected readonly nudgeThreshold = signal(0);
+  protected readonly nudgeVisible = computed(() => {
+    const t = this.nudgeThreshold();
+    return t > 0 && this.nudgeCompleted() >= t;
+  });
   dismissNudge() {
-    this.nudgeVisible.set(false);
+    // Optimistic — hide immediately, then sync the counter from the server.
+    this.nudgeCompleted.set(0);
+    this.settingsApi.dismissNudge().subscribe({
+      next: (s) => {
+        this.nudgeCompleted.set(s.completed_since_last_nudge);
+        this.nudgeThreshold.set(s.manual_coding_nudge_after_n_tasks);
+      },
+    });
   }
 
   // ─── Token usage chart ────────────────────────────────────────────────
@@ -699,16 +715,23 @@ export class HomePage {
         }
       });
 
-    // Settings — one-shot for poll display + IDE/emacs/magit availability.
-    this.settingsApi.get().subscribe({
-      next: (s) => {
+    // Settings — poll every 10s. We need the nudge counter to refresh as
+    // tasks finish, and one-time fields (IDE commands, poll interval) just
+    // come along for the ride; updates are cheap.
+    timer(0, 10_000)
+      .pipe(
+        takeUntil(this.destroy$),
+        switchMap(() => this.settingsApi.get().pipe(catchError(() => of(null)))),
+      )
+      .subscribe((s) => {
+        if (!s) return;
         this.prPollMinutes.set(s.pr_review_poll_interval_minutes);
         this.hasIdeCommand.set(!!s.ide_open_command?.trim());
         this.hasEmacsCommand.set(!!s.emacs_open_command?.trim());
         this.hasMagitCommand.set(!!s.magit_open_command?.trim());
-      },
-      error: () => this.prPollMinutes.set(null),
-    });
+        this.nudgeCompleted.set(s.completed_since_last_nudge);
+        this.nudgeThreshold.set(s.manual_coding_nudge_after_n_tasks);
+      });
 
     // Live tick for the stage timers — every 1000ms.
     timer(0, 1000)

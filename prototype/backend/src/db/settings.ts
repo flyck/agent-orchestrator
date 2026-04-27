@@ -67,6 +67,26 @@ export function readAllSettings(handle: Database = db()): Settings {
   return out as Settings;
 }
 
+/** Atomically bump completed_since_last_nudge. Called on every successful
+ *  task termination so the nudge fires after the configured cadence. */
+export function incrementCompletedSinceNudge(handle: Database = db()): number {
+  const row = handle
+    .query<{ value: string }, [string]>("SELECT value FROM settings WHERE key = ?")
+    .get("completed_since_last_nudge");
+  const next = (row?.value ? Number(row.value) : 0) + 1;
+  handle
+    .prepare("UPDATE settings SET value = ? WHERE key = ?")
+    .run(String(next), "completed_since_last_nudge");
+  return next;
+}
+
+/** Reset the nudge counter — invoked by POST /api/nudge/dismiss. */
+export function resetCompletedSinceNudge(handle: Database = db()): void {
+  handle
+    .prepare("UPDATE settings SET value = '0' WHERE key = ?")
+    .run("completed_since_last_nudge");
+}
+
 export function updateSettings(patch: Partial<Settings>, handle: Database = db()): Settings {
   const upsert = handle.prepare(
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",

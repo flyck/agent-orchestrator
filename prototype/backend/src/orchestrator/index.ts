@@ -28,6 +28,7 @@ import {
   updateTaskStatus,
   type TaskRow,
 } from "../db/tasks";
+import { incrementCompletedSinceNudge } from "../db/settings";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
 import { readFileSync } from "node:fs";
@@ -414,6 +415,18 @@ async function startRunInternal(
           ? task.current_state
           : "ready";
       updateTaskStatus(taskId, finalStatus, finalState);
+      // Bump the manual-coding nudge counter on real completions only —
+      // failed/canceled runs don't count, so the user sees the nudge after
+      // N actually-shipped tasks. Force-complete counts too: user decided
+      // it was done.
+      if (finalStatus === "done") {
+        try {
+          const n = incrementCompletedSinceNudge();
+          log.info("orchestrator.run.nudge_counter_bumped", { taskId, completed: n });
+        } catch (err) {
+          log.warn("orchestrator.run.nudge_counter_failed", { taskId, error: String(err) });
+        }
+      }
       // Tell the queue we're done so it can promote the next pending task.
       queue.release(taskId);
       const lastErrorStr = lastError

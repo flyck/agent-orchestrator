@@ -35,4 +35,9 @@ export class SettingsService {
   update(patch: Partial<Settings>): Observable<Settings> {
     return this.http.put<Settings>('/api/settings', patch);
   }
+
+  /** Resets `completed_since_last_nudge` server-side and returns fresh settings. */
+  dismissNudge(): Observable<Settings> {
+    return this.http.post<Settings>('/api/nudge/dismiss', {});
+  }
 }
