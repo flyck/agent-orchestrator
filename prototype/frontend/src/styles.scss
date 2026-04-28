@@ -18,6 +18,7 @@
   --ink-red-bg:   #F5E9E7;
   --ink-amber:    #A66A1F;   /* used only for "agent needs your attention" */
   --ink-amber-bg: #F4E7CF;
+  --ink-green:    #2E7D32;   /* online / success */
 
   /* Muted state tints — used on pipeline cards / columns. Low saturation
      to stay compatible with the paper aesthetic; ink ratio still dominates. */
@@ -51,6 +52,7 @@
     --ink-red-bg:   #3A1F1F;
     --ink-amber:    #E5B870;
     --ink-amber-bg: #3A2D14;
+    --ink-green:    #66D48E;
 
     --state-spec-bg:    #2A271D;   /* sand */
     --state-spec-edge:  #66603F;
@@ -165,3 +167,9 @@ hr {
 .dot.errored  { background: var(--ink-red); }
 .dot.waiting  { background: var(--ink-amber); }   /* agent needs user input */
 .dot.pending  { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-faint); }
+
+/* Navbar-specific: treat `done` in the topbar status area as "online" (green).
+   Keep the global .dot.done as-is for other UI uses. */
+.topbar .status .dot.done {
+  background: var(--ink-green);
+}
