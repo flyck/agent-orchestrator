@@ -190,3 +190,56 @@ curl -s -X POST '{{BASE_URL}}/api/tasks/{{TASK_ID}}/alternatives' \
 Empty `alternatives: []` is legal and means "I considered, none worth
 showing" — useful when the implementation is the only sensible shape
 and you don't want to fabricate options.
+
+## 6. Posting back to GitHub (PR-review tasks only)
+
+When the orchestrator handed you a GitHub PR review task, the user's
+GitHub token lives on the orchestrator. **You never see it.** If you
+want to publish your output back to the PR — as a conversation
+comment or a formal review — go through the orchestrator's proxy
+endpoints below. They look up the PR coordinates from the task and
+make the GH call on your behalf.
+
+**Most agent roles do not post to GitHub.** Only do this if your
+role-specific prompt explicitly tells you to (currently: only the
+synthesizer in the gated PR-review pipeline, and only as the final
+step). Posting is irreversible and visible to the PR author.
+
+**Top-level conversation comment** — lands in the PR's Conversation
+tab, like `gh pr comment`. Use for the synthesizer's final digest:
+
+```bash
+curl -s -X POST '{{BASE_URL}}/api/integrations/github/comment' \
+  -H 'content-type: application/json' \
+  -d '{
+    "task_id": "{{TASK_ID}}",
+    "confirm": true,
+    "body": "<markdown body — the synthesizer output>"
+  }'
+```
+
+**Formal PR review** — submits a review with body + event=COMMENT
+(neither approve nor request-changes; the agent never speaks on the
+user's behalf as the reviewer-of-record). Use for findings that
+should appear in the Files Changed → Reviews list:
+
+```bash
+curl -s -X POST '{{BASE_URL}}/api/integrations/github/review' \
+  -H 'content-type: application/json' \
+  -d '{
+    "task_id": "{{TASK_ID}}",
+    "event": "COMMENT",
+    "confirm": true,
+    "body": "<markdown body>"
+  }'
+```
+
+`confirm: true` is required on both — a deliberate friction so a
+half-formed agent reply doesn't ping the PR author.
+
+The orchestrator returns `{ok: true, html_url: "..."}` on success.
+Failures are typically:
+- `task_not_a_pr_review` — task wasn't created from a PR. Skip.
+- `not_connected` — the user disconnected GitHub. Skip.
+- `github_request_failed` with status 403 — the token is read-only.
+  The user needs to rotate to a write-scoped token; do not retry.

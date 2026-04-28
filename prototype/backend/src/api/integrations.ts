@@ -20,11 +20,19 @@ import {
   isRequestedReviewer,
   listPullRequests,
   listRepos,
+  postIssueComment,
+  postPullReview,
   PullFilter,
   validate,
   type GithubPull,
 } from "../integrations/github";
-import { createTask } from "../db/tasks";
+import {
+  createTask,
+  getTask,
+  parseTaskMetadata,
+  setTaskMetadata,
+  type TaskRow,
+} from "../db/tasks";
 import { startRun } from "../orchestrator";
 import { log } from "../log";
 
@@ -249,6 +257,17 @@ integrations.post("/github/prs/:owner/:repo/:number/review", async (c) => {
     repo_path: null,
     initial_state: "review",
   });
+  // Stash GH coordinates on the task so the comment-proxy endpoint can
+  // post back to the right PR without re-parsing the title.
+  setTaskMetadata(task.id, {
+    github: {
+      repo: repoFullName,
+      number,
+      base_ref: pr.base.ref,
+      head_ref: pr.head.ref,
+      html_url: pr.html_url,
+    },
+  });
   log.info("api.integrations.github.review_task_created", {
     taskId: task.id,
     repoFullName,
@@ -261,6 +280,96 @@ integrations.post("/github/prs/:owner/:repo/:number/review", async (c) => {
     log.warn("api.integrations.github.start_run_failed", { taskId: task.id, error: String(err) });
   });
   return c.json({ task_id: task.id });
+});
+
+/**
+ * Proxy: post a top-level conversation comment back to the PR for
+ * `task_id`. Routes through the user's stored GitHub token — the
+ * agent never sees it. v1 expects an autonomous-but-rare action;
+ * `confirm: true` must be set in the payload so accidental calls
+ * during development don't ping anyone.
+ *
+ * Required token scope: write (classic `repo` or fine-grained
+ * `Pull requests: Read and write`). Read-only tokens 403.
+ */
+const postCommentSchema = z.object({
+  task_id: z.string().min(1).max(80),
+  body: z.string().min(1).max(60_000),
+  /** Posting to PR/MR is irreversible. Make the agent assert intent. */
+  confirm: z.literal(true),
+});
+integrations.post("/github/comment", async (c) => {
+  const cfg = getGithubConfig();
+  if (!cfg) return c.json({ error: "not_connected" }, 400);
+  const body = await c.req.json().catch(() => null);
+  const parsed = postCommentSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  const task = getTask(parsed.data.task_id);
+  if (!task) return c.json({ error: "task_not_found" }, 404);
+  const meta = parseTaskMetadata(task.metadata_json).github;
+  if (!meta?.repo || !meta?.number) {
+    return c.json({ error: "task_not_a_pr_review", message: "Task has no GitHub PR coordinates." }, 400);
+  }
+  try {
+    const r = await postIssueComment(cfg.token, meta.repo, meta.number, parsed.data.body);
+    log.info("api.integrations.github.comment_posted", {
+      task_id: task.id,
+      repo: meta.repo,
+      number: meta.number,
+      comment_id: r.id,
+    });
+    return c.json({ ok: true, html_url: r.html_url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("api.integrations.github.comment_failed", { task_id: task.id, message });
+    return c.json({ error: "github_request_failed", message }, 502);
+  }
+});
+
+/**
+ * Proxy: submit the PR-review payload as a formal review with body +
+ * event=COMMENT. Same auth + confirm semantics as /github/comment.
+ * Used by the synthesizer or by a "Post review to GitHub" UI button
+ * on the Ready stage.
+ */
+const postReviewSchema = z.object({
+  task_id: z.string().min(1).max(80),
+  body: z.string().min(1).max(60_000),
+  /** Reserved for the future. v1 forces COMMENT — the orchestrator
+   *  doesn't approve / request-changes on the user's behalf. */
+  event: z.literal("COMMENT").default("COMMENT"),
+  confirm: z.literal(true),
+});
+integrations.post("/github/review", async (c) => {
+  const cfg = getGithubConfig();
+  if (!cfg) return c.json({ error: "not_connected" }, 400);
+  const body = await c.req.json().catch(() => null);
+  const parsed = postReviewSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  const task = getTask(parsed.data.task_id);
+  if (!task) return c.json({ error: "task_not_found" }, 404);
+  const meta = parseTaskMetadata(task.metadata_json).github;
+  if (!meta?.repo || !meta?.number) {
+    return c.json({ error: "task_not_a_pr_review", message: "Task has no GitHub PR coordinates." }, 400);
+  }
+  try {
+    const r = await postPullReview(cfg.token, meta.repo, meta.number, parsed.data.body, "COMMENT");
+    log.info("api.integrations.github.review_posted", {
+      task_id: task.id,
+      repo: meta.repo,
+      number: meta.number,
+      review_id: r.id,
+    });
+    return c.json({ ok: true, html_url: r.html_url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("api.integrations.github.review_post_failed", { task_id: task.id, message });
+    return c.json({ error: "github_request_failed", message }, 502);
+  }
 });
 
 /** Slim the GH pull-request shape for transport — we don't surface the

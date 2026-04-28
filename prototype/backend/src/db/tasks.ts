@@ -152,8 +152,45 @@ export interface TaskRow {
    *  awaiting user approval. The home detail surfaces an
    *  "approve direction / send back" banner driven by this field. */
   awaiting_gate_id: string | null;
+  /** Task-type-specific metadata as a JSON blob. PR-review tasks stash
+   *  GitHub coordinates here ({repo, number, base_ref, head_ref,
+   *  html_url}); other task types may use it later. Parse with
+   *  `parseTaskMetadata`. */
+  metadata_json: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface TaskGithubMetadata {
+  repo: string;
+  number: number;
+  base_ref?: string;
+  head_ref?: string;
+  html_url?: string;
+}
+
+export interface TaskMetadata {
+  github?: TaskGithubMetadata;
+}
+
+export function parseTaskMetadata(raw: string | null): TaskMetadata {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setTaskMetadata(
+  id: string,
+  meta: TaskMetadata,
+  handle: Database = db(),
+): void {
+  handle
+    .prepare("UPDATE tasks SET metadata_json = ?, updated_at = ? WHERE id = ?")
+    .run(JSON.stringify(meta), Date.now(), id);
 }
 
 export interface CreateTaskInput {

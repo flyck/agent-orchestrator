@@ -37,6 +37,8 @@ import {
         </p>
         <details class="gh-perms">
           <summary>required token permissions</summary>
+          <p class="muted small">Two tiers, depending on what you want the orchestrator to do.</p>
+          <h4>Read-only (list PRs, fetch diffs)</h4>
           <ul>
             <li>
               <strong>Classic tokens:</strong> <code>repo</code> scope (covers private repos);
@@ -48,9 +50,27 @@ import {
               <em>Metadata: Read-only</em>. Issues read-only is recommended (the search API
               that backs "review-requested for me" goes through the issues index).
             </li>
-            <li>Email/profile scopes are NOT needed — we identify you by GitHub login,
-              fetched from <code>/user</code>.</li>
           </ul>
+          <h4>Write (post review back as a PR comment)</h4>
+          <ul>
+            <li>
+              <strong>Classic tokens:</strong> <code>repo</code> already covers it.
+            </li>
+            <li>
+              <strong>Fine-grained tokens:</strong> upgrade <em>Pull requests</em> to
+              <em>Read and write</em>. Issues to write only if you want to comment on
+              the underlying issue too.
+            </li>
+            <li>
+              The orchestrator only ever posts <em>COMMENT</em> reviews — never approves
+              or requests changes on your behalf. The button on the Ready stage is the
+              only place this fires.
+            </li>
+          </ul>
+          <p class="muted small">
+            Email / profile scopes are NOT needed — we identify you by GitHub login from
+            <code>/user</code>.
+          </p>
         </details>
         <div class="gh-row">
           <input class="gh-token"
@@ -243,6 +263,12 @@ import {
         padding-left: 18px;
       }
       .gh-perms li { margin: 4px 0; line-height: 1.5; }
+      .gh-perms h4 {
+        margin: 10px 0 4px;
+        font-family: var(--font-serif);
+        font-size: 13.5px;
+        letter-spacing: -0.005em;
+      }
       .gh-perms code {
         background: var(--paper-soft);
         padding: 0 4px;

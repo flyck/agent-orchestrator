@@ -93,6 +93,11 @@ function applyMigrations(db: Database) {
   // existing runLifecycle continues to handle code-task workspaces).
   ensureColumn("tasks", "pipeline_id", "TEXT");
   ensureColumn("tasks", "awaiting_gate_id", "TEXT");
+  // Task-type-specific metadata as a JSON blob. PR-review tasks stash
+  // the GitHub coordinates (repo full name, number, base_ref, head_ref,
+  // html_url) here so the comment-proxy endpoint can post back to the
+  // right PR without re-parsing the task title.
+  ensureColumn("tasks", "metadata_json", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

@@ -232,6 +232,56 @@ export async function fetchPullRequest(
 }
 
 /**
+ * Post a top-level comment on the PR's underlying issue. This is what
+ * `gh pr comment` does — it lands in the PR conversation tab, not as
+ * an inline review comment.
+ *
+ * Requires the token to have write scope (classic: `repo`,
+ * fine-grained: `Pull requests: Read and write`). Read-only tokens
+ * 403 here.
+ */
+export async function postIssueComment(
+  token: string,
+  repoFullName: string,
+  issueNumber: number,
+  body: string,
+): Promise<{ id: number; html_url: string }> {
+  const res = await ghFetch(
+    `/repos/${repoFullName}/issues/${issueNumber}/comments`,
+    token,
+    { method: "POST", body: JSON.stringify({ body }) },
+  );
+  if (!res.ok) throw new GithubError(res.status, `/repos/${repoFullName}/issues/${issueNumber}/comments`, await res.text());
+  return res.json() as Promise<{ id: number; html_url: string }>;
+}
+
+/**
+ * Submit a PR review with a body and an event verdict. Used when the
+ * orchestrator wants to publish the synthesizer's output as a single
+ * formal review (rather than a free-form comment).
+ *
+ * `event` matches the GitHub API: APPROVE / REQUEST_CHANGES / COMMENT.
+ * The orchestrator only emits COMMENT in v1 — APPROVE / REQUEST_CHANGES
+ * imply the agent is the reviewer of record, which we don't want
+ * without an explicit user approval step.
+ */
+export async function postPullReview(
+  token: string,
+  repoFullName: string,
+  number: number,
+  body: string,
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES" = "COMMENT",
+): Promise<{ id: number; html_url: string }> {
+  const res = await ghFetch(
+    `/repos/${repoFullName}/pulls/${number}/reviews`,
+    token,
+    { method: "POST", body: JSON.stringify({ body, event }) },
+  );
+  if (!res.ok) throw new GithubError(res.status, `/repos/${repoFullName}/pulls/${number}/reviews`, await res.text());
+  return res.json() as Promise<{ id: number; html_url: string }>;
+}
+
+/**
  * Fetch the unified diff for a PR. Uses the `application/vnd.github.v3.diff`
  * accept header, which returns plain text.
  */
