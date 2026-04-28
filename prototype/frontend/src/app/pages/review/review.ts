@@ -9,36 +9,62 @@ import {
   type PrFilter,
 } from '../../services/integrations.service';
 import { TasksService, type Task } from '../../services/tasks.service';
-import {
-  PIPELINE_STATES,
-  STATE_ROLE,
-  formatTs,
-  relativeTs,
-  type PipelineState,
-} from '../home/home';
+import { formatTs, relativeTs } from '../home/home';
 
-const STATE_LABELS: Record<PipelineState, string> = {
-  spec: 'Spec',
-  plan: 'Plan',
-  code: 'Code',
-  review: 'Review',
+/**
+ * PR-review pipeline phases (Design A). Mirrors the order in
+ * `orchestrator/pipelines.ts:PR_REVIEW_GATED_PIPELINE`. Kept as its
+ * own const here so the Review page is independent of the home
+ * (code-task) pipeline list.
+ */
+export const REVIEW_PIPELINE_STATES = [
+  'intake',
+  'explore',
+  'direction-gate',
+  'deep-review',
+  'synthesis',
+  'ready',
+] as const;
+export type ReviewPipelineState = (typeof REVIEW_PIPELINE_STATES)[number];
+
+const STATE_LABELS: Record<ReviewPipelineState, string> = {
+  intake: 'Intake',
+  explore: 'Explore',
+  'direction-gate': 'Direction',
+  'deep-review': 'Deep Review',
+  synthesis: 'Synthesis',
   ready: 'Ready',
-  finalize: 'Finalize',
+};
+
+/** Engineer (human) on gates + ready; robot (agent) on the rest. */
+const STATE_ROLE: Record<ReviewPipelineState, 'human' | 'agent'> = {
+  intake: 'agent',
+  explore: 'agent',
+  'direction-gate': 'human',
+  'deep-review': 'agent',
+  synthesis: 'agent',
+  ready: 'human',
 };
 
 interface ReviewCard {
   raw: Task;
-  state: PipelineState;
+  state: ReviewPipelineState;
   status: 'open' | 'closed';
 }
 
+/**
+ * Map a task's raw current_state into a column on the Review page.
+ * Anything that isn't one of the pipeline phases (legacy review-tasks
+ * created before Phase 16) maps to 'ready' so old rows still appear
+ * in the History at least, and don't visually pollute the new columns.
+ */
 function toCard(t: Task): ReviewCard {
   const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
-  // current_state can be a legacy 'build' for older rows; map to 'code'
-  // before narrowing to PipelineState.
-  const raw = (t.current_state ?? 'review') as string;
-  let state: PipelineState = (raw === 'build' ? 'code' : raw) as PipelineState;
-  if (closed && state !== 'finalize') state = 'ready';
+  const raw = (t.current_state ?? 'intake') as string;
+  let state: ReviewPipelineState = (REVIEW_PIPELINE_STATES as readonly string[]).includes(raw)
+    ? (raw as ReviewPipelineState)
+    : 'ready';
+  if (closed && state !== 'ready') state = 'ready';
   return { raw: t, state, status: closed ? 'closed' : 'open' };
 }
 
@@ -320,11 +346,14 @@ function relativeTsIso(iso: string): string {
         gap: 12px;
         background: var(--paper);
       }
-      .column[data-state='spec']     { border-top-color: var(--state-spec-edge); }
-      .column[data-state='plan']     { border-top-color: var(--state-plan-edge); }
-      .column[data-state='build']    { border-top-color: var(--state-build-edge); }
-      .column[data-state='ready']    { border-top-color: var(--state-ready-edge); }
-      .column[data-state='finalize'] { border-top-color: var(--rule-strong); }
+      /* Color the column tops by phase, reusing the home page's
+         state-edge tokens so the two pipelines feel coherent. */
+      .column[data-state='intake']         { border-top-color: var(--state-spec-edge); }
+      .column[data-state='explore']        { border-top-color: var(--state-plan-edge); }
+      .column[data-state='direction-gate'] { border-top-color: var(--ink-amber); }
+      .column[data-state='deep-review']    { border-top-color: var(--state-build-edge); }
+      .column[data-state='synthesis']      { border-top-color: var(--state-plan-edge); }
+      .column[data-state='ready']          { border-top-color: var(--state-ready-edge); }
       .column-head {
         display: flex;
         justify-content: space-between;
@@ -492,7 +521,7 @@ export class ReviewPage implements OnDestroy {
   private tasksApi = inject(TasksService);
   private router = inject(Router);
 
-  protected readonly states = PIPELINE_STATES;
+  protected readonly states = REVIEW_PIPELINE_STATES;
   protected readonly stateLabels = STATE_LABELS;
   protected readonly stateRole = STATE_ROLE;
   protected readonly relativeTs = relativeTs;
@@ -533,8 +562,13 @@ export class ReviewPage implements OnDestroy {
     );
   });
   protected readonly openByState = computed(() => {
-    const groups: Record<PipelineState, ReviewCard[]> = {
-      spec: [], plan: [], code: [], review: [], ready: [], finalize: [],
+    const groups: Record<ReviewPipelineState, ReviewCard[]> = {
+      intake: [],
+      explore: [],
+      'direction-gate': [],
+      'deep-review': [],
+      synthesis: [],
+      ready: [],
     };
     for (const t of this.openTasks()) groups[t.state].push(t);
     return groups;
