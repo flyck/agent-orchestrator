@@ -398,6 +398,20 @@
         <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
       </section>
 
+      <!-- Concept diagram: pulled from the intake agent's
+           diagram_mermaid YAML field (PR-review tasks only). Hidden
+           when intake hasn't run yet or didn't draw one. -->
+      @if (intakeDiagram()) {
+        <section class="diagram-section">
+          <header class="diagram-head">
+            <p class="meta">concept · drawn by the intake agent</p>
+          </header>
+          <app-mermaid-diagram
+            [source]="intakeDiagram()"
+            [darkMode]="darkMode()" />
+        </section>
+      }
+
       <!-- Plan notes: the planner agent writes .agent-notes/<id>.md
            which the coder reads on its first turn. Surfacing the same
            content here so the user knows what context is being passed
@@ -530,6 +544,14 @@
               <app-scoring-radar
                 [scoring]="scoringForAlt(alt)"
                 [darkMode]="darkMode()" />
+              @if (alt.diagram_mermaid) {
+                <div class="alt-diagram">
+                  <p class="meta">concept · this alternative</p>
+                  <app-mermaid-diagram
+                    [source]="alt.diagram_mermaid"
+                    [darkMode]="darkMode()" />
+                </div>
+              }
             </section>
           }
         }

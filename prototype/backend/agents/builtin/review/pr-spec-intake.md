@@ -59,6 +59,57 @@ linked_issues:
   ...
 
 confidence: high | medium | low
+
+diagram_mermaid: |
+  <Mermaid `flowchart` source — concept of the PR. Show the entities
+   touched (existing modules, new files, external systems) as nodes,
+   and the relationships / data flow as edges. Mark new nodes with
+   `:::new`, modified with `:::mod`, removed with `:::del`. Cap at
+   ~12 nodes — this is a conceptual sketch, not an architecture
+   diagram. Omit the field if the diff is too small to map (single
+   string change, copy edit, etc.).>
+```
+
+### Diagram conventions
+
+When you produce `diagram_mermaid`:
+
+- Start with `flowchart LR` (left-to-right reads better than top-down
+  for diff concepts; switch to `TD` only if the flow is naturally
+  vertical).
+- Class definitions at the bottom so node IDs stay above. Use these
+  class names verbatim — the renderer expects them:
+
+  ```
+  classDef new fill:#dde8d6,stroke:#4F7048,stroke-width:1.5px;
+  classDef mod fill:#dce3ec,stroke:#3D5882,stroke-width:1.5px;
+  classDef del fill:#f5e9e7,stroke:#8B1E1E,stroke-width:1.5px;
+  classDef ext fill:#f0eee8,stroke:#6E6E69,stroke-dasharray:4 2;
+  ```
+
+- Node label = the thing's actual name (`auth/middleware.ts`,
+  `User.create`, `POST /api/sessions`). Don't rename for prose.
+- Edges = real relationships (`A -- "calls" --> B`,
+  `A -- "writes to" --> Db`). Avoid invented edges to make the
+  diagram busier.
+
+Example shape:
+
+```
+flowchart LR
+  Req["POST /api/sessions"]:::mod
+  Auth["auth/middleware.ts"]:::mod
+  Sess["sessions repo"]:::new
+  Db[("sessions table")]:::mod
+  Ext["JWT signer"]:::ext
+  Req --> Auth
+  Auth -- "verifies" --> Ext
+  Auth -- "creates" --> Sess
+  Sess -- "INSERT" --> Db
+  classDef new fill:#dde8d6,stroke:#4F7048,stroke-width:1.5px;
+  classDef mod fill:#dce3ec,stroke:#3D5882,stroke-width:1.5px;
+  classDef del fill:#f5e9e7,stroke:#8B1E1E,stroke-width:1.5px;
+  classDef ext fill:#f0eee8,stroke:#6E6E69,stroke-dasharray:4 2;
 ```
 
 `confidence` is your read on how clear the author's intent is. `high`

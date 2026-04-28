@@ -81,6 +81,26 @@ protocol. Empty array is legal and tells the UI "no viable
 alternative — the implementation is the only sensible shape." Don't
 fabricate to fill slots.
 
+For each alternative you DO post, include a `diagram_mermaid` field:
+a Mermaid `flowchart` source showing what the alternative shape
+would look like (entities, calls, data flow). Same conventions as
+the intake agent's diagram — `flowchart LR`, real names not prose,
+class definitions at the bottom. Drop the field when the diff is
+too small to map (one-line tweak, copy edit) — the UI hides the
+diagram in that case rather than rendering an empty box.
+
+```yaml
+{
+  "label": "Use a Map instead of array scan",
+  "description": "...",
+  "verdict": "better",
+  "rationale": "O(1) lookups + clearer intent.",
+  "scores": { ... },
+  "rationales": { ... },
+  "diagram_mermaid": "flowchart LR\n  A[\"User.lookup\"] -- \"Map.get\" --> B[(\"users map\")]\n  classDef new fill:#dde8d6,stroke:#4F7048,stroke-width:1.5px;\n  classDef mod fill:#dce3ec,stroke:#3D5882,stroke-width:1.5px;"
+}
+```
+
 **3. Final message** — a single fenced YAML block, nothing else:
 
 ```yaml

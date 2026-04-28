@@ -312,6 +312,14 @@ export class TasksService {
     );
   }
 
+  /** Per-phase agent outputs captured by the pipeline runner. Used to
+   *  pull the intake's concept diagram, the explorer's verdict, etc. */
+  getPhaseOutputs(id: string): Observable<{ phase_outputs: TaskPhaseOutputRow[] }> {
+    return this.http.get<{ phase_outputs: TaskPhaseOutputRow[] }>(
+      `/api/tasks/${id}/phase-outputs`,
+    );
+  }
+
   /** Read the task's radar-chart scoring (per-axis rows). */
   getScoring(id: string): Observable<{ scoring: TaskScoringRow[] }> {
     return this.http.get<{ scoring: TaskScoringRow[] }>(`/api/tasks/${id}/scoring`);
@@ -330,6 +338,15 @@ export class TasksService {
       `/api/tasks/${id}/alternatives`,
     );
   }
+}
+
+export interface TaskPhaseOutputRow {
+  id: number;
+  task_id: string;
+  phase_id: string;
+  agent_slug: string;
+  output_md: string;
+  created_at: number;
 }
 
 export interface TaskScoringRow {
@@ -374,6 +391,9 @@ export interface TaskAlternativeRow {
   rationales_json: string | null;
   verdict: AlternativeVerdict;
   rationale: string | null;
+  /** Mermaid flowchart source — concept diagram for this alternative.
+   *  null when the explorer didn't draw one. */
+  diagram_mermaid: string | null;
   set_by: string;
   created_at: number;
 }

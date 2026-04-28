@@ -98,6 +98,9 @@ function applyMigrations(db: Database) {
   // html_url) here so the comment-proxy endpoint can post back to the
   // right PR without re-parsing the task title.
   ensureColumn("tasks", "metadata_json", "TEXT");
+  // Per-alternative concept diagram (Mermaid source). null when the
+  // explorer didn't or couldn't draw one.
+  ensureColumn("task_alternatives", "diagram_mermaid", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

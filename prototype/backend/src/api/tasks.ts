@@ -23,6 +23,7 @@ import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, upsertScoring } from "../db/scorings";
 import { listReviewsForTask } from "../db/reviews";
 import { listForTask as listAlternativesForTask, replaceForTask as replaceAlternatives } from "../db/alternatives";
+import { listPhaseOutputs } from "../db/phaseOutputs";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
@@ -96,6 +97,10 @@ const alternativeItemSchema = z.object({
   rationales: z.record(z.string().min(1).max(60), z.string().max(2000).nullable()).optional(),
   verdict: z.enum(["better", "equal", "worse"]),
   rationale: z.string().max(2000).nullable().optional(),
+  /** Optional Mermaid flowchart source describing the alternative
+   *  shape. Null / absent when the alternative is too small to
+   *  warrant a diagram. */
+  diagram_mermaid: z.string().max(8000).nullable().optional(),
 });
 
 const alternativesSchema = z.object({
@@ -397,6 +402,17 @@ tasks.post("/:id/alternatives", async (c) => {
     count: parsed.data.alternatives.length,
   });
   return c.json({ alternatives: rows });
+});
+
+/**
+ * All per-phase outputs the pipeline runner has captured for this
+ * task. Drives the intake-diagram extraction in the Review tab and
+ * any future per-phase artifact viewer.
+ */
+tasks.get("/:id/phase-outputs", (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  return c.json({ phase_outputs: listPhaseOutputs(id) });
 });
 
 /**

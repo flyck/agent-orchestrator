@@ -9,6 +9,7 @@ import {
   type ReviewFinding,
   type Task,
   type TaskAlternativeRow,
+  type TaskPhaseOutputRow,
   type TaskReviewRow,
   type TaskScoringRow,
   type TaskState,
@@ -19,6 +20,7 @@ import { TaskStreamService, type StreamEvent } from '../../services/task-stream.
 import { NewTaskDialog } from '../../components/new-task-dialog';
 import { ScoringRadar } from '../../components/scoring-radar';
 import { ActivityPanel } from '../../components/activity-panel';
+import { MermaidDiagram } from '../../components/mermaid-diagram';
 import type { Subscription } from 'rxjs';
 
 /**
@@ -256,7 +258,7 @@ function toViewTask(t: Task): ViewTask {
 @Component({
   selector: 'app-home-page',
   standalone: true,
-  imports: [NgApexchartsModule, FormsModule, NewTaskDialog, ScoringRadar, ActivityPanel],
+  imports: [NgApexchartsModule, FormsModule, NewTaskDialog, ScoringRadar, ActivityPanel, MermaidDiagram],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
@@ -446,6 +448,38 @@ export class HomePage {
   protected readonly notesContent = signal<string | null>(null);
   protected readonly notesPath = signal<string | null>(null);
 
+  // ─── Pipeline phase outputs (PR-review tasks) ────────────────────────
+  // Captured by the runner; the intake's reply carries the concept
+  // diagram. We pull all phase outputs at once and parse client-side.
+  protected readonly phaseOutputs = signal<TaskPhaseOutputRow[]>([]);
+
+  /** Extract the YAML `diagram_mermaid: |` block from an agent reply.
+   *  Returns null when absent. Tolerant — falls back gracefully on
+   *  unexpected indentation. */
+  protected extractMermaid(text: string): string | null {
+    const match = text.match(/^[ \t]*diagram_mermaid:[ \t]*\|[ \t]*\n([\s\S]*?)(?=\n[A-Za-z_][A-Za-z0-9_-]*:|\n*$)/m);
+    if (!match) return null;
+    const block = match[1] ?? '';
+    // Block-scalar children share an indent level — strip the smallest
+    // common leading whitespace so mermaid sees the source flush left.
+    const lines = block.split('\n').filter((l) => l.trim().length > 0);
+    if (lines.length === 0) return null;
+    const indents = lines.map((l) => (l.match(/^[ \t]*/)?.[0].length ?? 0));
+    const minIndent = Math.min(...indents);
+    return block
+      .split('\n')
+      .map((l) => l.slice(minIndent))
+      .join('\n')
+      .trim();
+  }
+
+  /** Mermaid source extracted from the intake phase output, or null. */
+  protected readonly intakeDiagram = computed<string | null>(() => {
+    const intake = this.phaseOutputs().find((p) => p.phase_id === 'intake');
+    if (!intake) return null;
+    return this.extractMermaid(intake.output_md);
+  });
+
   // ─── Working-tree changes for selected task ───────────────────────────
   protected readonly diff = signal<DiffResponse | null>(null);
   protected readonly diffLoading = signal(false);
@@ -509,6 +543,7 @@ export class HomePage {
       this.refreshReviews(next);
       this.refreshAlternatives(next);
       this.refreshNotes(next);
+      this.refreshPhaseOutputs(next);
       this.openStream(next);
       this.altTabIndex.set(-1);
       const t = this.tasks().find((x) => x.raw.id === next);
@@ -536,6 +571,7 @@ export class HomePage {
       this.alternatives.set([]);
       this.notesContent.set(null);
       this.notesPath.set(null);
+      this.phaseOutputs.set([]);
       this.transcriptTail.set([]);
       this.closeStream();
     }
@@ -589,6 +625,13 @@ export class HomePage {
         this.notesContent.set(null);
         this.notesPath.set(null);
       },
+    });
+  }
+
+  refreshPhaseOutputs(taskId: string) {
+    this.tasksApi.getPhaseOutputs(taskId).subscribe({
+      next: (r) => this.phaseOutputs.set(r.phase_outputs),
+      error: () => this.phaseOutputs.set([]),
     });
   }
 
@@ -1107,6 +1150,7 @@ export class HomePage {
           this.refreshReviews(sel);
           this.refreshAlternatives(sel);
           this.refreshNotes(sel);
+          this.refreshPhaseOutputs(sel);
         }
       });
 

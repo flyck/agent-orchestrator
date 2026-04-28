@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS task_alternatives (
   rationales_json TEXT,                      -- {dimension: prose} (optional)
   verdict         TEXT NOT NULL,             -- better | equal | worse
   rationale       TEXT,                      -- one-paragraph justification
+  diagram_mermaid TEXT,                      -- optional flowchart source
   set_by          TEXT NOT NULL,             -- agent slug or 'user'
   created_at      INTEGER NOT NULL
 );

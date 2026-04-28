@@ -29,6 +29,9 @@ export interface TaskAlternativeRow {
   rationales_json: string | null;
   verdict: AlternativeVerdict;
   rationale: string | null;
+  /** Optional Mermaid flowchart source — concept diagram for this
+   *  specific alternative shape. */
+  diagram_mermaid: string | null;
   set_by: string;
   created_at: number;
 }
@@ -40,6 +43,7 @@ export interface AlternativeInput {
   rationales?: Record<string, string | null>;
   verdict: AlternativeVerdict;
   rationale?: string | null;
+  diagram_mermaid?: string | null;
 }
 
 export interface ReplaceAlternativesInput {
@@ -58,8 +62,8 @@ export function replaceForTask(
     const insert = handle.prepare(
       `INSERT INTO task_alternatives
          (task_id, label, description, scores_json, rationales_json,
-          verdict, rationale, set_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          verdict, rationale, diagram_mermaid, set_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const alt of input.alternatives) {
       const scores: Record<string, number> = {};
@@ -74,6 +78,7 @@ export function replaceForTask(
         alt.rationales ? JSON.stringify(alt.rationales) : null,
         alt.verdict,
         alt.rationale ?? null,
+        alt.diagram_mermaid ?? null,
         input.set_by,
         ts,
       );
