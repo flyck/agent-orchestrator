@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadUserSettingsOverlay } from "./userSettings";
 
 const DEFAULT_DB_PATH = join(process.cwd(), "data", "orchestrator.sqlite");
 const SCHEMA_PATH = fileURLToPath(new URL("./schema.sql", import.meta.url));
@@ -11,6 +12,10 @@ export function openDatabase(path: string = process.env.DB_PATH ?? DEFAULT_DB_PA
   const db = new Database(path, { create: true });
   applySchema(db);
   seedDefaultSettings(db);
+  // Apply data/user-settings.yaml on top of the defaults so machine-specific
+  // open-in-IDE / emacs / magit commands etc. live in a portable text file
+  // rather than being burned into the local SQLite DB. No-op when missing.
+  loadUserSettingsOverlay(db);
   return db;
 }
 
