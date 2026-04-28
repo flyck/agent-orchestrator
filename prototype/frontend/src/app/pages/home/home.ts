@@ -445,6 +445,20 @@ export class HomePage {
   protected readonly hasEmacsCommand = signal(false);
   protected readonly hasMagitCommand = signal(false);
 
+  /** Pick the most useful initial tab for a task based on its state.
+   *  Spec for spec — show what the user authored. Files for finalize —
+   *  the user is about to commit. Review for ready — the bot just gave
+   *  its verdict, that's what they want to see. Everything else
+   *  (running phases) goes to Stream so they watch it work. */
+  private defaultTabForTask(t: ViewTask): (typeof this.detailTabs)[number] {
+    switch (t.state) {
+      case 'spec':     return 'spec';
+      case 'finalize': return 'files';
+      case 'ready':    return 'review';
+      default:         return 'stream';
+    }
+  }
+
   selectTask(id: string) {
     const next = this.selectedId() === id ? null : id;
     this.selectedId.set(next);
@@ -458,10 +472,19 @@ export class HomePage {
       this.refreshScoring(next);
       this.refreshReviews(next);
       this.openStream(next);
+      const t = this.tasks().find((x) => x.raw.id === next);
+      // Land on a state-appropriate tab when the URL hasn't pinned one.
+      // If the URL has ?tab=foo, the queryParamMap subscriber already set
+      // it on hydration; we don't clobber the user's choice across clicks.
+      const urlTab = this.route.snapshot.queryParamMap.get('tab');
+      if (t && !urlTab) {
+        const defaultTab = this.defaultTabForTask(t);
+        this.detailTab.set(defaultTab);
+        this.syncQueryParams({ tab: defaultTab });
+      }
       // If the task is closed (Ready), the SSE stream won't have anything
       // to deliver — so backfill the persisted opencode transcript so the
       // user sees where the conversation ended.
-      const t = this.tasks().find((x) => x.raw.id === next);
       if (t && t.status === 'closed' && t.raw.last_session_id) {
         this.refreshTranscript(next);
       } else {
