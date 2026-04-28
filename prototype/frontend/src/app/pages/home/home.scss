@@ -360,12 +360,28 @@
   gap: 8px;
 }
 .detail-close,
-.detail-delete {
+.detail-delete,
+.detail-abandon {
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: transparent;
   border-color: var(--rule-strong);
+}
+.detail-abandon {
+  color: var(--ink-red);
+  border-color: var(--ink-red);
+}
+.detail-abandon:hover { background: var(--ink-red-bg); }
+.detail-abandon-tag {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-red);
+  border: 1px dashed var(--ink-red);
+  padding: 4px 10px;
+  border-radius: 2px;
+  align-self: center;
 }
 .detail-delete {
   color: var(--ink-red);

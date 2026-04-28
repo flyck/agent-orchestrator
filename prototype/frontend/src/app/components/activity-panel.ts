@@ -26,6 +26,7 @@ const KIND_LABEL: Record<ActivityKind, string> = {
   review_rate: 'Review rating',
   finalize: 'Finalize',
   task_run: 'Agent run',
+  abandon: 'Abandoned',
 };
 
 @Component({
@@ -43,6 +44,7 @@ const KIND_LABEL: Record<ActivityKind, string> = {
           <span class="legend-item"><span class="sq sq-spec"></span>Spec</span>
           <span class="legend-item"><span class="sq sq-review"></span>Review</span>
           <span class="legend-item"><span class="sq sq-agent"></span>Agent</span>
+          <span class="legend-item"><span class="sq sq-abandoned"></span>Abandoned</span>
         </div>
       </header>
 
@@ -53,13 +55,14 @@ const KIND_LABEL: Record<ActivityKind, string> = {
               class="sq"
               type="button"
               role="listitem"
-              [class.sq-agent]="a.actor === 'agent'"
+              [class.sq-agent]="a.actor === 'agent' && a.kind !== 'abandon'"
               [class.sq-spec]="a.kind === 'spec_create' || a.kind === 'spec_edit'"
               [class.sq-review]="
                 a.kind === 'review_sendback' ||
                 a.kind === 'review_rate' ||
                 a.kind === 'finalize'
               "
+              [class.sq-abandoned]="a.kind === 'abandon'"
               [title]="tooltip(a)"
               [disabled]="!a.task_id"
               (click)="jumpToTask(a.task_id)"
@@ -148,9 +151,10 @@ const KIND_LABEL: Record<ActivityKind, string> = {
       .sq:hover { outline: 1px solid var(--ink); outline-offset: 1px; }
       .sq:disabled { cursor: default; }
       /* Three category palettes — gray for agent, sage-green for spec, slate-blue for review. */
-      .sq-agent  { background: var(--ink-faint); border-color: var(--ink-faint); }
-      .sq-spec   { background: #6E8F66; border-color: #4F7048; }
-      .sq-review { background: #5874A2; border-color: #3D5882; }
+      .sq-agent     { background: var(--ink-faint); border-color: var(--ink-faint); }
+      .sq-spec      { background: #6E8F66; border-color: #4F7048; }
+      .sq-review    { background: #5874A2; border-color: #3D5882; }
+      .sq-abandoned { background: var(--ink-red); border-color: var(--ink-red); }
       @media (prefers-color-scheme: dark) {
         .sq-spec   { background: #88AB80; border-color: #ADCDA5; }
         .sq-review { background: #7991BB; border-color: #9DAFCF; }

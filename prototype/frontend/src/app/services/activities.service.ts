@@ -8,7 +8,8 @@ export type ActivityKind =
   | 'review_sendback'
   | 'review_rate'
   | 'finalize'
-  | 'task_run';
+  | 'task_run'
+  | 'abandon';
 
 export type ActivityActor = 'user' | 'agent';
 

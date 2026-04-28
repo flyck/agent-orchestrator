@@ -70,6 +70,10 @@ export interface TaskRow {
    *  it. Bumped on each state transition. Powers the on-card re-entry
    *  bubble. Stored as TEXT in SQLite — callers should JSON.parse. */
   stage_entries_json: string;
+  /** Timestamp the user clicked "Abandon" on this task. null = active
+   *  or completed normally. Distinct from delete — the row stays so
+   *  rating + activity entries keep their context. */
+  abandoned_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -276,6 +280,18 @@ export function incrementUserSendbacks(
   const t = getTask(id, handle);
   recordActivity("review_sendback", "user", id, t?.title ?? null, handle);
   return next;
+}
+
+/**
+ * Mark a task as abandoned by the user. Cancellation of any active run
+ * is the caller's job — this is just the persistence side.
+ */
+export function markAbandoned(id: string, handle: Database = db()): TaskRow | null {
+  const now = Date.now();
+  handle
+    .prepare("UPDATE tasks SET abandoned_at = ?, updated_at = ? WHERE id = ?")
+    .run(now, now, id);
+  return getTask(id, handle);
 }
 
 /** Set or clear the user's rating + comment. `rating=null` removes the tag. */

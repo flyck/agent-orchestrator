@@ -67,6 +67,9 @@ export interface Task {
   /** JSON-encoded `Record<stage, count>`. Bumped on each state transition.
    *  Stored as a string in SQLite; parse client-side. */
   stage_entries_json: string;
+  /** Timestamp the user clicked "Abandon" on this task. null = active or
+   *  completed normally. Distinct from delete — the row stays. */
+  abandoned_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -136,6 +139,13 @@ export class TasksService {
 
   delete(id: string): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`/api/tasks/${id}`);
+  }
+
+  /** Mark a task as abandoned: cancels any active run, stamps the row,
+   *  and emits an `abandon` activity event. The row stays — distinct
+   *  from DELETE which removes it entirely. */
+  abandon(id: string): Observable<Task> {
+    return this.http.post<Task>(`/api/tasks/${id}/abandon`, {});
   }
 
   clearFeedback(id: string): Observable<Task> {

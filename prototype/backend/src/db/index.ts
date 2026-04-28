@@ -77,6 +77,10 @@ function applyMigrations(db: Database) {
   // re-entry bubble (e.g. code column shows "3" when reviewer has sent
   // it back twice). Default '{}' so existing rows stay safely empty.
   ensureColumn("tasks", "stage_entries_json", "TEXT NOT NULL DEFAULT '{}'");
+  // User-flagged abandonment. Distinct from delete: the row stays so the
+  // user remembers it existed (and any rating / activity log entries
+  // remain readable). null = active; a timestamp = abandoned at that ms.
+  ensureColumn("tasks", "abandoned_at", "INTEGER");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

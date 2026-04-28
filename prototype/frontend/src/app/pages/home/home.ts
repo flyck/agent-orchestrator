@@ -577,12 +577,6 @@ export class HomePage {
     this.streamConnected.set(false);
   }
 
-  closeDetail() {
-    this.selectedId.set(null);
-    this.syncQueryParams({ task: null });
-    this.closeStream();
-  }
-
   private syncQueryParams(patch: Record<string, string | null>) {
     this.router.navigate([], {
       relativeTo: this.route,
@@ -613,6 +607,16 @@ export class HomePage {
       next: () => this.refreshTasks(),
       error: (e) =>
         this.finalizeError.set(`force-complete failed: ${e?.error?.message ?? e?.message ?? e}`),
+    });
+  }
+
+  abandonSelectedTask() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.tasksApi.abandon(sel.raw.id).subscribe({
+      next: () => this.refreshTasks(),
+      error: (e) =>
+        this.finalizeError.set(`abandon failed: ${e?.error?.message ?? e?.message ?? e}`),
     });
   }
 

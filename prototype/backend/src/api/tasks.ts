@@ -8,6 +8,7 @@ import {
   getTask,
   incrementUserSendbacks,
   listTasks,
+  markAbandoned,
   setNeedsFeedback,
   setTaskDifficulty,
   setTaskProgress,
@@ -16,6 +17,7 @@ import {
   type TaskWorkspace,
   type TaskStatus,
 } from "../db/tasks";
+import { recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, upsertScoring } from "../db/scorings";
 import { listReviewsForTask } from "../db/reviews";
@@ -494,6 +496,34 @@ tasks.post("/:id/cancel", async (c) => {
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   await cancelRun(id);
   return c.json({ ok: true });
+});
+
+/**
+ * Abandon a task — user gives up but wants to keep the record.
+ *   - Cancels any in-flight engine run
+ *   - Stamps tasks.abandoned_at with the current ts
+ *   - Records an `abandon` activity event so the home overview's
+ *     squares panel shows it as a red marker
+ *
+ * Distinct from DELETE: the row stays. Distinct from cancel: cancel is
+ * a transient state inside the orchestrator's lifecycle; abandon is a
+ * user verdict that survives reboots and gets surfaced in the metrics.
+ */
+tasks.post("/:id/abandon", async (c) => {
+  const id = c.req.param("id");
+  const t = getTask(id);
+  if (!t) return c.json({ error: "not_found" }, 404);
+  // Cancel any active run first; ignore errors — the run may already
+  // be finished or never started.
+  try {
+    await cancelRun(id);
+  } catch {
+    /* not active is fine */
+  }
+  const updated = markAbandoned(id);
+  recordActivity("abandon", "user", id, t.title);
+  log.info("api.tasks.abandoned", { id });
+  return c.json(updated);
 });
 
 tasks.post("/:id/finalize", async (c) => {

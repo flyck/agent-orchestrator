@@ -204,9 +204,22 @@
             force complete
           </button>
         }
-        <button class="detail-delete" type="button" (click)="deleteSelectedTask()" title="Delete this task">delete</button>
-        <button class="detail-close" type="button" (click)="closeDetail()">close</button>
+        <button class="detail-delete" type="button" (click)="deleteSelectedTask()" title="Delete this task entirely (no record)">delete</button>
+        @if (sel.raw.abandoned_at === null) {
+          <button class="detail-abandon" type="button" (click)="abandonSelectedTask()"
+                  title="Give up on this task. Cancels any active run; the row + activity log stay so it shows as a red square in the overview.">
+            abandon
+          </button>
+        } @else {
+          <span class="detail-abandon-tag" [title]="'abandoned ' + relativeTs(sel.raw.abandoned_at!)">
+            abandoned
+          </span>
+        }
       </div>
+      <!-- (The dedicated "close" button is gone — clicking the same task
+           card again collapses the detail, which covers the close action
+           without taking a slot in the header. -->
+
     </header>
 
     @if (sel.needsAttention) {
