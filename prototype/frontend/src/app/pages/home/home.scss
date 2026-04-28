@@ -115,14 +115,22 @@
   gap: 16px;
 }
 .toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   color: var(--ink-muted);
   cursor: pointer;
+  /* Make the label look like a discrete button */
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+  padding: 6px 8px;
+  border-radius: 4px;
+  align-self: center;
   input { width: auto; }
 }
+.toggle:hover { background: var(--paper-soft); }
+.toggle input { margin: 0; }
 
 .columns {
   display: grid;
