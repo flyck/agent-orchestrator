@@ -45,6 +45,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { recordUsageEvent } from "../db/usageEvents";
 import { recordActivity } from "../db/activities";
+import { appendReview } from "../db/reviews";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -636,6 +637,27 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
       // a.phase === "review", clean idle.
       await safeClose(a.session, taskId, "review_done");
       const decision = parseReviewerDecision(r.assistantText);
+
+      // Persist the verdict so the "Reviewer" tab in the detail panel can
+      // show history. Best-effort — a failed insert mustn't block the
+      // accept/send-back transition the user is waiting on.
+      try {
+        appendReview({
+          task_id: taskId,
+          cycle: a.cycleCount,
+          decision: decision.action,
+          notes:
+            decision.action === "accept"
+              ? decision.notes ?? null
+              : decision.feedback,
+          raw_text: r.assistantText ?? null,
+        });
+      } catch (err) {
+        log.warn("orchestrator.reviewer.persist_failed", {
+          taskId,
+          error: String(err),
+        });
+      }
 
       if (decision.action === "accept") {
         log.info("orchestrator.reviewer.accept", {

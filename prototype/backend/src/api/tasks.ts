@@ -18,6 +18,7 @@ import {
 } from "../db/tasks";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, upsertScoring } from "../db/scorings";
+import { listReviewsForTask } from "../db/reviews";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
@@ -315,6 +316,17 @@ tasks.get("/:id/revisions", (c) => {
   const id = c.req.param("id");
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ revisions: listSpecRevisions(id) });
+});
+
+/**
+ * History of reviewer-agent verdicts for this task. Newest cycle first.
+ * Empty array when the reviewer hasn't run yet (or the task predates
+ * the persistence wiring).
+ */
+tasks.get("/:id/reviews", (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  return c.json({ reviews: listReviewsForTask(id) });
 });
 
 /**

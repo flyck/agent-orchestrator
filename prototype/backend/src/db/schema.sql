@@ -220,6 +220,23 @@ CREATE TABLE IF NOT EXISTS bug_reports (
 
 CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC);
 
+-- One row per reviewer agent pass. Cycle 0 is the initial review;
+-- cycle N>0 is the reviewer's verdict on the (N+1)-th coder pass after
+-- N send-backs. raw_text is the reviewer's full assistant reply (for
+-- the "what did the reviewer actually say?" tab); notes captures the
+-- structured per-pass notes/feedback.
+CREATE TABLE IF NOT EXISTS task_reviews (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  cycle       INTEGER NOT NULL,
+  decision    TEXT NOT NULL,             -- accept | send_back
+  notes       TEXT,                      -- accept notes OR send_back feedback
+  raw_text    TEXT,                      -- reviewer's verbatim YAML/markdown reply
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_reviews_task ON task_reviews(task_id, cycle);
+
 -- Append-only timeline of human + agent actions. One row per event;
 -- never updated. Drives the home page activity squares + agent/manual
 -- pie ratio. Kinds of interest:

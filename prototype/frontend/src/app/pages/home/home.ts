@@ -7,6 +7,7 @@ import { SettingsService } from '../../services/settings.service';
 import {
   TasksService,
   type Task,
+  type TaskReviewRow,
   type TaskScoringRow,
   type TaskState,
 } from '../../services/tasks.service';
@@ -380,7 +381,7 @@ export class HomePage {
 
   // Tab within the detail card. Persisted in the URL as ?tab= so reload
   // and direct-link both keep their place.
-  protected readonly detailTabs = ['spec', 'stream', 'files'] as const;
+  protected readonly detailTabs = ['spec', 'stream', 'review', 'files'] as const;
   protected readonly detailTab = signal<(typeof this.detailTabs)[number]>('stream');
   setDetailTab(tab: (typeof this.detailTabs)[number]) {
     this.detailTab.set(tab);
@@ -404,6 +405,10 @@ export class HomePage {
     // future producers in plan/spec). Empty list keeps the section hidden.
     return this.scoring().length > 0;
   });
+
+  // ─── Reviewer-agent verdicts for selected task ───────────────────────
+  // One row per reviewer pass — newest cycle first. Drives the Review tab.
+  protected readonly reviews = signal<TaskReviewRow[]>([]);
 
   // ─── Working-tree changes for selected task ───────────────────────────
   protected readonly diff = signal<DiffResponse | null>(null);
@@ -451,6 +456,7 @@ export class HomePage {
     if (next) {
       this.refreshDiff();
       this.refreshScoring(next);
+      this.refreshReviews(next);
       this.openStream(next);
       // If the task is closed (Ready), the SSE stream won't have anything
       // to deliver — so backfill the persisted opencode transcript so the
@@ -464,6 +470,7 @@ export class HomePage {
     } else {
       this.diff.set(null);
       this.scoring.set([]);
+      this.reviews.set([]);
       this.transcriptTail.set([]);
       this.closeStream();
     }
@@ -473,6 +480,13 @@ export class HomePage {
     this.tasksApi.getScoring(taskId).subscribe({
       next: (r) => this.scoring.set(r.scoring),
       error: () => this.scoring.set([]),
+    });
+  }
+
+  refreshReviews(taskId: string) {
+    this.tasksApi.getReviews(taskId).subscribe({
+      next: (r) => this.reviews.set(r.reviews),
+      error: () => this.reviews.set([]),
     });
   }
 
@@ -881,7 +895,7 @@ export class HomePage {
         const task = p.get('task');
         this.selectedId.set(task && task.length > 0 ? task : null);
         const tab = p.get('tab');
-        if (tab === 'spec' || tab === 'stream' || tab === 'files') {
+        if (tab === 'spec' || tab === 'stream' || tab === 'review' || tab === 'files') {
           this.detailTab.set(tab);
         }
       });
@@ -946,10 +960,13 @@ export class HomePage {
         this.tasks.set(r.tasks.map(toViewTask));
         this.tasksLoading.set(false);
         this.tasksError.set(null);
-        // Pick up new scoring rows the reviewer agent may have just POSTed.
-        // Cheap — one request per 5s while a task is selected.
+        // Pick up new scoring rows the reviewer agent may have just POSTed,
+        // and any newly-persisted review verdicts. Cheap — one request each.
         const sel = this.selectedId();
-        if (sel) this.refreshScoring(sel);
+        if (sel) {
+          this.refreshScoring(sel);
+          this.refreshReviews(sel);
+        }
       });
 
     // Cost — refresh every 15s.

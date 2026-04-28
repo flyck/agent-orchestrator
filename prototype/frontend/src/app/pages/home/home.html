@@ -279,6 +279,15 @@
       </button>
       <button type="button"
               class="detail-tab"
+              [class.active]="detailTab() === 'review'"
+              (click)="setDetailTab('review')">
+        Review
+        @if (reviews().length > 0) {
+          <span class="meta">{{ reviews().length }}</span>
+        }
+      </button>
+      <button type="button"
+              class="detail-tab"
               [class.active]="detailTab() === 'files'"
               (click)="setDetailTab('files')">
         Files
@@ -405,6 +414,51 @@
           {{ sel.status === 'open' ? 'Send' : 'Send back' }}
         </button>
       </div>
+    }
+
+    <!-- ═══ Review tab ═════════════════════════════════════════════ -->
+    @if (detailTab() === 'review') {
+      <section class="review-section">
+        <header class="review-head">
+          <h3>Reviewer agent</h3>
+          @if (reviews().length > 0) {
+            <span class="meta">{{ reviews().length }} pass(es)</span>
+          }
+        </header>
+
+        @if (reviews().length === 0) {
+          <p class="muted small">
+            The reviewer agent hasn't recorded a verdict for this task yet. It runs after the
+            coder finishes — once a pass completes, the YAML reply (accept / send_back, plus any
+            notes or feedback) shows up here.
+          </p>
+        } @else {
+          <ul class="reviews">
+            @for (rv of reviews(); track rv.id) {
+              <li class="review-item" [attr.data-decision]="rv.decision">
+                <header class="review-item-head">
+                  <span class="meta">cycle {{ rv.cycle + 1 }}</span>
+                  <span class="review-decision"
+                        [class.accept]="rv.decision === 'accept'"
+                        [class.send-back]="rv.decision === 'send_back'">
+                    {{ rv.decision === 'accept' ? 'accepted' : 'sent back' }}
+                  </span>
+                  <span class="meta">{{ relativeTs(rv.created_at) }}</span>
+                </header>
+                @if (rv.notes) {
+                  <p class="review-notes">{{ rv.notes }}</p>
+                }
+                @if (rv.raw_text) {
+                  <details class="review-raw">
+                    <summary class="meta">show raw reply</summary>
+                    <pre class="mono">{{ rv.raw_text }}</pre>
+                  </details>
+                }
+              </li>
+            }
+          </ul>
+        }
+      </section>
     }
 
     <!-- ═══ Files tab ══════════════════════════════════════════════ -->

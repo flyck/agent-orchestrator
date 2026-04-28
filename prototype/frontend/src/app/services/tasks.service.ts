@@ -212,6 +212,12 @@ export class TasksService {
   getScoring(id: string): Observable<{ scoring: TaskScoringRow[] }> {
     return this.http.get<{ scoring: TaskScoringRow[] }>(`/api/tasks/${id}/scoring`);
   }
+
+  /** Reviewer-agent verdicts (newest cycle first). Empty when the
+   *  reviewer hasn't run yet. */
+  getReviews(id: string): Observable<{ reviews: TaskReviewRow[] }> {
+    return this.http.get<{ reviews: TaskReviewRow[] }>(`/api/tasks/${id}/reviews`);
+  }
 }
 
 export interface TaskScoringRow {
@@ -221,6 +227,16 @@ export interface TaskScoringRow {
   rationale: string | null;
   set_by: string;
   updated_at: number;
+}
+
+export interface TaskReviewRow {
+  id: number;
+  task_id: string;
+  cycle: number;
+  decision: 'accept' | 'send_back';
+  notes: string | null;
+  raw_text: string | null;
+  created_at: number;
 }
 
 export interface SpecRevision {
