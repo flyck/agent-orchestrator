@@ -8,8 +8,9 @@
 
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { log } from "../log";
-import { getTask, updateTaskStatus } from "../db/tasks";
+import { getTask, setTaskBaseRef, updateTaskStatus } from "../db/tasks";
 import { recordActivity } from "../db/activities";
 import {
   commitInWorktree,
@@ -113,7 +114,7 @@ export async function finalizeTask(
         log: [...trail, `rename failed: ${ren.message ?? ""}`],
       };
     }
-    updateTaskStatus(taskId, "done", "ready");
+    updateTaskStatus(taskId, "done", "finalize");
     log.info("orchestrator.finalize.ok", {
       taskId,
       strategy: "new",
@@ -159,8 +160,37 @@ export async function finalizeTask(
       log.info("orchestrator.finalize.rebase_recovered", {
         taskId,
         parentBranch: rebased.parentBranch,
+        newHeadSha: rebased.newHeadSha,
       });
       ff = rebased;
+      // Rebase rewrote the agent commit's parent. Anchor the task's base
+      // ref to the new commit's parent so the Files tab post-finalize
+      // shows just the agent's diff, not "everything since 7786aeb".
+      // git rev-parse HEAD~1 is run in the worktree so it walks the
+      // rebased branch's history.
+      if (rebased.newHeadSha) {
+        try {
+          const newParent = spawnSync(
+            "git",
+            ["rev-parse", `${rebased.newHeadSha}^`],
+            { cwd: task.worktree_path, encoding: "utf8" },
+          );
+          const newBase = newParent.stdout.trim();
+          if (newParent.status === 0 && newBase) {
+            setTaskBaseRef(taskId, newBase);
+            log.info("orchestrator.finalize.base_ref_updated", {
+              taskId,
+              from: task.worktree_base_ref,
+              to: newBase,
+            });
+          }
+        } catch (err) {
+          log.warn("orchestrator.finalize.base_ref_update_failed", {
+            taskId,
+            error: String(err),
+          });
+        }
+      }
     } else {
       log.warn("orchestrator.finalize.rebase_failed", {
         taskId,
@@ -179,7 +209,7 @@ export async function finalizeTask(
       };
     }
   }
-  updateTaskStatus(taskId, "done", "ready");
+  updateTaskStatus(taskId, "done", "finalize");
   log.info("orchestrator.finalize.ok", {
     taskId,
     strategy: "current",
@@ -259,7 +289,7 @@ async function legacyInPlaceFinalize(
     .map((s) => s.trim())
     .filter(Boolean);
 
-  updateTaskStatus(taskId, "done", "ready");
+  updateTaskStatus(taskId, "done", "finalize");
   return {
     ok: true,
     branch: branchName,

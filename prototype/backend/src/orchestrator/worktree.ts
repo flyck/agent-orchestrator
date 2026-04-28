@@ -219,6 +219,10 @@ export interface FastForwardInput {
 export interface FastForwardResult {
   ok: boolean;
   parentBranch: string;
+  /** Sha at the worktree branch tip after the operation. Populated on
+   *  success — useful when a rebase rewrote the original agent commit
+   *  and the caller needs the new sha to update task records. */
+  newHeadSha?: string;
   message?: string;
   log: string[];
 }
@@ -313,7 +317,17 @@ export function rebaseAndFastForward(
     };
   }
 
-  return { ok: true, parentBranch, log: trail };
+  // Capture the new sha so the caller can update the task's base ref —
+  // otherwise the Files tab keeps diffing against the long-dead original
+  // base and shows everything that's landed on main since.
+  const tip = git(input.worktreePath, ["rev-parse", "HEAD"]);
+  sayRun("git rev-parse HEAD (worktree tip)", tip);
+  return {
+    ok: true,
+    parentBranch,
+    newHeadSha: tip.stdout.trim() || undefined,
+    log: trail,
+  };
 }
 
 /**
