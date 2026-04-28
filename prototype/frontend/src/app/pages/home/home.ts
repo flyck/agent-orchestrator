@@ -1058,9 +1058,11 @@ export class HomePage {
         ? `${wt}/${path}`
         : path
       : (wt ?? undefined);
-    this.openMessage.set('opening…');
+    // Success is silent — the user sees the IDE/emacs frame come up.
+    // Only failures get surfaced, to keep the meta row from layout-shifting
+    // on every click.
+    this.openMessage.set(null);
     this.repoApi.open('ide', target).subscribe({
-      next: (r) => this.openMessage.set(`launched ${r.cmd} ${r.target}`),
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
@@ -1074,9 +1076,8 @@ export class HomePage {
         ? `${wt}/${path}`
         : path
       : (wt ?? undefined);
-    this.openMessage.set('opening emacs…');
+    this.openMessage.set(null);
     this.repoApi.open('emacs', target).subscribe({
-      next: (r) => this.openMessage.set(`launched ${r.cmd} ${r.target}`),
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
@@ -1085,9 +1086,8 @@ export class HomePage {
   openInMagit() {
     const sel = this.selectedTask();
     const wt = sel?.raw.worktree_path ?? undefined;
-    this.openMessage.set('opening magit…');
+    this.openMessage.set(null);
     this.repoApi.open('magit', wt).subscribe({
-      next: (r) => this.openMessage.set(`launched ${r.cmd} on ${r.target}`),
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
