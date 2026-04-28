@@ -22,11 +22,15 @@ import {
   clearNeedsFeedback,
   getTask,
   incrementReviewCycles,
+  setAwaitingGate,
   setLastSessionId,
   setLatestInputTokens,
   setTaskBaseRef,
+  setTaskPipeline,
   setTaskProgress,
   setWorktree,
+  taskTypeFor,
+  TaskType,
   updateTaskStatus,
   type TaskRow,
 } from "../db/tasks";
@@ -38,6 +42,14 @@ import {
   buildPlannerSystemPrompt,
   openPlannerSession,
 } from "./planner";
+import {
+  getPipeline,
+  PhaseKind,
+  PipelineId,
+  type PhaseDef,
+  type PipelineDef,
+} from "./pipelines";
+import { getPhaseOutput, recordPhaseOutput } from "../db/phaseOutputs";
 import {
   buildReviewerMessage,
   buildReviewerSystemPrompt,
@@ -93,11 +105,11 @@ interface ActiveTask {
    *  phases (and at the end of the active phase) and bails to done/ready
    *  instead of continuing. */
   forceCompleted?: boolean;
-  /** Which agent owns the current session. Drives the lifecycle
-   *  controller's branch on terminal. Plan runs first on initial runs;
-   *  send-backs skip Plan and start at Code (the planner's notes file
-   *  in .agent-notes/<id>.md is the cache). */
-  phase: "plan" | "code" | "review";
+  /** Which agent owns the current session. For the legacy code-task
+   *  lifecycle this is one of "plan" / "code" / "review". For the
+   *  pipeline runner it's a free-form phase id from the PipelineDef
+   *  (e.g. "intake", "explore", "deep-review"). */
+  phase: string;
   /** True when the watchdog detected the engine session finished but
    *  the SSE bus missed the events. Lifecycle treats this as "phase
    *  finished cleanly" and proceeds to the next phase, instead of
@@ -257,11 +269,19 @@ async function startRunInternal(
     task.feedback_question = null;
   }
 
-  // PR-review tasks (workspace='review' + diff input) skip the entire
-  // Plan→Code path: the diff is already in input_payload, no agent
-  // edits a worktree, the reviewer runs once on the diff and we
-  // finalize. Treated specially throughout this function.
-  const isPrReview = task.workspace === "review" && task.input_kind === "diff" && !opts.followUp;
+  // Pipeline = task type → pipeline lookup. Coding tasks (feature,
+  // bugfix, arch_compare, internal) keep the legacy plan→code→review
+  // lifecycle; review tasks walk the gated PR-review pipeline. The
+  // mapping is owned by the backend so the same task type always
+  // gets the same pipeline — callers don't pass it in.
+  const taskType = taskTypeFor(task.workspace);
+  const pipelineId = pipelineForType(taskType);
+  const usePipeline = pipelineId !== null;
+  if (usePipeline && task.pipeline_id !== pipelineId) {
+    setTaskPipeline(taskId, pipelineId);
+    task.pipeline_id = pipelineId;
+  }
+  const isPrReview = taskType === TaskType.Review && task.input_kind === "diff";
 
   // ── Worktree setup ─────────────────────────────────────────────────
   // First run: create a fresh worktree branched from the parent repo's
@@ -270,7 +290,7 @@ async function startRunInternal(
   // task is then naturally scoped to the worktree's branch — main can
   // move on freely without polluting the view.
   // PR reviews don't need a worktree — there's no editing.
-  if (!isPrReview && !task.worktree_path) {
+  if (!usePipeline && !task.worktree_path) {
     const parentRoot = findRoot(import.meta.dir);
     if (!parentRoot) {
       const msg = "no .git found above backend dir — cannot create worktree";
@@ -322,19 +342,25 @@ async function startRunInternal(
   // planner agent populates .agent-notes/<id>.md. Send-backs skip Plan
   // — the cache from the prior pass is the planner's residue, and the
   // user wants the coder to address feedback, not to re-explore. PR
-  // reviews open a reviewer session immediately and finalize once it
-  // idles — no plan, no code, no send-back loop.
-  const startInPlan = !opts.followUp && !isPrReview;
-  const initialPhase: ActiveTask["phase"] = isPrReview
-    ? "review"
+  // reviews go through the pipeline runner; the initial phase id
+  // depends on where the runner picks up.
+  const startInPlan = !opts.followUp && !usePipeline;
+  const initialPhase: ActiveTask["phase"] = usePipeline
+    ? task.awaiting_gate_id
+      ? "resuming"
+      : "intake"
     : startInPlan
       ? "plan"
       : "code";
 
   let session: EngineSession;
   try {
-    if (isPrReview) {
-      session = await engine.openSession({ title: `pr-review:${task.title}` });
+    if (usePipeline) {
+      // Placeholder session — the pipeline runner replaces this with a
+      // fresh per-phase session as soon as it starts. Opening
+      // something here keeps ActiveTask.session non-null for the
+      // watchdog + listener wiring.
+      session = await engine.openSession({ title: `pipeline:${task.title}` });
     } else if (startInPlan) {
       session = await openPlannerSession(task, taskId);
     } else {
@@ -359,7 +385,7 @@ async function startRunInternal(
     throw err;
   }
 
-  updateTaskStatus(taskId, "running", initialPhase);
+  updateTaskStatus(taskId, "running", initialPhase as TaskRow["current_state"]);
 
   const a: ActiveTask = {
     taskId,
@@ -375,21 +401,18 @@ async function startRunInternal(
 
   // Lifecycle controller: pumps the current session, then decides
   // whether to switch to the reviewer, send back to the coder, or
-  // finalize. Replaces the old single-session pump.
-  a.pump = runLifecycle(a, task);
+  // finalize. Replaces the old single-session pump. PR-review tasks
+  // walk the multi-phase pipeline runner instead.
+  a.pump = usePipeline ? runPipelineLifecycle(a, task) : runLifecycle(a, task);
 
   // Send the initial message AFTER setting up the active record + pump so we
   // don't lose early events.
   try {
     const cwd = task.worktree_path ?? REPO_ROOT;
-    if (isPrReview) {
-      // PR review: no worktree, no spec — input_payload already carries
-      // the rendered "PR title + diff" message from the integrations
-      // endpoint. Reviewer agent runs straight on it.
-      const sharedPrompt = renderSharedPrompt(taskId, cwd);
-      await session.send(task.input_payload, {
-        system: buildReviewerSystemPrompt(sharedPrompt),
-      });
+    if (usePipeline) {
+      // Pipeline runner owns its own per-phase sessions; the
+      // placeholder we opened here gets immediately replaced by the
+      // runner's first phase. No initial send needed.
     } else if (startInPlan) {
       // Planner gets the same skills + repo-context block as the coder
       // and reviewer — the planner is the agent that most needs it,
@@ -655,6 +678,308 @@ function finalizeTask(
  * Cap on cycles is MAX_REVIEW_CYCLES (defined in reviewer.ts). Once
  * hit, send_back is forced to accept.
  */
+/**
+ * Pick the pipeline for a task by its high-level type. Returns null
+ * for tasks that should use the legacy hard-coded lifecycle. Adding
+ * a new pipeline = adding a TaskType + a row here; runtime config
+ * from the DB can layer on top once the runner is fully proven.
+ */
+function pipelineForType(type: TaskType): PipelineId | null {
+  switch (type) {
+    case TaskType.Review:
+      return PipelineId.PrReviewGated;
+    case TaskType.Coding:
+      // Legacy plan→code→review→ready lifecycle for now. Will become
+      // PipelineId.CodeTask once the runner replaces runLifecycle.
+      return null;
+  }
+}
+
+// ─── Pipeline runner (Phase 16, Design A) ──────────────────────────────
+// Walks a PipelineDef phase list for tasks that have pipeline_id set
+// (currently only PR-review tasks). Coexists with the legacy
+// runLifecycle below; routing happens in startRunInternal.
+
+/** Strip frontmatter and load an agent's role prompt. Same shape as
+ *  loadReviewerPrompt / loadPlannerPrompt; duplicated to avoid an
+ *  import cycle. */
+function loadAgentPrompt(relPath: string): string {
+  const path = fileURLToPath(new URL(`../../agents/builtin/${relPath}`, import.meta.url));
+  try {
+    const raw = readFileSync(path, "utf8");
+    const m = raw.match(/^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/);
+    return (m?.[1] ?? raw).trim();
+  } catch (err) {
+    log.error("orchestrator.pipeline.prompt_read_failed", { path, error: String(err) });
+    return "";
+  }
+}
+
+/** Per-agent prompt bodies used by the pipeline runner. Loaded once at
+ *  module init; restart the backend to pick up edits. */
+const PIPELINE_AGENT_PROMPTS: Record<string, string> = {
+  "pr-spec-intake":         loadAgentPrompt("review/pr-spec-intake.md"),
+  "solution-explorer":      loadAgentPrompt("review/solution-explorer.md"),
+  "reviewer-coder":         loadAgentPrompt("review/reviewer-coder.md"),
+  "review-security":        loadAgentPrompt("review/reviewer-security.md"),
+  "reviewer-performance":   loadAgentPrompt("review/reviewer-performance.md"),
+  "reviewer-architecture":  loadAgentPrompt("review/reviewer-architecture.md"),
+  "synthesizer":            loadAgentPrompt("review/synthesizer.md"),
+};
+
+/** Build the user message for one (phase, agent) pair. Earlier phases'
+ *  outputs are pulled from task_phase_outputs and stitched in. */
+function buildPipelinePhaseMessage(
+  task: TaskRow,
+  phase: PhaseDef,
+  agentSlug: string,
+): string {
+  const taskId = task.id;
+  const prInput = task.input_payload;
+
+  if (phase.id === "intake") return prInput;
+
+  if (phase.id === "explore") {
+    const intake = getPhaseOutput(taskId, "intake");
+    return [
+      "# Spec (from pr-spec-intake)",
+      "",
+      intake?.output_md ?? "_(intake produced no spec — fall back to the PR body below)_",
+      "",
+      "---",
+      "",
+      "# PR + diff",
+      "",
+      prInput,
+    ].join("\n");
+  }
+
+  if (phase.id === "deep-review") {
+    const intake = getPhaseOutput(taskId, "intake");
+    const explore = getPhaseOutput(taskId, "explore");
+    const focusByAgent: Record<string, string> = {
+      "review-security": "security",
+      "reviewer-performance": "performance",
+      "reviewer-architecture": "architecture",
+      "reviewer-coder": "bugs and correctness",
+    };
+    const focus = focusByAgent[agentSlug] ?? agentSlug;
+    return [
+      `# Your specialty: ${focus}`,
+      "",
+      "Read the spec, then the diff. Output findings in the YAML shape your role prompt specifies. High signal only.",
+      "",
+      "---",
+      "",
+      "# Spec (from pr-spec-intake)",
+      "",
+      intake?.output_md ?? "_(no spec captured)_",
+      "",
+      "# Solution explorer's verdict",
+      "",
+      explore?.output_md ?? "_(no explorer output)_",
+      "",
+      "---",
+      "",
+      "# PR + diff",
+      "",
+      prInput,
+    ].join("\n");
+  }
+
+  if (phase.id === "synthesis") {
+    const out = getPhaseOutput(taskId, "deep-review");
+    return [
+      "# Reviewer outputs to synthesize",
+      "",
+      out?.output_md ?? "_(no reviewer outputs captured)_",
+    ].join("\n");
+  }
+
+  return prInput;
+}
+
+/**
+ * Run one agent in one phase. Opens a fresh engine session, sends the
+ * built message, pumps until terminal, persists the assistant reply
+ * to task_phase_outputs. For deep-review reviewers, also writes a
+ * task_reviews row so the existing Review-tab UI lights up.
+ *
+ * Returns false on session-level error.
+ */
+async function runPipelineAgent(
+  a: ActiveTask,
+  task: TaskRow,
+  phase: PhaseDef,
+  agentSlug: string,
+): Promise<boolean> {
+  const taskId = task.id;
+  const cwd = task.worktree_path ?? REPO_ROOT;
+  const promptBody = PIPELINE_AGENT_PROMPTS[agentSlug];
+  if (!promptBody) {
+    log.warn("orchestrator.pipeline.unknown_agent", { taskId, agentSlug });
+    return false;
+  }
+  const system = `${renderSharedPrompt(taskId, cwd)}\n\n---\n\n${promptBody}`;
+  const message = buildPipelinePhaseMessage(task, phase, agentSlug);
+
+  const engine = await getEngine();
+  const session = await engine.openSession({
+    title: `${phase.id}:${task.title}`,
+    cwd: task.worktree_path ?? undefined,
+  });
+  setLastSessionId(taskId, session.id);
+  a.session = session;
+  a.lastEventTs = Date.now();
+  setTaskProgress(taskId, { step: null, total: null, label: null });
+
+  try {
+    await session.send(message, { system });
+  } catch (err) {
+    log.error("orchestrator.pipeline.send_failed", {
+      taskId,
+      phaseId: phase.id,
+      agentSlug,
+      error: String(err),
+    });
+    await safeClose(session, taskId, "pipeline_send_failed");
+    return false;
+  }
+
+  const r = await pumpUntilTerminal(a);
+  await safeClose(session, taskId, `${phase.id}_done`);
+
+  if (r.terminal === "error") {
+    log.warn("orchestrator.pipeline.phase_error", { taskId, phaseId: phase.id, agentSlug });
+    return phase.kind === PhaseKind.Parallel; // soft-fail when one of N reviewers dies
+  }
+
+  const reply = (r.assistantText ?? "").trim();
+  if (reply.length > 0) {
+    recordPhaseOutput(taskId, phase.id, agentSlug, reply);
+  }
+
+  // If this is a reviewing agent in deep-review, also persist a
+  // task_reviews row — that's what feeds the Review tab.
+  const reviewerSlugs = new Set([
+    "reviewer-coder",
+    "review-security",
+    "reviewer-performance",
+    "reviewer-architecture",
+  ]);
+  if (reviewerSlugs.has(agentSlug) && phase.id === "deep-review") {
+    try {
+      const decision = parseReviewerDecision(reply);
+      if (decision.action === "accept" || decision.action === "send_back") {
+        appendReview({
+          task_id: taskId,
+          cycle: 0,
+          decision: decision.action,
+          notes:
+            decision.action === "accept"
+              ? decision.notes ?? null
+              : decision.feedback,
+          raw_text: reply,
+          confidence: decision.confidence ?? null,
+          findings_json:
+            decision.findings && decision.findings.length > 0
+              ? JSON.stringify(decision.findings)
+              : null,
+        });
+      }
+    } catch (err) {
+      log.warn("orchestrator.pipeline.review_persist_failed", {
+        taskId,
+        agentSlug,
+        error: String(err),
+      });
+    }
+  }
+
+  log.info("orchestrator.pipeline.phase_done", {
+    taskId,
+    phaseId: phase.id,
+    agentSlug,
+    outputBytes: reply.length,
+  });
+  return true;
+}
+
+/**
+ * Walk the task's pipeline from the resume index to either the next
+ * gate (pause) or the end (finalize). Replaces runLifecycle for tasks
+ * with pipeline_id set.
+ */
+async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
+  const taskId = task.id;
+  const pipelineId = task.pipeline_id ?? "pr-review-gated";
+  const pipeline = getPipeline(pipelineId);
+  if (!pipeline) {
+    log.error("orchestrator.pipeline.unknown", { taskId, pipelineId });
+    finalizeTask(task, "failed", task.current_state, new Error(`unknown pipeline ${pipelineId}`));
+    return;
+  }
+
+  // Resume after a gate, or start at 0.
+  const startIdx = (() => {
+    if (!task.awaiting_gate_id) return 0;
+    const idx = pipeline.phases.findIndex((p) => p.id === task.awaiting_gate_id);
+    return idx >= 0 ? idx + 1 : 0;
+  })();
+
+  log.info("orchestrator.pipeline.start", {
+    taskId,
+    pipelineId,
+    startIdx,
+    totalPhases: pipeline.phases.length,
+  });
+
+  // Clearing here is symmetric — we're past the gate now.
+  if (task.awaiting_gate_id) setAwaitingGate(taskId, null);
+
+  try {
+    for (let i = startIdx; i < pipeline.phases.length; i++) {
+      const phase = pipeline.phases[i]!;
+      a.phase = phase.id;
+      log.info("orchestrator.pipeline.phase", {
+        taskId,
+        phaseId: phase.id,
+        kind: phase.kind,
+      });
+      updateTaskStatus(taskId, "running", phase.id as TaskRow["current_state"]);
+
+      if (phase.kind === PhaseKind.Gate) {
+        // Pause and return. Resume happens via the gate API which calls
+        // startRun again; this function picks up at the phase after.
+        // The "ready" gate at the end of the pipeline is treated as the
+        // terminal: finalize done/ready instead of awaiting.
+        if (phase.id === "ready") {
+          finalizeTask(task, "done", "ready", null);
+          return;
+        }
+        setAwaitingGate(taskId, phase.id);
+        log.info("orchestrator.pipeline.gate_pause", { taskId, phaseId: phase.id });
+        return;
+      }
+
+      const agents = phase.agents ?? [];
+      let allOk = true;
+      for (const agentSlug of agents) {
+        const ok = await runPipelineAgent(a, task, phase, agentSlug);
+        if (!ok) { allOk = false; break; }
+      }
+      if (!allOk) {
+        finalizeTask(task, "failed", phase.id as TaskRow["current_state"], null);
+        return;
+      }
+    }
+    finalizeTask(task, "done", "ready", null);
+  } finally {
+    active.delete(taskId);
+    queue.release(taskId);
+  }
+}
+
 async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
   const taskId = task.id;
   let lastError: unknown = null;

@@ -60,6 +60,12 @@ export interface Task {
   /** Optional post-hoc tag set in the Ready state. */
   user_rating: 'bad' | null;
   user_rating_comment: string | null;
+  /** Multi-phase pipeline this task walks. null = legacy hard-coded
+   *  lifecycle. Populated for review-workspace tasks. */
+  pipeline_id: string | null;
+  /** Phase id the runner paused on, awaiting user approval. null when
+   *  not at a gate. Drives the gate banner in the detail panel. */
+  awaiting_gate_id: string | null;
   /** Live context-window usage — input-token count from the most recent
    *  assistant message. Drives the on-card "ctx" chip on the home pipeline. */
   latest_input_tokens: number | null;
@@ -154,6 +160,12 @@ export class TasksService {
    *  user dealt with the work outside the orchestrator. */
   finish(id: string): Observable<Task> {
     return this.http.post<Task>(`/api/tasks/${id}/finish`, {});
+  }
+
+  /** Approve a paused pipeline gate so the runner advances to the next
+   *  phase. Called by the "approve direction" button. */
+  approveGate(id: string): Observable<{ task_id: string }> {
+    return this.http.post<{ task_id: string }>(`/api/tasks/${id}/gate/approve`, {});
   }
 
   clearFeedback(id: string): Observable<Task> {

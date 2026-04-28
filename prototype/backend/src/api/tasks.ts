@@ -578,6 +578,31 @@ tasks.post("/:id/cancel", async (c) => {
 });
 
 /**
+ * Approve a paused gate. Clears tasks.awaiting_gate_id and re-starts
+ * the run, which causes the pipeline runner to resume at the phase
+ * after the gate. Used by the "approve direction" button in the UI.
+ */
+tasks.post("/:id/gate/approve", async (c) => {
+  const id = c.req.param("id");
+  const t = getTask(id);
+  if (!t) return c.json({ error: "not_found" }, 404);
+  if (!t.awaiting_gate_id) {
+    return c.json({ error: "not_at_gate", message: "Task is not paused at a gate." }, 400);
+  }
+  log.info("api.tasks.gate_approved", { id, gate: t.awaiting_gate_id });
+  try {
+    const r = await startRun(id);
+    if (!r) {
+      return c.json({ task_id: id, queued: true });
+    }
+    return c.json({ task_id: id, session_id: r.sessionId });
+  } catch (err) {
+    log.error("api.tasks.gate_approve_failed", { id, error: String(err) });
+    return c.json({ error: "resume_failed", message: String(err) }, 500);
+  }
+});
+
+/**
  * Finish a task — manual mark-as-done. Cancels any active run, moves
  * the task to current_state='finalize' / status='done', and records a
  * `finalize` activity event. Distinct from POST /:id/finalize (which

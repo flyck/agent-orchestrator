@@ -16,7 +16,22 @@
  * the bulk of Phase 16.
  */
 
-export type PhaseKind = "agent" | "parallel" | "gate";
+/** What a phase does in the pipeline runner. */
+export const PhaseKind = {
+  Agent: "agent",
+  Parallel: "parallel",
+  Gate: "gate",
+} as const;
+export type PhaseKind = (typeof PhaseKind)[keyof typeof PhaseKind];
+
+/** Pipeline IDs as a const-enum so callers don't pass typo'd strings.
+ *  Add a new pipeline = add a row here + an entry in REGISTRY below. */
+export const PipelineId = {
+  CodeTask: "code-task",
+  PrReviewTriage: "pr-review-triage",
+  PrReviewGated: "pr-review-gated",
+} as const;
+export type PipelineId = (typeof PipelineId)[keyof typeof PipelineId];
 
 export interface PhaseDef {
   /** Stable ID — task.current_state aligns to this for the agent and
@@ -49,7 +64,7 @@ export interface PipelineDef {
  * until the runner switches to phase-driven walking.
  */
 export const CODE_TASK_PIPELINE: PipelineDef = {
-  id: "code-task",
+  id: PipelineId.CodeTask,
   label: "Code task",
   phases: [
     { id: "spec",     label: "Spec",     kind: "gate", prompt: "Author the spec, then submit." },
@@ -72,7 +87,7 @@ export const CODE_TASK_PIPELINE: PipelineDef = {
  * the full agent list; the runner filters by `depth`.
  */
 export const PR_REVIEW_TRIAGE_PIPELINE: PipelineDef = {
-  id: "pr-review-triage",
+  id: PipelineId.PrReviewTriage,
   label: "PR review (triage)",
   phases: [
     {
@@ -125,7 +140,7 @@ export const PR_REVIEW_TRIAGE_PIPELINE: PipelineDef = {
  * repo.
  */
 export const PR_REVIEW_GATED_PIPELINE: PipelineDef = {
-  id: "pr-review-gated",
+  id: PipelineId.PrReviewGated,
   label: "PR review (gated)",
   phases: [
     {

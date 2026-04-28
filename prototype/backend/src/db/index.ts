@@ -86,6 +86,13 @@ function applyMigrations(db: Database) {
   // rows from before this column existed stay readable.
   ensureColumn("task_reviews", "confidence", "TEXT");
   ensureColumn("task_reviews", "findings_json", "TEXT");
+  // Multi-phase pipeline runner (Phase 16). pipeline_id selects which
+  // PipelineDef the task walks through; awaiting_gate_id is the phase
+  // id the runner paused on, surfaced in the UI as the approval/
+  // send-back banner. null in both = legacy hard-coded lifecycle (the
+  // existing runLifecycle continues to handle code-task workspaces).
+  ensureColumn("tasks", "pipeline_id", "TEXT");
+  ensureColumn("tasks", "awaiting_gate_id", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

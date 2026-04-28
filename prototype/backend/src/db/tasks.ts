@@ -6,6 +6,31 @@ import { recordActivity } from "./activities";
 
 export type TaskWorkspace = "review" | "feature" | "bugfix" | "arch_compare" | "background" | "internal";
 export type TaskQueue = "foreground" | "background";
+
+/**
+ * High-level task category. Drives pipeline selection.
+ *
+ *   - Coding: the user wants code written / changed (feature, bugfix,
+ *     arch_compare, background, internal). Walks the legacy
+ *     plan→code→review lifecycle.
+ *   - Review: the user wants someone *else's* code reviewed (currently
+ *     just GitHub PRs). Walks the gated PR-review pipeline (Phase 16).
+ *
+ * Kept as a const-asserted object for ergonomic enum-ish usage from
+ * callers without importing TS `enum` (which has its own quirks
+ * around tree-shaking and runtime emit).
+ */
+export const TaskType = {
+  Coding: "coding",
+  Review: "review",
+} as const;
+export type TaskType = (typeof TaskType)[keyof typeof TaskType];
+
+/** Derive the type from the workspace. Single source of truth so we
+ *  don't sprinkle `workspace === "review"` literals across the codebase. */
+export function taskTypeFor(workspace: TaskWorkspace): TaskType {
+  return workspace === "review" ? TaskType.Review : TaskType.Coding;
+}
 export type TaskStatus =
   | "queued"
   | "running"
@@ -28,7 +53,15 @@ export type TaskState =
   | "review"
   | "build"
   | "ready"
-  | "finalize";
+  | "finalize"
+  // PR-review pipeline phases (Phase 16, Design A). Stored verbatim
+  // in tasks.current_state so pipeline cards can be filtered exactly
+  // like local-task ones.
+  | "intake"
+  | "explore"
+  | "direction-gate"
+  | "deep-review"
+  | "synthesis";
 
 export interface TaskRow {
   id: string;
@@ -74,6 +107,13 @@ export interface TaskRow {
    *  or completed normally. Distinct from delete — the row stays so
    *  rating + activity entries keep their context. */
   abandoned_at: number | null;
+  /** Multi-phase pipeline this task walks. null = legacy hard-coded
+   *  lifecycle (the existing runLifecycle handles code-task workspaces). */
+  pipeline_id: string | null;
+  /** When non-null, the pipeline runner has paused at this gate phase
+   *  awaiting user approval. The home detail surfaces an
+   *  "approve direction / send back" banner driven by this field. */
+  awaiting_gate_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -280,6 +320,30 @@ export function incrementUserSendbacks(
   const t = getTask(id, handle);
   recordActivity("review_sendback", "user", id, t?.title ?? null, handle);
   return next;
+}
+
+/** Set or clear the pipeline id for a task. */
+export function setTaskPipeline(
+  id: string,
+  pipelineId: string | null,
+  handle: Database = db(),
+): void {
+  handle
+    .prepare("UPDATE tasks SET pipeline_id = ?, updated_at = ? WHERE id = ?")
+    .run(pipelineId, Date.now(), id);
+}
+
+/** Pause the runner at a gate. The runner returns; the user resumes
+ *  via the gate API which clears this field and continues. */
+export function setAwaitingGate(
+  id: string,
+  gateId: string | null,
+  handle: Database = db(),
+): TaskRow | null {
+  handle
+    .prepare("UPDATE tasks SET awaiting_gate_id = ?, updated_at = ? WHERE id = ?")
+    .run(gateId, Date.now(), id);
+  return getTask(id, handle);
 }
 
 /**

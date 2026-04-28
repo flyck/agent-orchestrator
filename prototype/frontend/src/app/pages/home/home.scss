@@ -465,6 +465,28 @@
   .small { margin: 0; }
 }
 
+/* Pipeline gate banner — distinct from "needs feedback" (amber). The
+   gate is a normal pause-for-approval, paper-toned, not alarming. */
+.gate-block {
+  background: var(--paper-soft);
+  border-left: 3px solid var(--ink);
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  .gate-question {
+    font-family: var(--font-serif);
+    font-size: 16px;
+    line-height: 1.4;
+    margin: 4px 0 10px;
+    color: var(--ink);
+  }
+}
+.gate-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .detail-meta {
   display: flex;
   align-items: center;

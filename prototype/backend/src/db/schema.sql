@@ -258,6 +258,23 @@ CREATE TABLE IF NOT EXISTS task_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_task_reviews_task ON task_reviews(task_id, cycle);
 
+-- Per-phase outputs from the multi-phase pipeline runner. The runner
+-- accumulates outputs across phases (e.g. spec_md from intake feeds
+-- the deep reviewers; explorer's verdict feeds the direction gate)
+-- and survives the user pausing at a gate. Keyed by (task_id,
+-- phase_id, agent_slug) since parallel phases produce multiple rows
+-- under the same phase_id.
+CREATE TABLE IF NOT EXISTS task_phase_outputs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  phase_id    TEXT NOT NULL,
+  agent_slug  TEXT NOT NULL,
+  output_md   TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_phase_outputs_task ON task_phase_outputs(task_id, phase_id);
+
 -- Append-only timeline of human + agent actions. One row per event;
 -- never updated. Drives the home page activity squares + agent/manual
 -- pie ratio. Kinds of interest:

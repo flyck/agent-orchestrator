@@ -246,6 +246,37 @@
       </aside>
     }
 
+    <!-- Pipeline gate banner. Shown when the runner has paused at a
+         gate phase awaiting user approval. Currently only the
+         direction-gate after solution-explorer; the same UI handles
+         any future gate phase. -->
+    @if (sel.raw.awaiting_gate_id) {
+      <aside class="gate-block">
+        <p class="meta">paused at gate · {{ sel.raw.awaiting_gate_id }}</p>
+        <p class="gate-question">
+          @switch (sel.raw.awaiting_gate_id) {
+            @case ('direction-gate') {
+              The solution-explorer has scored the implementation and proposed alternatives.
+              Approve to start the deep review (security, performance, bugs in parallel),
+              or send back with feedback if the direction needs rethinking.
+            }
+            @default {
+              The pipeline runner has paused. Approve to advance to the next phase,
+              or send back to revise the previous step.
+            }
+          }
+        </p>
+        <div class="gate-actions">
+          <button class="primary" type="button" (click)="approveGate()" [disabled]="gateBusy()">
+            {{ gateBusy() ? 'resuming…' : 'approve direction' }}
+          </button>
+          <span class="muted small">
+            (or use "Send back" below to send the previous step back with feedback.)
+          </span>
+        </div>
+      </aside>
+    }
+
     <div class="detail-meta">
       @if (sel.raw.worktree_path) {
         <span class="meta">worktree</span>

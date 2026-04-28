@@ -689,6 +689,24 @@ export class HomePage {
     });
   }
 
+  protected readonly gateBusy = signal(false);
+
+  approveGate() {
+    const sel = this.selectedTask();
+    if (!sel || !sel.raw.awaiting_gate_id) return;
+    this.gateBusy.set(true);
+    this.tasksApi.approveGate(sel.raw.id).subscribe({
+      next: () => {
+        this.gateBusy.set(false);
+        this.refreshTasks();
+      },
+      error: (e) => {
+        this.gateBusy.set(false);
+        this.finalizeError.set(`approve failed: ${e?.error?.message ?? e?.message ?? e}`);
+      },
+    });
+  }
+
   abandonSelectedTask() {
     const sel = this.selectedTask();
     if (!sel) return;
