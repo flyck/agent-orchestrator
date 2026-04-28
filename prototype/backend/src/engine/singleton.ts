@@ -69,6 +69,16 @@ export async function getEngine(): Promise<OpenCodeAdapter> {
   return _starting;
 }
 
+/**
+ * Read the cached engine without starting one. Returns null when the
+ * engine has never been requested. Used by the /api/health/engine probe
+ * so cold = explicitly cold (lazy init not yet triggered) rather than
+ * a side-effect of the probe itself.
+ */
+export function peekEngine(): OpenCodeAdapter | null {
+  return _engine;
+}
+
 export async function shutdownEngine(): Promise<void> {
   if (!_engine) return;
   log.info("engine.shutdown.requested");
