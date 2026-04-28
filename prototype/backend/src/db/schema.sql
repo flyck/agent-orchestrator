@@ -220,6 +220,43 @@ CREATE TABLE IF NOT EXISTS bug_reports (
 
 CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC);
 
+-- Append-only timeline of human + agent actions. One row per event;
+-- never updated. Drives the home page activity squares + agent/manual
+-- pie ratio. Kinds of interest:
+--   spec_create   (user) — task created with a spec, or first revision
+--   spec_edit     (user) — subsequent spec revisions
+--   review_sendback (user) — user clicked "send back with feedback"
+--   review_rate   (user) — user flagged the task in Ready (bad/good)
+--   finalize      (user) — user committed the agent's diff
+--   task_run      (agent) — orchestrator started a run
+CREATE TABLE IF NOT EXISTS activity_events (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts           INTEGER NOT NULL,
+  kind         TEXT NOT NULL,
+  actor        TEXT NOT NULL,             -- 'user' | 'agent'
+  task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  detail       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_events_ts ON activity_events(ts DESC);
+
+-- Per-task radar-chart scoring. One row per (task, dimension); the
+-- reviewer agent (and any other producer instructed to) UPSERTs scores
+-- via /api/tasks/:id/scoring. Score is 1–10. dimension is a free-form
+-- slug — the frontend pins display order via a known list, but unknown
+-- slugs are tolerated (they just don't render in the radar).
+CREATE TABLE IF NOT EXISTS task_scorings (
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  dimension   TEXT NOT NULL,
+  score       INTEGER NOT NULL,
+  rationale   TEXT,
+  set_by      TEXT NOT NULL,    -- agent slug or 'user'
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (task_id, dimension)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_scorings_task ON task_scorings(task_id);
+
 -- Per-(provider, model) usage events. Written when an assistant message
 -- finishes with a `cost`/`tokens` payload from opencode. Powers the home
 -- tab's usage chart and any future per-model performance drill-downs.

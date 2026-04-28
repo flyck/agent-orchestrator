@@ -77,6 +77,21 @@ The orchestrator parses this exact format. If it can't parse, the task
 is treated as accepted (fail-open — the user reviews anyway). So make
 the YAML clean.
 
+## Scoring (always send one)
+
+Before you emit your YAML decision, post a scoring to the orchestrator so
+the user sees a radar chart of this work. Use `set_by: "reviewer-coder"`.
+Score all five axes (complexity, involved_parts, lines_of_code,
+user_benefit, maintainability) on 1–10. Keep each rationale to one short
+sentence. The exact request format is in the common protocols section
+of your system prompt.
+
+Score what you actually see in the diff — not what the spec asked for,
+not what the coder claimed. If the diff is empty, score user_benefit and
+the size axes as 1; complexity and maintainability as the lowest
+plausible value (1–2). Send the scoring even when you `send_back`; it
+gets refreshed on the next review pass.
+
 ## Anti-patterns
 
 - ❌ send_back for code style ("rename this variable")

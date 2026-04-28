@@ -99,3 +99,51 @@ Do not signal needs-feedback unless you really cannot continue. Most of
 the time, picking the most plausible interpretation and proceeding is
 the right move — flag this, mention your assumption in the notes file,
 and continue.
+
+## 4. Scoring (radar chart)
+
+The orchestrator renders a small radar chart per task. Five integer axes,
+each on a 1–10 scale:
+
+- `complexity` — how complex the chosen solution is (1 = trivial, 10 =
+  intricate / lots of moving parts). Not the same as task difficulty;
+  this is about the *implementation*, not the *problem*.
+- `involved_parts` — how many separate modules / files / subsystems the
+  change touches (1 = one file, 10 = cross-cutting).
+- `lines_of_code` — relative size of the change (1 = a few lines,
+  10 = thousands).
+- `user_benefit` — how much the user (or end-user) gains from this work
+  landing (1 = trivial polish, 10 = unblocks something major).
+- `maintainability` — how easy the result is to keep alive going forward
+  (1 = brittle / hard to reason about, 10 = clean and self-explanatory).
+
+**Most agent roles do not score** — leave the chart empty unless your
+role-specific prompt explicitly tells you to score. When you are
+instructed to score, post a single fire-and-forget request near the end
+of your run:
+
+```bash
+curl -s -X POST '{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring' \
+  -H 'content-type: application/json' \
+  -d '{
+    "set_by": "<your-agent-slug>",
+    "scores": {
+      "complexity":      <1-10>,
+      "involved_parts":  <1-10>,
+      "lines_of_code":   <1-10>,
+      "user_benefit":    <1-10>,
+      "maintainability": <1-10>
+    },
+    "rationale": {
+      "complexity":      "<one short sentence>",
+      "involved_parts":  "<one short sentence>",
+      "lines_of_code":   "<one short sentence>",
+      "user_benefit":    "<one short sentence>",
+      "maintainability": "<one short sentence>"
+    }
+  }'
+```
+
+Partial updates are accepted — a follow-up call only needs to include
+the axes you want to change. If the request fails, do not retry; this
+is a UI affordance, not a correctness signal.

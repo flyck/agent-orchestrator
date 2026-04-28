@@ -17,6 +17,7 @@ import {
   type TaskStatus,
 } from "../db/tasks";
 import { listSpecRevisions } from "../db/specRevisions";
+import { listScoring, upsertScoring } from "../db/scorings";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
@@ -71,6 +72,16 @@ const ratingSchema = z.object({
   /** null clears the rating; 'bad' marks a bad experience. */
   rating: z.enum(["bad"]).nullable(),
   comment: z.string().max(2000).nullable().optional(),
+});
+
+const scoringSchema = z.object({
+  /** Map of dimension slug → integer 1–10. Partial updates allowed —
+   *  any dimensions omitted keep their previous values. */
+  scores: z.record(z.string().min(1).max(60), z.number().int().min(1).max(10)),
+  /** Optional per-dimension prose, same keys as scores. */
+  rationale: z.record(z.string().min(1).max(60), z.string().max(2000).nullable()).optional(),
+  /** Producer slug (agent slug or 'user'). */
+  set_by: z.string().min(1).max(80),
 });
 
 export const tasks = new Hono();
@@ -304,6 +315,42 @@ tasks.get("/:id/revisions", (c) => {
   const id = c.req.param("id");
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ revisions: listSpecRevisions(id) });
+});
+
+/**
+ * Read this task's scoring map (radar-chart axes). Returns an array of
+ * {dimension, score, rationale, set_by, updated_at} rows. Empty array when
+ * no agent has scored yet.
+ */
+tasks.get("/:id/scoring", (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  return c.json({ scoring: listScoring(id) });
+});
+
+/**
+ * Agent (or user) writes scoring axes for this task. Partial updates are
+ * fine — only the dimensions in `scores` are touched. Each call records a
+ * new updated_at; the frontend renders the latest scoring.
+ *
+ * Every agent's system prompt explains this endpoint. Only the reviewer
+ * agent is currently instructed to actually call it.
+ */
+tasks.post("/:id/scoring", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = scoringSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_scoring", issues: parsed.error.issues }, 400);
+  }
+  const rows = upsertScoring(id, parsed.data);
+  log.info("api.tasks.scoring", {
+    id,
+    set_by: parsed.data.set_by,
+    dimensions: Object.keys(parsed.data.scores),
+  });
+  return c.json({ scoring: rows });
 });
 
 /**

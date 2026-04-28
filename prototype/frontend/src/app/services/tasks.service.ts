@@ -60,6 +60,13 @@ export interface Task {
   /** Optional post-hoc tag set in the Ready state. */
   user_rating: 'bad' | null;
   user_rating_comment: string | null;
+  /** Live context-window usage — input-token count from the most recent
+   *  assistant message. Drives the on-card "ctx" chip on the home pipeline. */
+  latest_input_tokens: number | null;
+  latest_tokens_ts: number | null;
+  /** JSON-encoded `Record<stage, count>`. Bumped on each state transition.
+   *  Stored as a string in SQLite; parse client-side. */
+  stage_entries_json: string;
   created_at: number;
   updated_at: number;
 }
@@ -200,6 +207,20 @@ export class TasksService {
   ): Observable<Task> {
     return this.http.post<Task>(`/api/tasks/${id}/rating`, { rating, comment });
   }
+
+  /** Read the task's radar-chart scoring (per-axis rows). */
+  getScoring(id: string): Observable<{ scoring: TaskScoringRow[] }> {
+    return this.http.get<{ scoring: TaskScoringRow[] }>(`/api/tasks/${id}/scoring`);
+  }
+}
+
+export interface TaskScoringRow {
+  task_id: string;
+  dimension: string;
+  score: number;
+  rationale: string | null;
+  set_by: string;
+  updated_at: number;
 }
 
 export interface SpecRevision {

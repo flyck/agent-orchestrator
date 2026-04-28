@@ -9,6 +9,8 @@ import { tasks } from "./tasks";
 import { cost } from "./cost";
 import { repo } from "./repo";
 import { nudge } from "./nudge";
+import { activities } from "./activities";
+import { analysis } from "./analysis";
 
 export const app = new Hono();
 
@@ -22,3 +24,5 @@ app.route("/api/tasks", tasks);
 app.route("/api/cost", cost);
 app.route("/api/repo", repo);
 app.route("/api/nudge", nudge);
+app.route("/api/activities", activities);
+app.route("/api/analysis", analysis);

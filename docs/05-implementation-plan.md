@@ -145,6 +145,14 @@ The spec-writing experience is in v1; downstream agent execution is v2. See [`10
 
 Render a placeholder describing the planned agent composition. Shares `Orchestrator`, `JobQueue`, and the WS hub.
 
+## Phase 14 — Activity timeline + analysis
+
+1. **Activity timeline** — append-only `activity_events` table populated from the operations that matter (spec creation/edit, send-backs, ratings, finalize, agent run starts). Home page top-left renders one square per event, color-coded by actor (agent vs. spec-write vs. review action), plus a small donut for the manual ratio. Replaces the explicit "code something manually" banner — the visualisation is itself the reminder.
+2. **Analysis tab** — read-only aggregations over completed tasks. Tokens-per-task and send-backs-per-task each pick from `avg / p90 / p95 / min / max` (default avg). Daily send-back chart. Tasks-completed counter.
+3. **Per-agent context size on pipeline cards** — backend polls opencode for live context size of running sessions; cards in the Home pipeline display it next to the timer so the user can see the agent is approaching its window before it gets dumb.
+4. **Per-stage entry counter on cards** — `tasks.stage_entries_json` JSON map bumped on each state transition. Pipeline cards render a small "×N" bubble next to the kind label when the current stage has been entered more than once (typically a reviewer send-back loop). The Finalize column reuses the bubble to show the agent's total reported step count instead.
+5. **Solution scoring radar** — `task_scorings` table; reviewer (and any other producer instructed in its system prompt) POSTs five-axis scores (complexity / parts / LoC / user benefit / maintainability) on a 1–10 scale. Detail panel renders an ApexCharts radar; future phases extend to spec/plan agents and to user-driven reviews of others' code.
+
 ## Out of scope for v1 (explicit)
 
 - GitHub/GitLab PR ingestion or comment posting.

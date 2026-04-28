@@ -16,6 +16,7 @@ const TABS: { path: string; label: string }[] = [
   { path: 'review',       label: 'Review' },
   { path: 'architecture', label: 'Architecture' },
   { path: 'background',   label: 'Background' },
+  { path: 'analysis',     label: 'Analysis' },
   { path: 'settings',     label: 'Settings' },
   { path: 'cost',         label: 'Cost' },
 ];

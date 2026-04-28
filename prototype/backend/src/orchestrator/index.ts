@@ -23,6 +23,7 @@ import {
   getTask,
   incrementReviewCycles,
   setLastSessionId,
+  setLatestInputTokens,
   setTaskBaseRef,
   setTaskProgress,
   setWorktree,
@@ -43,6 +44,7 @@ import * as queue from "../queue";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { recordUsageEvent } from "../db/usageEvents";
+import { recordActivity } from "../db/activities";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -206,6 +208,7 @@ async function startRunInternal(
     title: task.title,
     isFollowUp: !!opts.followUp,
   });
+  recordActivity("task_run", "agent", taskId, opts.followUp ? "follow-up" : "initial");
 
   // If we're resuming a Ready task with new feedback, reset progress so the
   // bar starts fresh and clear the terminal status.
@@ -430,6 +433,19 @@ async function pumpUntilTerminal(a: ActiveTask): Promise<PumpResult> {
           }
         ).properties?.info;
         if (info?.role === "assistant") {
+          // Surface the live context-window usage on the task card. Captured
+          // even on intermediate (non-finish) updates — opencode bumps the
+          // input-token count as the model accumulates context within a turn.
+          if (typeof info.tokens?.input === "number" && info.tokens.input > 0) {
+            try {
+              setLatestInputTokens(taskId, info.tokens.input, ev.ts);
+            } catch (err) {
+              log.warn("orchestrator.run.ctx_update_failed", {
+                taskId,
+                error: String(err),
+              });
+            }
+          }
           if (info.error) {
             log.error("orchestrator.run.assistant_error", {
               taskId,

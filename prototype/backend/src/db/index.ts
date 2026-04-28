@@ -61,6 +61,17 @@ function applyMigrations(db: Database) {
   ensureColumn("tasks", "user_sendbacks", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("tasks", "user_rating", "TEXT");
   ensureColumn("tasks", "user_rating_comment", "TEXT");
+  // Live context-window usage. Captured from each assistant message's
+  // tokens.input field — that is the size of the conversation fed in for
+  // that turn, i.e. the current context size. Surfaced on home pipeline
+  // cards so the user sees the agent approaching its window.
+  ensureColumn("tasks", "latest_input_tokens", "INTEGER");
+  ensureColumn("tasks", "latest_tokens_ts", "INTEGER");
+  // JSON map of pipeline stage → entry count. Bumped in updateTaskStatus
+  // each time the task transitions into a stage. Drives the on-card
+  // re-entry bubble (e.g. code column shows "3" when reviewer has sent
+  // it back twice). Default '{}' so existing rows stay safely empty.
+  ensureColumn("tasks", "stage_entries_json", "TEXT NOT NULL DEFAULT '{}'");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

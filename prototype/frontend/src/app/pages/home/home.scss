@@ -237,6 +237,22 @@
   letter-spacing: 0.03em;
   cursor: help;
 }
+/* Stage re-entry bubble. Non-default stages show "×N" when N > 1; the
+   finalize column shows the agent's total step count. Borders inset for
+   the paper aesthetic — no fills, no shadows. */
+.stage-bubble {
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 14px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
 
 .task-title {
   margin: 8px 0 10px;
@@ -292,6 +308,15 @@
   font-size: 12px;
   color: var(--ink-muted);
   word-break: break-all;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.ctx-chip {
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  cursor: help;
 }
 
 /* ─── Inline task detail ──────────────────────────────────────────────── */

@@ -7,12 +7,15 @@ import { SettingsService } from '../../services/settings.service';
 import {
   TasksService,
   type Task,
+  type TaskScoringRow,
   type TaskState,
 } from '../../services/tasks.service';
 import { CostService, type CostSummary } from '../../services/cost.service';
 import { RepoService, type DiffResponse } from '../../services/repo.service';
 import { TaskStreamService, type StreamEvent } from '../../services/task-stream.service';
 import { NewTaskDialog } from '../../components/new-task-dialog';
+import { ScoringRadar } from '../../components/scoring-radar';
+import { ActivityPanel } from '../../components/activity-panel';
 import type { Subscription } from 'rxjs';
 
 /**
@@ -250,7 +253,7 @@ function toViewTask(t: Task): ViewTask {
 @Component({
   selector: 'app-home-page',
   standalone: true,
-  imports: [NgApexchartsModule, FormsModule, NewTaskDialog],
+  imports: [NgApexchartsModule, FormsModule, NewTaskDialog, ScoringRadar, ActivityPanel],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
@@ -292,6 +295,53 @@ export class HomePage {
     if (sec < 60) return `${sec}s`;
     if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
     return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+  }
+
+  /** Compact context-token formatter — "12.3k" / "1.2M". */
+  protected formatCtx(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return '0';
+    if (n < 1000) return String(n);
+    if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+
+  protected ctxTooltip(t: ViewTask): string {
+    const n = t.raw.latest_input_tokens ?? 0;
+    const ts = t.raw.latest_tokens_ts;
+    const ago = ts ? relativeTs(ts) : 'never';
+    return `Last reported context: ${n.toLocaleString()} input tokens (${ago}).\nUpdated each turn from opencode's message info.`;
+  }
+
+  /** Read the parsed stage-entry map for a task. Tolerates stale or
+   *  malformed JSON; an empty object is treated as no entries. */
+  private stageEntries(t: ViewTask): Record<string, number> {
+    try {
+      const parsed = JSON.parse(t.raw.stage_entries_json || '{}');
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Bubble label for the current pipeline stage. For the finalize stage
+   *  it reads the agent's reported total steps (showing the agent's plan
+   *  size rather than re-entries). For every other stage, it returns the
+   *  per-stage entry count when greater than 1 — first-time visits don't
+   *  warrant a chip, since the timer already covers that. */
+  protected stageBubble(t: ViewTask): string | null {
+    if (t.state === 'finalize') {
+      return t.total > 0 ? `${t.total} steps` : null;
+    }
+    const entries = this.stageEntries(t)[t.state] ?? 0;
+    return entries > 1 ? `×${entries}` : null;
+  }
+
+  protected stageBubbleTooltip(t: ViewTask): string {
+    if (t.state === 'finalize') {
+      return `Agent reported ${t.total} step(s) total during this task.`;
+    }
+    const entries = this.stageEntries(t)[t.state] ?? 0;
+    return `Entered ${this.stateLabels[t.state]} ${entries} time(s) — re-entries usually mean a reviewer send-back.`;
   }
 
   // ─── Real tasks ───────────────────────────────────────────────────────
@@ -352,6 +402,18 @@ export class HomePage {
   protected readonly finalizeResult = signal<string | null>(null);
   protected readonly finalizeError = signal<string | null>(null);
 
+  // ─── Radar-chart scoring for selected task ────────────────────────────
+  // Reviewer agent posts axes; the chart shows up on Spec/Files tabs once
+  // any score lands. Refreshed when the task changes or its session ticks.
+  protected readonly scoring = signal<TaskScoringRow[]>([]);
+  protected readonly scoringVisible = computed(() => {
+    const sel = this.selectedTask();
+    if (!sel) return false;
+    // Visible whenever scoring exists (covers ready, finalize, plus any
+    // future producers in plan/spec). Empty list keeps the section hidden.
+    return this.scoring().length > 0;
+  });
+
   // ─── Working-tree changes for selected task ───────────────────────────
   protected readonly diff = signal<DiffResponse | null>(null);
   protected readonly diffLoading = signal(false);
@@ -397,6 +459,7 @@ export class HomePage {
     this.syncQueryParams({ task: next });
     if (next) {
       this.refreshDiff();
+      this.refreshScoring(next);
       this.openStream(next);
       // If the task is closed (Ready), the SSE stream won't have anything
       // to deliver — so backfill the persisted opencode transcript so the
@@ -409,9 +472,17 @@ export class HomePage {
       }
     } else {
       this.diff.set(null);
+      this.scoring.set([]);
       this.transcriptTail.set([]);
       this.closeStream();
     }
+  }
+
+  refreshScoring(taskId: string) {
+    this.tasksApi.getScoring(taskId).subscribe({
+      next: (r) => this.scoring.set(r.scoring),
+      error: () => this.scoring.set([]),
+    });
   }
 
   refreshTranscript(taskId: string) {
@@ -865,8 +936,10 @@ export class HomePage {
       )
       .subscribe((q) => this.queueState.set(q));
 
-    // Tasks — refresh every 5s (covers SSE-less initial wiring).
-    timer(0, 5000)
+    // Tasks — refresh every 2s. Short enough that the context-tokens chip
+    // on running cards stays close to live; long enough that idle tabs
+    // don't burn CPU. The query is a single SQL select + JSON serialize.
+    timer(0, 2000)
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>
@@ -882,6 +955,10 @@ export class HomePage {
         this.tasks.set(r.tasks.map(toViewTask));
         this.tasksLoading.set(false);
         this.tasksError.set(null);
+        // Pick up new scoring rows the reviewer agent may have just POSTed.
+        // Cheap — one request per 5s while a task is selected.
+        const sel = this.selectedId();
+        if (sel) this.refreshScoring(sel);
       });
 
     // Cost — refresh every 15s.

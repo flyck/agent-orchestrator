@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { log } from "../log";
 import { getTask, updateTaskStatus } from "../db/tasks";
+import { recordActivity } from "../db/activities";
 import {
   commitInWorktree,
   fastForwardParent,
@@ -118,6 +119,7 @@ export async function finalizeTask(
       branch: target,
       commit: commit.sha,
     });
+    recordActivity("finalize", "user", taskId, `→ ${target}`);
     return {
       ok: true,
       branch: target,
@@ -149,6 +151,7 @@ export async function finalizeTask(
     branch: ff.parentBranch,
     commit: commit.sha,
   });
+  recordActivity("finalize", "user", taskId, `→ ${ff.parentBranch}`);
   return {
     ok: true,
     branch: ff.parentBranch,

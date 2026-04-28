@@ -1,17 +1,9 @@
-<!-- ─── Top row: nudge + usage chart, 50/50 split ───────────────────────── -->
+<!-- ─── Top row: activity panel + usage chart, 50/50 split ──────────────── -->
 <section class="top-row">
-  @if (nudgeVisible()) {
-    <aside class="nudge">
-      <div class="nudge-text">
-        <p class="meta">friendly reminder · per the manifesto</p>
-        <p class="nudge-body">
-          Code something manually today. The orchestrator is fast; staying sharp is faster than getting
-          sharp again. Skill atrophy is the real cost of agent-assisted work, not tokens.
-        </p>
-      </div>
-      <button class="nudge-dismiss" type="button" (click)="dismissNudge()">Dismiss for now</button>
-    </aside>
-  }
+  <!-- Activity squares + manual/agent ratio donut. Replaces the manual-coding
+       reminder banner — the visualisation is itself the reminder. Hover a
+       square to see the activity type + task title; click jumps to it. -->
+  <app-activity-panel />
 
   <section class="block usage">
     <header class="block-head">
@@ -99,6 +91,12 @@
                       d{{ vt.raw.difficulty }}
                     </span>
                   }
+                  @let bubble = stageBubble(vt);
+                  @if (bubble) {
+                    <span class="stage-bubble mono" [title]="stageBubbleTooltip(vt)">
+                      {{ bubble }}
+                    </span>
+                  }
                 </span>
                 @if (vt.needsAttention) {
                   <span class="dot waiting" title="agent needs your input"></span>
@@ -126,9 +124,17 @@
               </div>
 
               <!-- Per-stage timer (replaces the noisy worktree path; that's
-                   in the Files tab). Live ticking via nowTick. -->
+                   in the Files tab). Live ticking via nowTick. The ctx chip
+                   shows latest input-token count from opencode, refreshed
+                   every 2s while the task is open. -->
               <div class="task-foot meta">
-                {{ secondsInState(vt) }} in {{ stateLabels[vt.state] }}
+                <span>{{ secondsInState(vt) }} in {{ stateLabels[vt.state] }}</span>
+                @if (vt.raw.latest_input_tokens && vt.raw.latest_input_tokens > 0) {
+                  <span class="ctx-chip mono"
+                        [title]="ctxTooltip(vt)">
+                    · {{ formatCtx(vt.raw.latest_input_tokens) }} ctx
+                  </span>
+                }
               </div>
             </button>
           }
@@ -340,6 +346,14 @@
         </header>
         <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
       </section>
+
+      <!-- Radar chart: rendered when the reviewer (or any future agent)
+           has posted a scoring. The component itself prints a muted line
+           when scoring is empty, but we hide the whole block in that case
+           to keep early states quiet. -->
+      @if (scoringVisible()) {
+        <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
+      }
     }
 
     <!-- ═══ Stream tab ═════════════════════════════════════════════ -->

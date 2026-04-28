@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 import { db } from "./index";
 import { appendSpecRevision } from "./specRevisions";
+import { recordActivity } from "./activities";
 
 export type TaskWorkspace = "review" | "feature" | "bugfix" | "arch_compare" | "background" | "internal";
 export type TaskQueue = "foreground" | "background";
@@ -61,6 +62,14 @@ export interface TaskRow {
    *  meaningful; null when unset. Free-form comment paired with it. */
   user_rating: "bad" | null;
   user_rating_comment: string | null;
+  /** Latest input-token count from an assistant message — i.e. the current
+   *  conversation length fed to the model. Drives the on-card "ctx" chip. */
+  latest_input_tokens: number | null;
+  latest_tokens_ts: number | null;
+  /** JSON map of pipeline stage → number of times this task has entered
+   *  it. Bumped on each state transition. Powers the on-card re-entry
+   *  bubble. Stored as TEXT in SQLite — callers should JSON.parse. */
+  stage_entries_json: string;
   created_at: number;
   updated_at: number;
 }
@@ -82,12 +91,14 @@ export function createTask(input: CreateTaskInput, handle: Database = db()): Tas
   // exists without a matching revision (the spec tab assumes at least
   // version 1 is present once a task is visible).
   const tx = handle.transaction(() => {
+    const initialState = input.initial_state ?? "spec";
     handle
       .prepare(
         `INSERT INTO tasks (id, workspace, queue, title, input_kind, input_payload,
                             repo_path, worktree_path, worktree_branch, worktree_base_ref,
-                            status, current_state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?)`,
+                            status, current_state, state_entered_at, stage_entries_json,
+                            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -98,7 +109,9 @@ export function createTask(input: CreateTaskInput, handle: Database = db()): Tas
         input.input_payload,
         input.repo_path ?? null,
         "queued",
-        input.initial_state ?? "spec",
+        initialState,
+        now,
+        JSON.stringify({ [initialState]: 1 }),
         now,
         now,
       );
@@ -109,6 +122,12 @@ export function createTask(input: CreateTaskInput, handle: Database = db()): Tas
     }
   });
   tx();
+  // Record activity outside the tx so a failure doesn't roll back the
+  // task creation. spec-kind tasks count as a spec creation; non-spec
+  // tasks (review pasted-diff, etc.) don't get a spec_create event.
+  if (input.input_kind === "spec") {
+    recordActivity("spec_create", "user", id, input.title, handle);
+  }
   return getTask(id, handle)!;
 }
 
@@ -129,7 +148,9 @@ export function updateTaskSpec(
     appendSpecRevision(id, specMd, handle);
   });
   tx();
-  return getTask(id, handle);
+  const t = getTask(id, handle);
+  recordActivity("spec_edit", "user", id, t?.title ?? null, handle);
+  return t;
 }
 
 export function getTask(id: string, handle: Database = db()): TaskRow | null {
@@ -205,6 +226,20 @@ export function setLastSessionId(id: string, sessionId: string, handle: Database
     .run(sessionId, Date.now(), id);
 }
 
+/** Stamp the latest input-token count for a task. Cheap UPDATE — called
+ *  from the orchestrator's message.updated handler. Avoids touching
+ *  updated_at so the home-page card timers don't flicker on every turn. */
+export function setLatestInputTokens(
+  id: string,
+  inputTokens: number,
+  ts: number,
+  handle: Database = db(),
+): void {
+  handle
+    .prepare("UPDATE tasks SET latest_input_tokens = ?, latest_tokens_ts = ? WHERE id = ?")
+    .run(inputTokens, ts, id);
+}
+
 /** Bump review_cycles by 1. Called by the orchestrator each time the
  *  reviewer sends the task back to the coder. Returns the new value. */
 export function incrementReviewCycles(
@@ -238,6 +273,8 @@ export function incrementUserSendbacks(
   handle
     .prepare("UPDATE tasks SET user_sendbacks = ?, updated_at = ? WHERE id = ?")
     .run(next, Date.now(), id);
+  const t = getTask(id, handle);
+  recordActivity("review_sendback", "user", id, t?.title ?? null, handle);
   return next;
 }
 
@@ -253,7 +290,11 @@ export function setUserRating(
       "UPDATE tasks SET user_rating = ?, user_rating_comment = ?, updated_at = ? WHERE id = ?",
     )
     .run(rating, comment, Date.now(), id);
-  return getTask(id, handle);
+  const t = getTask(id, handle);
+  // A rating change is a human review action — log it. Clearing also counts
+  // as a review action (the user looked again).
+  if (t) recordActivity("review_rate", "user", id, rating ?? "cleared", handle);
+  return t;
 }
 
 /**
@@ -337,11 +378,23 @@ export function updateTaskStatus(
     const prev = getTask(id, handle);
     const stateChanged = prev?.current_state !== current_state;
     if (stateChanged) {
+      // Increment the entry count for the new stage. Parse-fail / missing
+      // → start fresh at 0. `build` is normalized to `code` so legacy rows
+      // share the same bucket as new ones.
+      const normalized = current_state === "build" ? "code" : current_state;
+      let entries: Record<string, number> = {};
+      try {
+        entries = JSON.parse(prev?.stage_entries_json ?? "{}");
+        if (!entries || typeof entries !== "object") entries = {};
+      } catch {
+        entries = {};
+      }
+      entries[normalized] = (entries[normalized] ?? 0) + 1;
       handle
         .prepare(
-          "UPDATE tasks SET status = ?, current_state = ?, state_entered_at = ?, updated_at = ? WHERE id = ?",
+          "UPDATE tasks SET status = ?, current_state = ?, state_entered_at = ?, stage_entries_json = ?, updated_at = ? WHERE id = ?",
         )
-        .run(status, current_state, now, now, id);
+        .run(status, current_state, now, JSON.stringify(entries), now, id);
     } else {
       handle
         .prepare("UPDATE tasks SET status = ?, current_state = ?, updated_at = ? WHERE id = ?")
