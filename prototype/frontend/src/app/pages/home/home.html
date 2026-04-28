@@ -341,14 +341,6 @@
         </header>
         <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
       </section>
-
-      <!-- Radar chart: rendered when the reviewer (or any future agent)
-           has posted a scoring. The component itself prints a muted line
-           when scoring is empty, but we hide the whole block in that case
-           to keep early states quiet. -->
-      @if (scoringVisible()) {
-        <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
-      }
     }
 
     <!-- ═══ Stream tab ═════════════════════════════════════════════ -->
@@ -418,6 +410,13 @@
 
     <!-- ═══ Review tab ═════════════════════════════════════════════ -->
     @if (detailTab() === 'review') {
+      <!-- Radar of the reviewer's solution scoring. The reviewer-coder
+           prompt instructs the agent to POST scores at the end of every
+           pass, so this populates as soon as the first pass lands. -->
+      @if (scoringVisible()) {
+        <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
+      }
+
       <section class="review-section">
         <header class="review-head">
           <h3>Reviewer agent</h3>
