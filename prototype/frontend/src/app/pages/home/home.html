@@ -137,34 +137,40 @@
               </div>
               <div class="task-title">{{ vt.raw.title }}</div>
 
-              <!-- step / total — explicit so the bar isn't the only signal.
-                   0/0 means the agent hasn't picked a plan yet ("discovering"). -->
-              <div class="step-line">
-                <span class="step-counts mono">{{ vt.step }}/{{ vt.total }}</span>
-                @if (vt.hasReportedProgress && vt.raw.step_label) {
-                  <span class="step-label meta">{{ vt.raw.step_label }}</span>
-                } @else if (vt.status === 'open') {
-                  <span class="step-label meta">discovering…</span>
-                }
-              </div>
+              <!-- Finalize is post-work: timer, progress, and step counts
+                   are noise once the task has landed. Skip them entirely
+                   on that column. The kind / difficulty / stage bubble
+                   on the head + the title carry enough signal. -->
+              @if (vt.state !== 'finalize') {
+                <!-- step / total — explicit so the bar isn't the only signal.
+                     0/0 means the agent hasn't picked a plan yet ("discovering"). -->
+                <div class="step-line">
+                  <span class="step-counts mono">{{ vt.step }}/{{ vt.total }}</span>
+                  @if (vt.hasReportedProgress && vt.raw.step_label) {
+                    <span class="step-label meta">{{ vt.raw.step_label }}</span>
+                  } @else if (vt.status === 'open') {
+                    <span class="step-label meta">discovering…</span>
+                  }
+                </div>
 
-              <div class="progress" [class.empty]="!vt.hasReportedProgress && vt.status === 'open'">
-                <div class="progress-fill" [style.width.%]="vt.progress * 100"></div>
-              </div>
+                <div class="progress" [class.empty]="!vt.hasReportedProgress && vt.status === 'open'">
+                  <div class="progress-fill" [style.width.%]="vt.progress * 100"></div>
+                </div>
 
-              <!-- Per-stage timer (replaces the noisy worktree path; that's
-                   in the Files tab). Live ticking via nowTick. The ctx chip
-                   shows latest input-token count from opencode, refreshed
-                   every 2s while the task is open. -->
-              <div class="task-foot meta">
-                <span>{{ secondsInState(vt) }} in {{ stateLabels[vt.state] }}</span>
-                @if (vt.raw.latest_input_tokens && vt.raw.latest_input_tokens > 0) {
-                  <span class="ctx-chip mono"
-                        [title]="ctxTooltip(vt)">
-                    · {{ formatCtx(vt.raw.latest_input_tokens) }} ctx
-                  </span>
-                }
-              </div>
+                <!-- Per-stage timer (replaces the noisy worktree path; that's
+                     in the Files tab). Live ticking via nowTick. The ctx chip
+                     shows latest input-token count from opencode, refreshed
+                     every 2s while the task is open. -->
+                <div class="task-foot meta">
+                  <span>{{ secondsInState(vt) }} in {{ stateLabels[vt.state] }}</span>
+                  @if (vt.raw.latest_input_tokens && vt.raw.latest_input_tokens > 0) {
+                    <span class="ctx-chip mono"
+                          [title]="ctxTooltip(vt)">
+                      · {{ formatCtx(vt.raw.latest_input_tokens) }} ctx
+                    </span>
+                  }
+                </div>
+              }
             </button>
           }
         }
