@@ -212,7 +212,7 @@ export class ActivityPanel implements OnInit, OnDestroy {
     return {
       chart: {
         type: 'donut',
-        height: 140,
+        height: 180,
         width: 140,
         animations: { enabled: false },
         background: 'transparent',
@@ -225,7 +225,15 @@ export class ActivityPanel implements OnInit, OnDestroy {
       colors: dark
         ? ['#5C5A55', '#88AB80', '#7991BB']
         : ['#A3A19A', '#6E8F66', '#5874A2'],
-      legend: { show: false },
+      legend: {
+        show: true,
+        position: 'bottom' as const,
+        fontSize: '11px',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        labels: { colors: inkMuted },
+        markers: { size: 5, offsetX: -2 },
+        itemMargin: { horizontal: 4, vertical: 0 },
+      },
       stroke: { width: 1, colors: [dark ? '#16171A' : '#FAFAF7'] },
       dataLabels: { enabled: false },
       tooltip: {
@@ -236,15 +244,7 @@ export class ActivityPanel implements OnInit, OnDestroy {
         pie: {
           donut: {
             size: '60%',
-            labels: {
-              show: true,
-              total: {
-                show: true,
-                label: 'manual',
-                color: ink,
-                formatter: () => this.ratioLabel(),
-              },
-            },
+            labels: { show: false },
           },
         },
       },
