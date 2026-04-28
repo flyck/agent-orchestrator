@@ -67,7 +67,36 @@
     @for (state of states; track state) {
       <div class="column" [attr.data-state]="state">
         <div class="column-head">
-          <span class="state-name">{{ stateLabels[state] }}</span>
+          <span class="state-title">
+            <!-- Role icon: robot for agent-driven stages, engineer/hard-hat
+                 for human-driven. Tells the user at a glance which column
+                 is going to wait on them vs. on the agent. -->
+            <span class="role-icon"
+                  [class.role-human]="stateRole[state] === 'human'"
+                  [class.role-agent]="stateRole[state] === 'agent'"
+                  [attr.aria-label]="stateRole[state]"
+                  [title]="stateRole[state] === 'human' ? 'Human-driven stage' : 'Agent-driven stage'">
+              @if (stateRole[state] === 'human') {
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 14h16"/>
+                  <path d="M5 14a7 7 0 0 1 14 0"/>
+                  <path d="M10 7v3"/>
+                  <path d="M14 7v3"/>
+                  <path d="M2 18h20"/>
+                </svg>
+              } @else {
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="5" y="8" width="14" height="11" rx="1.5"/>
+                  <path d="M12 4v4"/>
+                  <circle cx="12" cy="3.2" r="0.9"/>
+                  <circle cx="9.5" cy="13" r="0.9" fill="currentColor"/>
+                  <circle cx="14.5" cy="13" r="0.9" fill="currentColor"/>
+                  <path d="M9.5 17h5"/>
+                </svg>
+              }
+            </span>
+            <span class="state-name">{{ stateLabels[state] }}</span>
+          </span>
           <span class="meta">{{ tasksByState()[state].length }}</span>
         </div>
 
@@ -179,49 +208,6 @@
         <button class="detail-close" type="button" (click)="closeDetail()">close</button>
       </div>
     </header>
-
-    <!-- ─── State strip: 6-node pipeline with role icons ─────────────── -->
-    <!-- Engineer = human-driven step, robot = agent-driven. Past states
-         are filled, current is highlighted, future are muted. Strip is
-         informational; clicking does nothing (per docs/10 — no gates). -->
-    <nav class="state-strip" aria-label="Pipeline state">
-      @for (s of states; track s; let last = $last) {
-        <div class="state-strip-node"
-             [class.current]="s === sel.state"
-             [class.past]="isPastState(s, sel.state)"
-             [class.future]="isFutureState(s, sel.state)"
-             [class.role-human]="stateRole[s] === 'human'"
-             [class.role-agent]="stateRole[s] === 'agent'">
-          <span class="role-icon" [attr.aria-label]="stateRole[s]">
-            @if (stateRole[s] === 'human') {
-              <!-- engineer / hard hat -->
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 14h16"/>
-                <path d="M5 14a7 7 0 0 1 14 0"/>
-                <path d="M10 7v3"/>
-                <path d="M14 7v3"/>
-                <path d="M2 18h20"/>
-              </svg>
-            } @else {
-              <!-- robot -->
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="5" y="8" width="14" height="11" rx="1.5"/>
-                <path d="M12 4v4"/>
-                <circle cx="12" cy="3.2" r="0.9"/>
-                <circle cx="9.5" cy="13" r="0.9" fill="currentColor"/>
-                <circle cx="14.5" cy="13" r="0.9" fill="currentColor"/>
-                <path d="M9.5 17h5"/>
-              </svg>
-            }
-          </span>
-          <span class="state-dot"></span>
-          <span class="state-name">{{ stateLabels[s] }}</span>
-        </div>
-        @if (!last) {
-          <span class="state-sep" [class.past]="isPastState(s, sel.state)"></span>
-        }
-      }
-    </nav>
 
     @if (sel.needsAttention) {
       <aside class="attention-block">

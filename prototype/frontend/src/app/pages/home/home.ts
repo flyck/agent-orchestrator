@@ -274,15 +274,6 @@ export class HomePage {
   protected readonly relativeTs = relativeTs;
   protected readonly terminalStatuses = new Set(['done', 'failed', 'canceled']);
 
-  /** True when state `s` precedes the current state in the pipeline order. */
-  isPastState(s: PipelineState, current: PipelineState): boolean {
-    return PIPELINE_STATES.indexOf(s) < PIPELINE_STATES.indexOf(current);
-  }
-  /** True when state `s` comes after the current state. */
-  isFutureState(s: PipelineState, current: PipelineState): boolean {
-    return PIPELINE_STATES.indexOf(s) > PIPELINE_STATES.indexOf(current);
-  }
-
   /** Ticks every second so the per-card "Xs in this stage" counters stay live
    *  without waiting for the 5s task-list poll. Cheap — pure signal update,
    *  no I/O. */

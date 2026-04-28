@@ -155,13 +155,29 @@
 .column-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+}
+.state-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .state-name {
   font-family: var(--font-serif);
   font-size: 15px;
   letter-spacing: -0.01em;
 }
+.role-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 14px;
+  width: 14px;
+  cursor: help;
+}
+.role-icon.role-human { color: var(--ink); }
+.role-icon.role-agent { color: var(--ink-muted); }
 
 .column-empty {
   flex: 1;
@@ -672,68 +688,6 @@
   text-transform: uppercase;
 }
 .detail-meta .open-msg { font-family: var(--font-mono); font-size: 11px; }
-
-/* ─── State strip ───────────────────────────────────────────────────────
-   6-node horizontal pipeline visualisation. Each node has a role icon
-   above (engineer = human, robot = agent), a dot, and a label. Past
-   states are filled, current is highlighted, future are muted. Strip
-   is informational; clicks do nothing. */
-.state-strip {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  margin: 14px 0 6px;
-  padding: 10px 0;
-  border-top: 1px solid var(--rule);
-  border-bottom: 1px solid var(--rule);
-}
-.state-strip-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-  min-width: 72px;
-  color: var(--ink-faint);
-  &.past { color: var(--ink-muted); }
-  &.current { color: var(--ink); }
-  &.future { color: var(--ink-faint); }
-  .role-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 16px;
-    opacity: 0.55;
-  }
-  &.current .role-icon { opacity: 1; }
-  .state-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    border: 1.5px solid currentColor;
-    background: transparent;
-    margin: 2px 0;
-  }
-  &.past .state-dot,
-  &.current .state-dot {
-    background: currentColor;
-  }
-  .state-name {
-    font-size: 10.5px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-}
-.state-sep {
-  flex: 1 1 auto;
-  align-self: center;
-  height: 1px;
-  background: var(--rule);
-  margin: 0 2px;
-  min-width: 14px;
-  &.past { background: var(--ink-muted); }
-}
 
 /* Header chips for review cycles, user send-backs, bad-experience flag. */
 .detail-head .rating-bad {
