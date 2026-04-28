@@ -20,9 +20,9 @@ import {
   isRequestedReviewer,
   listPullRequests,
   listRepos,
+  PullFilter,
   validate,
   type GithubPull,
-  type PullFilter,
 } from "../integrations/github";
 import { createTask } from "../db/tasks";
 import { startRun } from "../orchestrator";
@@ -173,7 +173,8 @@ integrations.get("/github/prs", async (c) => {
     return c.json({ prs: [], message: "no_watched_repos" });
   }
   const filterRaw = c.req.query("filter");
-  const filter: PullFilter = filterRaw === "all_open" ? "all_open" : "awaiting_me";
+  const filter: PullFilter =
+    filterRaw === PullFilter.AllOpen ? PullFilter.AllOpen : PullFilter.AwaitingMe;
   try {
     const prs = await listPullRequests(cfg.token, cfg.watched_repos, filter, cfg.login ?? undefined);
     markSynced("github");

@@ -2,10 +2,23 @@ import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 import { db } from "./index";
 import { appendSpecRevision } from "./specRevisions";
-import { recordActivity } from "./activities";
+import { ActivityActor, ActivityKind, recordActivity } from "./activities";
 
-export type TaskWorkspace = "review" | "feature" | "bugfix" | "arch_compare" | "background" | "internal";
-export type TaskQueue = "foreground" | "background";
+export const TaskWorkspace = {
+  Review: "review",
+  Feature: "feature",
+  Bugfix: "bugfix",
+  ArchCompare: "arch_compare",
+  Background: "background",
+  Internal: "internal",
+} as const;
+export type TaskWorkspace = (typeof TaskWorkspace)[keyof typeof TaskWorkspace];
+
+export const TaskQueue = {
+  Foreground: "foreground",
+  Background: "background",
+} as const;
+export type TaskQueue = (typeof TaskQueue)[keyof typeof TaskQueue];
 
 /**
  * High-level task category. Drives pipeline selection.
@@ -29,16 +42,41 @@ export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 /** Derive the type from the workspace. Single source of truth so we
  *  don't sprinkle `workspace === "review"` literals across the codebase. */
 export function taskTypeFor(workspace: TaskWorkspace): TaskType {
-  return workspace === "review" ? TaskType.Review : TaskType.Coding;
+  return workspace === TaskWorkspace.Review ? TaskType.Review : TaskType.Coding;
 }
-export type TaskStatus =
-  | "queued"
-  | "running"
-  | "synthesizing"
-  | "done"
-  | "failed"
-  | "canceled"
-  | "findings_pending";
+
+/** What the user provided as task input. */
+export const TaskInputKind = {
+  Diff: "diff",
+  Path: "path",
+  Prompt: "prompt",
+  Spec: "spec",
+} as const;
+export type TaskInputKind = (typeof TaskInputKind)[keyof typeof TaskInputKind];
+
+/** Post-hoc rating the user can stamp on a Ready task. Currently
+ *  binary; structure is here for future Good/Bad/Mixed. */
+export const TaskRating = {
+  Bad: "bad",
+} as const;
+export type TaskRating = (typeof TaskRating)[keyof typeof TaskRating];
+export const TaskStatus = {
+  Queued: "queued",
+  Running: "running",
+  Synthesizing: "synthesizing",
+  Done: "done",
+  Failed: "failed",
+  Canceled: "canceled",
+  FindingsPending: "findings_pending",
+} as const;
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+
+/** Terminal statuses — task has stopped, won't run again. */
+export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  TaskStatus.Done,
+  TaskStatus.Failed,
+  TaskStatus.Canceled,
+]);
 /** Pipeline states.
  *
  * `code` and `review` split the old monolithic `build` state — the coder
@@ -68,7 +106,7 @@ export interface TaskRow {
   workspace: TaskWorkspace;
   queue: TaskQueue;
   title: string;
-  input_kind: "diff" | "path" | "prompt" | "spec";
+  input_kind: TaskInputKind;
   input_payload: string;
   repo_path: string | null;
   worktree_path: string | null;
@@ -93,7 +131,7 @@ export interface TaskRow {
   user_sendbacks: number;
   /** Optional post-hoc tag set in the Ready state. Currently only 'bad' is
    *  meaningful; null when unset. Free-form comment paired with it. */
-  user_rating: "bad" | null;
+  user_rating: TaskRating | null;
   user_rating_comment: string | null;
   /** Latest input-token count from an assistant message — i.e. the current
    *  conversation length fed to the model. Drives the on-card "ctx" chip. */
@@ -170,7 +208,7 @@ export function createTask(input: CreateTaskInput, handle: Database = db()): Tas
   // task creation. spec-kind tasks count as a spec creation; non-spec
   // tasks (review pasted-diff, etc.) don't get a spec_create event.
   if (input.input_kind === "spec") {
-    recordActivity("spec_create", "user", id, input.title, handle);
+    recordActivity(ActivityKind.SpecCreate, ActivityActor.User, id, input.title, handle);
   }
   return getTask(id, handle)!;
 }
@@ -193,7 +231,7 @@ export function updateTaskSpec(
   });
   tx();
   const t = getTask(id, handle);
-  recordActivity("spec_edit", "user", id, t?.title ?? null, handle);
+  recordActivity(ActivityKind.SpecEdit, ActivityActor.User, id, t?.title ?? null, handle);
   return t;
 }
 
@@ -318,7 +356,7 @@ export function incrementUserSendbacks(
     .prepare("UPDATE tasks SET user_sendbacks = ?, updated_at = ? WHERE id = ?")
     .run(next, Date.now(), id);
   const t = getTask(id, handle);
-  recordActivity("review_sendback", "user", id, t?.title ?? null, handle);
+  recordActivity(ActivityKind.ReviewSendback, ActivityActor.User, id, t?.title ?? null, handle);
   return next;
 }
 
@@ -361,7 +399,7 @@ export function markAbandoned(id: string, handle: Database = db()): TaskRow | nu
 /** Set or clear the user's rating + comment. `rating=null` removes the tag. */
 export function setUserRating(
   id: string,
-  rating: "bad" | null,
+  rating: TaskRating | null,
   comment: string | null,
   handle: Database = db(),
 ): TaskRow | null {
@@ -373,7 +411,7 @@ export function setUserRating(
   const t = getTask(id, handle);
   // A rating change is a human review action — log it. Clearing also counts
   // as a review action (the user looked again).
-  if (t) recordActivity("review_rate", "user", id, rating ?? "cleared", handle);
+  if (t) recordActivity(ActivityKind.ReviewRate, ActivityActor.User, id, rating ?? "cleared", handle);
   return t;
 }
 

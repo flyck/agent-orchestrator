@@ -48,7 +48,11 @@ export interface GithubPr {
   awaiting_me: boolean;
 }
 
-export type PrFilter = 'awaiting_me' | 'all_open';
+export const PrFilter = {
+  AwaitingMe: 'awaiting_me',
+  AllOpen: 'all_open',
+} as const;
+export type PrFilter = (typeof PrFilter)[keyof typeof PrFilter];
 
 export interface ConnectInput {
   token?: string | null;

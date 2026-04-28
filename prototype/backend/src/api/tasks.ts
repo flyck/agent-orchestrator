@@ -13,12 +13,12 @@ import {
   setTaskDifficulty,
   setTaskProgress,
   setUserRating,
+  TaskStatus,
   updateTaskSpec,
   updateTaskStatus,
   type TaskWorkspace,
-  type TaskStatus,
 } from "../db/tasks";
-import { recordActivity } from "../db/activities";
+import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, upsertScoring } from "../db/scorings";
 import { listReviewsForTask } from "../db/reviews";
@@ -618,8 +618,8 @@ tasks.post("/:id/finish", async (c) => {
   } catch {
     /* already idle */
   }
-  const updated = updateTaskStatus(id, "done", "finalize");
-  recordActivity("finalize", "user", id, "manual finish");
+  const updated = updateTaskStatus(id, TaskStatus.Done, "finalize");
+  recordActivity(ActivityKind.Finalize, ActivityActor.User, id, "manual finish");
   log.info("api.tasks.finished", { id });
   return c.json(updated);
 });
@@ -647,7 +647,7 @@ tasks.post("/:id/abandon", async (c) => {
     /* not active is fine */
   }
   const updated = markAbandoned(id);
-  recordActivity("abandon", "user", id, t.title);
+  recordActivity(ActivityKind.Abandon, ActivityActor.User, id, t.title);
   log.info("api.tasks.abandoned", { id });
   return c.json(updated);
 });

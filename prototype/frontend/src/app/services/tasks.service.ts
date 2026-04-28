@@ -2,22 +2,87 @@ import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-export type TaskWorkspace =
-  | 'review'
-  | 'feature'
-  | 'bugfix'
-  | 'arch_compare'
-  | 'background'
-  | 'internal';
-export type TaskQueue = 'foreground' | 'background';
-export type TaskStatus =
-  | 'queued'
-  | 'running'
-  | 'synthesizing'
-  | 'done'
-  | 'failed'
-  | 'canceled'
-  | 'findings_pending';
+/** Mirror of the backend enums (db/tasks.ts). Const-asserted objects so
+ *  the TS values at call sites are the same shape on both sides — no
+ *  drift between frontend and backend literals. */
+export const TaskWorkspace = {
+  Review: 'review',
+  Feature: 'feature',
+  Bugfix: 'bugfix',
+  ArchCompare: 'arch_compare',
+  Background: 'background',
+  Internal: 'internal',
+} as const;
+export type TaskWorkspace = (typeof TaskWorkspace)[keyof typeof TaskWorkspace];
+
+export const TaskQueue = {
+  Foreground: 'foreground',
+  Background: 'background',
+} as const;
+export type TaskQueue = (typeof TaskQueue)[keyof typeof TaskQueue];
+
+export const TaskStatus = {
+  Queued: 'queued',
+  Running: 'running',
+  Synthesizing: 'synthesizing',
+  Done: 'done',
+  Failed: 'failed',
+  Canceled: 'canceled',
+  FindingsPending: 'findings_pending',
+} as const;
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+
+export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  TaskStatus.Done,
+  TaskStatus.Failed,
+  TaskStatus.Canceled,
+]);
+
+export const TaskInputKind = {
+  Diff: 'diff',
+  Path: 'path',
+  Prompt: 'prompt',
+  Spec: 'spec',
+} as const;
+export type TaskInputKind = (typeof TaskInputKind)[keyof typeof TaskInputKind];
+
+export const TaskRating = { Bad: 'bad' } as const;
+export type TaskRating = (typeof TaskRating)[keyof typeof TaskRating];
+
+/** High-level task category — drives pipeline selection on the
+ *  backend. Mirrors db/tasks.ts:TaskType. */
+export const TaskType = { Coding: 'coding', Review: 'review' } as const;
+export type TaskType = (typeof TaskType)[keyof typeof TaskType];
+
+export function taskTypeFor(workspace: TaskWorkspace): TaskType {
+  return workspace === TaskWorkspace.Review ? TaskType.Review : TaskType.Coding;
+}
+
+export const Confidence = { High: 'high', Medium: 'medium', Low: 'low' } as const;
+export type Confidence = (typeof Confidence)[keyof typeof Confidence];
+
+export const Severity = {
+  Info: 'info',
+  Low: 'low',
+  Medium: 'medium',
+  High: 'high',
+} as const;
+export type Severity = (typeof Severity)[keyof typeof Severity];
+
+export const ReviewDecisionAction = {
+  Accept: 'accept',
+  SendBack: 'send_back',
+} as const;
+export type ReviewDecisionAction =
+  (typeof ReviewDecisionAction)[keyof typeof ReviewDecisionAction];
+
+export const AlternativeVerdict = {
+  Better: 'better',
+  Equal: 'equal',
+  Worse: 'worse',
+} as const;
+export type AlternativeVerdict =
+  (typeof AlternativeVerdict)[keyof typeof AlternativeVerdict];
 /** Pipeline states. `code` and `review` split the old `build` state; we
  *  keep `build` for tasks that pre-date the split (frontend renders it as
  *  `code` for display purposes). */
@@ -35,7 +100,7 @@ export interface Task {
   workspace: TaskWorkspace;
   queue: TaskQueue;
   title: string;
-  input_kind: 'diff' | 'path' | 'prompt' | 'spec';
+  input_kind: TaskInputKind;
   input_payload: string;
   repo_path: string | null;
   worktree_path: string | null;
@@ -58,7 +123,7 @@ export interface Task {
   /** Bumped each time the user clicks Send back with feedback. */
   user_sendbacks: number;
   /** Optional post-hoc tag set in the Ready state. */
-  user_rating: 'bad' | null;
+  user_rating: TaskRating | null;
   user_rating_comment: string | null;
   /** Multi-phase pipeline this task walks. null = legacy hard-coded
    *  lifecycle. Populated for review-workspace tasks. */
@@ -277,8 +342,8 @@ export interface TaskScoringRow {
 }
 
 export interface ReviewFinding {
-  severity: 'info' | 'low' | 'medium' | 'high';
-  confidence: 'high' | 'medium' | 'low';
+  severity: Severity;
+  confidence: Confidence;
   location: string;
   title: string;
   detail: string;
@@ -288,17 +353,15 @@ export interface TaskReviewRow {
   id: number;
   task_id: string;
   cycle: number;
-  decision: 'accept' | 'send_back';
+  decision: ReviewDecisionAction;
   notes: string | null;
   raw_text: string | null;
   /** Reviewer's confidence in its decision. null for older rows. */
-  confidence: 'high' | 'medium' | 'low' | null;
+  confidence: Confidence | null;
   /** JSON-encoded ReviewFinding[]. Parse client-side. */
   findings_json: string | null;
   created_at: number;
 }
-
-export type AlternativeVerdict = 'better' | 'equal' | 'worse';
 
 export interface TaskAlternativeRow {
   id: number;

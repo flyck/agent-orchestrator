@@ -30,6 +30,7 @@ import {
   setTaskProgress,
   setWorktree,
   taskTypeFor,
+  TaskStatus,
   TaskType,
   updateTaskStatus,
   type TaskRow,
@@ -56,13 +57,14 @@ import {
   MAX_REVIEW_CYCLES,
   openReviewerSession,
   parseReviewerDecision,
+  ReviewDecisionAction,
 } from "./reviewer";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { recordUsageEvent } from "../db/usageEvents";
-import { recordActivity } from "../db/activities";
+import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { appendReview } from "../db/reviews";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
@@ -254,7 +256,7 @@ async function startRunInternal(
     title: task.title,
     isFollowUp: !!opts.followUp,
   });
-  recordActivity("task_run", "agent", taskId, opts.followUp ? "follow-up" : "initial");
+  recordActivity(ActivityKind.TaskRun, ActivityActor.Agent, taskId, opts.followUp ? "follow-up" : "initial");
 
   // If we're resuming a Ready task with new feedback, reset progress so the
   // bar starts fresh and clear the terminal status.
@@ -295,13 +297,13 @@ async function startRunInternal(
     if (!parentRoot) {
       const msg = "no .git found above backend dir — cannot create worktree";
       log.error("orchestrator.run.worktree_no_repo", { taskId });
-      updateTaskStatus(taskId, "failed", task.current_state);
+      updateTaskStatus(taskId, TaskStatus.Failed, task.current_state);
       throw new Error(msg);
     }
     const sha = captureHeadSha();
     if (!sha) {
       log.error("orchestrator.run.worktree_no_head", { taskId });
-      updateTaskStatus(taskId, "failed", task.current_state);
+      updateTaskStatus(taskId, TaskStatus.Failed, task.current_state);
       throw new Error("could not resolve parent HEAD for worktree base");
     }
     try {
@@ -315,7 +317,7 @@ async function startRunInternal(
         taskId,
         error: String(err),
       });
-      updateTaskStatus(taskId, "failed", task.current_state);
+      updateTaskStatus(taskId, TaskStatus.Failed, task.current_state);
       throw err;
     }
   } else {
@@ -334,7 +336,7 @@ async function startRunInternal(
       taskId,
       error: err instanceof Error ? err.message : String(err),
     });
-    updateTaskStatus(taskId, "failed", task.current_state);
+    updateTaskStatus(taskId, TaskStatus.Failed, task.current_state);
     throw err;
   }
 
@@ -381,11 +383,11 @@ async function startRunInternal(
       taskId,
       error: err instanceof Error ? err.message : String(err),
     });
-    updateTaskStatus(taskId, "failed", task.current_state);
+    updateTaskStatus(taskId, TaskStatus.Failed, task.current_state);
     throw err;
   }
 
-  updateTaskStatus(taskId, "running", initialPhase as TaskRow["current_state"]);
+  updateTaskStatus(taskId, TaskStatus.Running, initialPhase as TaskRow["current_state"]);
 
   const a: ActiveTask = {
     taskId,
@@ -441,7 +443,7 @@ async function startRunInternal(
       await session.close();
     } catch {}
     active.delete(taskId);
-    updateTaskStatus(taskId, "failed", task.current_state);
+    updateTaskStatus(taskId, TaskStatus.Failed, task.current_state);
     throw err;
   }
 
@@ -638,13 +640,16 @@ async function safeClose(session: EngineSession, taskId: string, why: string): P
  *  real success, and emit the run.done log. */
 function finalizeTask(
   task: TaskRow,
-  finalStatus: "done" | "failed" | "canceled",
+  finalStatus:
+    | typeof TaskStatus.Done
+    | typeof TaskStatus.Failed
+    | typeof TaskStatus.Canceled,
   finalState: TaskRow["current_state"],
   lastError: unknown,
 ): void {
   const taskId = task.id;
   updateTaskStatus(taskId, finalStatus, finalState);
-  if (finalStatus === "done") {
+  if (finalStatus === TaskStatus.Done) {
     try {
       const n = incrementCompletedSinceNudge();
       log.info("orchestrator.run.nudge_counter_bumped", { taskId, completed: n });
@@ -870,13 +875,13 @@ async function runPipelineAgent(
   if (reviewerSlugs.has(agentSlug) && phase.id === "deep-review") {
     try {
       const decision = parseReviewerDecision(reply);
-      if (decision.action === "accept" || decision.action === "send_back") {
+      if (decision.action === ReviewDecisionAction.Accept || decision.action === ReviewDecisionAction.SendBack) {
         appendReview({
           task_id: taskId,
           cycle: 0,
           decision: decision.action,
           notes:
-            decision.action === "accept"
+            decision.action === ReviewDecisionAction.Accept
               ? decision.notes ?? null
               : decision.feedback,
           raw_text: reply,
@@ -916,7 +921,7 @@ async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void>
   const pipeline = getPipeline(pipelineId);
   if (!pipeline) {
     log.error("orchestrator.pipeline.unknown", { taskId, pipelineId });
-    finalizeTask(task, "failed", task.current_state, new Error(`unknown pipeline ${pipelineId}`));
+    finalizeTask(task, TaskStatus.Failed, task.current_state, new Error(`unknown pipeline ${pipelineId}`));
     return;
   }
 
@@ -946,7 +951,7 @@ async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void>
         phaseId: phase.id,
         kind: phase.kind,
       });
-      updateTaskStatus(taskId, "running", phase.id as TaskRow["current_state"]);
+      updateTaskStatus(taskId, TaskStatus.Running, phase.id as TaskRow["current_state"]);
 
       if (phase.kind === PhaseKind.Gate) {
         // Pause and return. Resume happens via the gate API which calls
@@ -954,7 +959,7 @@ async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void>
         // The "ready" gate at the end of the pipeline is treated as the
         // terminal: finalize done/ready instead of awaiting.
         if (phase.id === "ready") {
-          finalizeTask(task, "done", "ready", null);
+          finalizeTask(task, TaskStatus.Done, "ready", null);
           return;
         }
         setAwaitingGate(taskId, phase.id);
@@ -969,11 +974,11 @@ async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void>
         if (!ok) { allOk = false; break; }
       }
       if (!allOk) {
-        finalizeTask(task, "failed", phase.id as TaskRow["current_state"], null);
+        finalizeTask(task, TaskStatus.Failed, phase.id as TaskRow["current_state"], null);
         return;
       }
     }
-    finalizeTask(task, "done", "ready", null);
+    finalizeTask(task, TaskStatus.Done, "ready", null);
   } finally {
     active.delete(taskId);
     queue.release(taskId);
@@ -1013,7 +1018,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
               taskId,
               error: String(err),
             });
-            finalizeTask(task, "done", "ready", lastError);
+            finalizeTask(task, TaskStatus.Done, "ready", lastError);
             return;
           }
         }
@@ -1029,21 +1034,21 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
               taskId,
               error: String(err),
             });
-            finalizeTask(task, "done", "ready", lastError);
+            finalizeTask(task, TaskStatus.Done, "ready", lastError);
             return;
           }
         }
         // User-triggered force-complete (or watchdog at review phase) —
         // bail to ready as before.
         await safeClose(a.session, taskId, "force_completed");
-        finalizeTask(task, "done", "ready", lastError);
+        finalizeTask(task, TaskStatus.Done, "ready", lastError);
         return;
       }
 
       // Iterator closed externally with no terminal event → canceled.
       if (r.terminal === null) {
         await safeClose(a.session, taskId, "canceled");
-        finalizeTask(task, "canceled", task.current_state, lastError);
+        finalizeTask(task, TaskStatus.Canceled, task.current_state, lastError);
         return;
       }
 
@@ -1062,13 +1067,13 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
           await switchToCoder(a, task);
           continue;
         } catch (err) {
-          finalizeTask(task, "failed", task.current_state, lastError);
+          finalizeTask(task, TaskStatus.Failed, task.current_state, lastError);
           return;
         }
       }
       if (r.terminal === "error" && a.phase === "code") {
         await safeClose(a.session, taskId, "code_error");
-        finalizeTask(task, "failed", task.current_state, lastError);
+        finalizeTask(task, TaskStatus.Failed, task.current_state, lastError);
         return;
       }
 
@@ -1077,7 +1082,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
       if (r.terminal === "error" && a.phase === "review") {
         log.warn("orchestrator.reviewer.session_error_treated_as_accept", { taskId });
         await safeClose(a.session, taskId, "review_error_accept");
-        finalizeTask(task, "done", "ready", lastError);
+        finalizeTask(task, TaskStatus.Done, "ready", lastError);
         return;
       }
 
@@ -1092,7 +1097,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
             taskId,
             error: String(err),
           });
-          finalizeTask(task, "done", "ready", lastError);
+          finalizeTask(task, TaskStatus.Done, "ready", lastError);
           return;
         }
       }
@@ -1108,7 +1113,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
             taskId,
             error: String(err),
           });
-          finalizeTask(task, "done", "ready", lastError);
+          finalizeTask(task, TaskStatus.Done, "ready", lastError);
           return;
         }
       }
@@ -1126,7 +1131,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
           cycle: a.cycleCount,
           decision: decision.action,
           notes:
-            decision.action === "accept"
+            decision.action === ReviewDecisionAction.Accept
               ? decision.notes ?? null
               : decision.feedback,
           raw_text: r.assistantText ?? null,
@@ -1142,13 +1147,13 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
         });
       }
 
-      if (decision.action === "accept") {
+      if (decision.action === ReviewDecisionAction.Accept) {
         log.info("orchestrator.reviewer.accept", {
           taskId,
           cycleCount: a.cycleCount,
           notes: decision.notes ? decision.notes.slice(0, 280) : undefined,
         });
-        finalizeTask(task, "done", "ready", lastError);
+        finalizeTask(task, TaskStatus.Done, "ready", lastError);
         return;
       }
 
@@ -1162,7 +1167,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
           taskId,
           decision: decision.action,
         });
-        finalizeTask(task, "done", "ready", lastError);
+        finalizeTask(task, TaskStatus.Done, "ready", lastError);
         return;
       }
 
@@ -1173,7 +1178,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
           cycleCount: a.cycleCount,
           max: MAX_REVIEW_CYCLES,
         });
-        finalizeTask(task, "done", "ready", lastError);
+        finalizeTask(task, TaskStatus.Done, "ready", lastError);
         return;
       }
 
@@ -1195,7 +1200,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
           taskId,
           error: String(err),
         });
-        finalizeTask(task, "done", "ready", lastError);
+        finalizeTask(task, TaskStatus.Done, "ready", lastError);
         return;
       }
     }
@@ -1218,7 +1223,7 @@ async function switchToReviewer(a: ActiveTask, task: TaskRow): Promise<void> {
   a.session = session;
   a.phase = "review";
   a.lastEventTs = Date.now();
-  updateTaskStatus(taskId, "running", "review");
+  updateTaskStatus(taskId, TaskStatus.Running, "review");
 
   const cwd = task.worktree_path ?? REPO_ROOT;
   const message = buildReviewerMessage({
@@ -1258,7 +1263,7 @@ async function switchToCoder(a: ActiveTask, task: TaskRow, feedback?: string): P
   a.lastEventTs = Date.now();
   // Reset progress so the bar starts fresh for this iteration.
   setTaskProgress(taskId, { step: null, total: null, label: null });
-  updateTaskStatus(taskId, "running", "code");
+  updateTaskStatus(taskId, TaskStatus.Running, "code");
 
   const cwd = task.worktree_path ?? REPO_ROOT;
   const followUp = feedback
@@ -1384,7 +1389,7 @@ export function startWatchdog(): void {
 export async function resumeQueuedTasks(): Promise<void> {
   // Imported lazily to avoid a circular dep at module init.
   const { listTasks } = await import("../db/tasks");
-  const queued = listTasks({ status: "queued" });
+  const queued = listTasks({ status: TaskStatus.Queued });
   if (queued.length === 0) return;
   log.info("orchestrator.boot.resume_queued", { count: queued.length });
   for (const t of queued) {
@@ -1415,7 +1420,7 @@ export async function forceComplete(taskId: string): Promise<void> {
   if (!a) {
     log.info("orchestrator.force_complete.not_active", { taskId });
     queue.purge(taskId);
-    updateTaskStatus(taskId, "done", "ready");
+    updateTaskStatus(taskId, TaskStatus.Done, "ready");
     return;
   }
   log.info("orchestrator.force_complete.requested", { taskId });

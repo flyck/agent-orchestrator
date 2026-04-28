@@ -10,8 +10,8 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { log } from "../log";
-import { getTask, setTaskBaseRef, updateTaskStatus } from "../db/tasks";
-import { recordActivity } from "../db/activities";
+import { getTask, setTaskBaseRef, TaskStatus, updateTaskStatus } from "../db/tasks";
+import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import {
   commitInWorktree,
   fastForwardParent,
@@ -114,14 +114,14 @@ export async function finalizeTask(
         log: [...trail, `rename failed: ${ren.message ?? ""}`],
       };
     }
-    updateTaskStatus(taskId, "done", "finalize");
+    updateTaskStatus(taskId, TaskStatus.Done, "finalize");
     log.info("orchestrator.finalize.ok", {
       taskId,
       strategy: "new",
       branch: target,
       commit: commit.sha,
     });
-    recordActivity("finalize", "user", taskId, `→ ${target}`);
+    recordActivity(ActivityKind.Finalize, ActivityActor.User, taskId, `→ ${target}`);
     return {
       ok: true,
       branch: target,
@@ -209,7 +209,7 @@ export async function finalizeTask(
       };
     }
   }
-  updateTaskStatus(taskId, "done", "finalize");
+  updateTaskStatus(taskId, TaskStatus.Done, "finalize");
   log.info("orchestrator.finalize.ok", {
     taskId,
     strategy: "current",
@@ -289,7 +289,7 @@ async function legacyInPlaceFinalize(
     .map((s) => s.trim())
     .filter(Boolean);
 
-  updateTaskStatus(taskId, "done", "finalize");
+  updateTaskStatus(taskId, TaskStatus.Done, "finalize");
   return {
     ok: true,
     branch: branchName,

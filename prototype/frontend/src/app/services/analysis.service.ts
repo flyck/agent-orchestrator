@@ -2,7 +2,14 @@ import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-export type AggregationKind = 'avg' | 'p90' | 'p95' | 'min' | 'max';
+export const AggregationKind = {
+  Avg: 'avg',
+  P90: 'p90',
+  P95: 'p95',
+  Min: 'min',
+  Max: 'max',
+} as const;
+export type AggregationKind = (typeof AggregationKind)[keyof typeof AggregationKind];
 
 export interface AggregationBlock {
   sample_size: number;

@@ -13,7 +13,12 @@
 import type { Database } from "bun:sqlite";
 import { db } from "./index";
 
-export type AlternativeVerdict = "better" | "equal" | "worse";
+export const AlternativeVerdict = {
+  Better: "better",
+  Equal: "equal",
+  Worse: "worse",
+} as const;
+export type AlternativeVerdict = (typeof AlternativeVerdict)[keyof typeof AlternativeVerdict];
 
 export interface TaskAlternativeRow {
   id: number;

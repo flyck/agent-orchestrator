@@ -14,7 +14,7 @@
  */
 
 import { log } from "../log";
-import { listTasks, updateTaskStatus, type TaskRow } from "../db/tasks";
+import { listTasks, TaskStatus, updateTaskStatus, type TaskRow } from "../db/tasks";
 import { readAllSettings } from "../db/settings";
 
 type RunFactory = () => Promise<{ sessionId: string }>;
@@ -51,7 +51,7 @@ export async function submit(
     return null;
   }
   pending.push({ taskId, factory, enqueuedAt: Date.now() });
-  updateTaskStatus(taskId, "queued");
+  updateTaskStatus(taskId, TaskStatus.Queued);
   log.info("queue.enqueued", {
     taskId,
     pending: pending.length,
@@ -155,7 +155,7 @@ export function snapshot(): {
  * the dispatcher picks them back up.
  */
 export function bootScan(): void {
-  const stuck = listTasks({ status: "queued" }).map((t: TaskRow) => t.id);
+  const stuck = listTasks({ status: TaskStatus.Queued }).map((t: TaskRow) => t.id);
   if (stuck.length > 0) {
     log.info("queue.boot.queued_at_startup", {
       count: stuck.length,

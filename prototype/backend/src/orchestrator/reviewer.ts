@@ -188,10 +188,30 @@ export function buildReviewerSystemPrompt(
 ${REVIEWER_PROMPT}`;
 }
 
-export type Confidence = "high" | "medium" | "low";
+export const Confidence = {
+  High: "high",
+  Medium: "medium",
+  Low: "low",
+} as const;
+export type Confidence = (typeof Confidence)[keyof typeof Confidence];
+
+export const Severity = {
+  Info: "info",
+  Low: "low",
+  Medium: "medium",
+  High: "high",
+} as const;
+export type Severity = (typeof Severity)[keyof typeof Severity];
+
+export const ReviewDecisionAction = {
+  Accept: "accept",
+  SendBack: "send_back",
+} as const;
+export type ReviewDecisionAction =
+  (typeof ReviewDecisionAction)[keyof typeof ReviewDecisionAction];
 
 export interface ReviewFinding {
-  severity: "info" | "low" | "medium" | "high";
+  severity: Severity;
   confidence: Confidence;
   location: string;
   title: string;
@@ -200,24 +220,26 @@ export interface ReviewFinding {
 
 export type ReviewDecision =
   | {
-      action: "accept";
+      action: typeof ReviewDecisionAction.Accept;
       notes?: string;
       confidence?: Confidence;
       findings?: ReviewFinding[];
     }
   | {
-      action: "send_back";
+      action: typeof ReviewDecisionAction.SendBack;
       feedback: string;
       confidence?: Confidence;
       findings?: ReviewFinding[];
     };
 
-const CONFIDENCE_VALUES: Confidence[] = ["high", "medium", "low"];
+const CONFIDENCE_VALUES = Object.values(Confidence) as readonly Confidence[];
 function parseConfidence(raw: unknown): Confidence | undefined {
   if (typeof raw !== "string") return undefined;
   const v = raw.toLowerCase().trim() as Confidence;
   return CONFIDENCE_VALUES.includes(v) ? v : undefined;
 }
+
+const SEVERITY_VALUES = Object.values(Severity) as readonly Severity[];
 
 function parseFindings(raw: unknown): ReviewFinding[] {
   if (!Array.isArray(raw)) return [];
@@ -228,12 +250,13 @@ function parseFindings(raw: unknown): ReviewFinding[] {
     const title = typeof o["title"] === "string" ? o["title"] : "";
     const detail = typeof o["detail"] === "string" ? o["detail"] : "";
     if (!title && !detail) continue;
-    const severity = (typeof o["severity"] === "string" ? o["severity"] : "info").toLowerCase();
+    const sev = (typeof o["severity"] === "string" ? o["severity"] : "").toLowerCase();
+    const severity: Severity = (SEVERITY_VALUES.includes(sev as Severity)
+      ? sev
+      : Severity.Info) as Severity;
     out.push({
-      severity: (["info", "low", "medium", "high"].includes(severity)
-        ? severity
-        : "info") as ReviewFinding["severity"],
-      confidence: parseConfidence(o["confidence"]) ?? "medium",
+      severity,
+      confidence: parseConfidence(o["confidence"]) ?? Confidence.Medium,
       location: typeof o["location"] === "string" ? o["location"] : "general",
       title,
       detail,
@@ -254,7 +277,7 @@ export function parseReviewerDecision(rawText: string): ReviewDecision {
   const text = rawText.trim();
   if (!text) {
     log.warn("orchestrator.reviewer.empty_reply");
-    return { action: "accept" };
+    return { action: ReviewDecisionAction.Accept };
   }
 
   // Pull out the first ```yaml ... ``` block; fall back to whole text.
@@ -269,12 +292,12 @@ export function parseReviewerDecision(rawText: string): ReviewDecision {
       error: String(err),
       head: yamlBody.slice(0, 200),
     });
-    return { action: "accept" };
+    return { action: ReviewDecisionAction.Accept };
   }
 
   if (!parsed || typeof parsed !== "object") {
     log.warn("orchestrator.reviewer.unexpected_shape", { type: typeof parsed });
-    return { action: "accept" };
+    return { action: ReviewDecisionAction.Accept };
   }
 
   const obj = parsed as Record<string, unknown>;
@@ -282,20 +305,20 @@ export function parseReviewerDecision(rawText: string): ReviewDecision {
   const confidence = parseConfidence(obj["confidence"]);
   const findings = parseFindings(obj["findings"]);
 
-  if (decision === "send_back") {
+  if (decision === ReviewDecisionAction.SendBack) {
     const feedback = typeof obj["feedback"] === "string" ? obj["feedback"].trim() : "";
     if (!feedback) {
       log.warn("orchestrator.reviewer.send_back_without_feedback");
       // Send-back without feedback is useless to the coder. Accept.
-      return { action: "accept", confidence, findings };
+      return { action: ReviewDecisionAction.Accept, confidence, findings };
     }
-    return { action: "send_back", feedback, confidence, findings };
+    return { action: ReviewDecisionAction.SendBack, feedback, confidence, findings };
   }
 
   // Anything other than send_back → accept. Includes 'accept', misspellings,
   // missing field, etc. Capture optional notes so they can be logged.
   const notes = typeof obj["notes"] === "string" ? obj["notes"].trim() : undefined;
-  return { action: "accept", notes, confidence, findings };
+  return { action: ReviewDecisionAction.Accept, notes, confidence, findings };
 }
 
 /** Hard cap on how many times the reviewer can send back. After this

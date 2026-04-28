@@ -9,16 +9,22 @@
 import type { Database } from "bun:sqlite";
 import { db } from "./index";
 
-export type ActivityKind =
-  | "spec_create"
-  | "spec_edit"
-  | "review_sendback"
-  | "review_rate"
-  | "finalize"
-  | "task_run"
-  | "abandon";
+export const ActivityKind = {
+  SpecCreate: "spec_create",
+  SpecEdit: "spec_edit",
+  ReviewSendback: "review_sendback",
+  ReviewRate: "review_rate",
+  Finalize: "finalize",
+  TaskRun: "task_run",
+  Abandon: "abandon",
+} as const;
+export type ActivityKind = (typeof ActivityKind)[keyof typeof ActivityKind];
 
-export type ActivityActor = "user" | "agent";
+export const ActivityActor = {
+  User: "user",
+  Agent: "agent",
+} as const;
+export type ActivityActor = (typeof ActivityActor)[keyof typeof ActivityActor];
 
 export interface ActivityRow {
   id: number;

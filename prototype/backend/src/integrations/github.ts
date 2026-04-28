@@ -120,7 +120,11 @@ export async function isRequestedReviewer(
   return (pr.requested_reviewers ?? []).some((r) => r.login === myLogin);
 }
 
-export type PullFilter = "awaiting_me" | "all_open";
+export const PullFilter = {
+  AwaitingMe: "awaiting_me",
+  AllOpen: "all_open",
+} as const;
+export type PullFilter = (typeof PullFilter)[keyof typeof PullFilter];
 
 /**
  * List PRs across the watched repos. Two filters:
@@ -134,11 +138,11 @@ export type PullFilter = "awaiting_me" | "all_open";
 export async function listPullRequests(
   token: string,
   watched: string[],
-  filter: PullFilter = "awaiting_me",
+  filter: PullFilter = PullFilter.AwaitingMe,
   myLogin?: string,
 ): Promise<GithubPull[]> {
   if (watched.length === 0) return [];
-  if (filter === "all_open") {
+  if (filter === PullFilter.AllOpen) {
     return listAllOpen(token, watched, myLogin);
   }
   return listReviewRequests(token, watched, myLogin);
