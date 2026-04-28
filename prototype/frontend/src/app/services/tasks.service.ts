@@ -264,6 +264,14 @@ export interface TaskScoringRow {
   updated_at: number;
 }
 
+export interface ReviewFinding {
+  severity: 'info' | 'low' | 'medium' | 'high';
+  confidence: 'high' | 'medium' | 'low';
+  location: string;
+  title: string;
+  detail: string;
+}
+
 export interface TaskReviewRow {
   id: number;
   task_id: string;
@@ -271,6 +279,10 @@ export interface TaskReviewRow {
   decision: 'accept' | 'send_back';
   notes: string | null;
   raw_text: string | null;
+  /** Reviewer's confidence in its decision. null for older rows. */
+  confidence: 'high' | 'medium' | 'low' | null;
+  /** JSON-encoded ReviewFinding[]. Parse client-side. */
+  findings_json: string | null;
   created_at: number;
 }
 

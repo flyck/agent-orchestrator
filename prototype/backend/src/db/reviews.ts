@@ -15,6 +15,11 @@ export interface TaskReviewRow {
   decision: "accept" | "send_back";
   notes: string | null;
   raw_text: string | null;
+  /** "high" | "medium" | "low" | null. Reviewer's confidence in its
+   *  decision; persisted for the Review-tab UI. */
+  confidence: string | null;
+  /** JSON-encoded ReviewFinding[]. Empty array or null when none. */
+  findings_json: string | null;
   created_at: number;
 }
 
@@ -24,6 +29,8 @@ export interface AppendReviewInput {
   decision: "accept" | "send_back";
   notes: string | null;
   raw_text: string | null;
+  confidence?: string | null;
+  findings_json?: string | null;
 }
 
 export function appendReview(
@@ -32,12 +39,25 @@ export function appendReview(
 ): TaskReviewRow {
   const ts = Date.now();
   const row = handle
-    .query<TaskReviewRow, [string, number, string, string | null, string | null, number]>(
-      `INSERT INTO task_reviews (task_id, cycle, decision, notes, raw_text, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+    .query<
+      TaskReviewRow,
+      [string, number, string, string | null, string | null, string | null, string | null, number]
+    >(
+      `INSERT INTO task_reviews
+         (task_id, cycle, decision, notes, raw_text, confidence, findings_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
-    .get(input.task_id, input.cycle, input.decision, input.notes, input.raw_text, ts);
+    .get(
+      input.task_id,
+      input.cycle,
+      input.decision,
+      input.notes,
+      input.raw_text,
+      input.confidence ?? null,
+      input.findings_json ?? null,
+      ts,
+    );
   return row!;
 }
 

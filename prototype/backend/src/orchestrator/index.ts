@@ -107,6 +107,11 @@ interface ActiveTask {
   /** How many times the reviewer has sent the task back to the coder
    *  in *this run*. Capped by MAX_REVIEW_CYCLES. */
   cycleCount: number;
+  /** True for GitHub PR-review tasks. Lifecycle short-circuits on
+   *  review-phase termination — no send-back loop, the reviewer's
+   *  output is the deliverable. Set in startRunInternal for tasks
+   *  with workspace='review' + input_kind='diff'. */
+  isPrReview?: boolean;
   /** The reviewer's last `feedback:` text — passed back to the coder
    *  on send-back, and surfaced to the next reviewer pass so it can
    *  judge whether the issue was addressed. */
@@ -252,13 +257,20 @@ async function startRunInternal(
     task.feedback_question = null;
   }
 
+  // PR-review tasks (workspace='review' + diff input) skip the entire
+  // Plan→Code path: the diff is already in input_payload, no agent
+  // edits a worktree, the reviewer runs once on the diff and we
+  // finalize. Treated specially throughout this function.
+  const isPrReview = task.workspace === "review" && task.input_kind === "diff" && !opts.followUp;
+
   // ── Worktree setup ─────────────────────────────────────────────────
   // First run: create a fresh worktree branched from the parent repo's
   // current HEAD onto agent/<task>. Follow-up runs reuse the existing
   // worktree so the agent picks up where it left off. The diff for the
   // task is then naturally scoped to the worktree's branch — main can
   // move on freely without polluting the view.
-  if (!task.worktree_path) {
+  // PR reviews don't need a worktree — there's no editing.
+  if (!isPrReview && !task.worktree_path) {
     const parentRoot = findRoot(import.meta.dir);
     if (!parentRoot) {
       const msg = "no .git found above backend dir — cannot create worktree";
@@ -309,18 +321,28 @@ async function startRunInternal(
   // Initial vs. send-back: initial runs go through Plan first so the
   // planner agent populates .agent-notes/<id>.md. Send-backs skip Plan
   // — the cache from the prior pass is the planner's residue, and the
-  // user wants the coder to address feedback, not to re-explore.
-  const startInPlan = !opts.followUp;
-  const initialPhase: ActiveTask["phase"] = startInPlan ? "plan" : "code";
+  // user wants the coder to address feedback, not to re-explore. PR
+  // reviews open a reviewer session immediately and finalize once it
+  // idles — no plan, no code, no send-back loop.
+  const startInPlan = !opts.followUp && !isPrReview;
+  const initialPhase: ActiveTask["phase"] = isPrReview
+    ? "review"
+    : startInPlan
+      ? "plan"
+      : "code";
 
   let session: EngineSession;
   try {
-    session = startInPlan
-      ? await openPlannerSession(task, taskId)
-      : await engine.openSession({
-          title: task.title,
-          cwd: task.worktree_path ?? undefined,
-        });
+    if (isPrReview) {
+      session = await engine.openSession({ title: `pr-review:${task.title}` });
+    } else if (startInPlan) {
+      session = await openPlannerSession(task, taskId);
+    } else {
+      session = await engine.openSession({
+        title: task.title,
+        cwd: task.worktree_path ?? undefined,
+      });
+    }
     setLastSessionId(taskId, session.id);
     log.info("orchestrator.run.session_opened", {
       taskId,
@@ -347,6 +369,7 @@ async function startRunInternal(
     lastEventTs: Date.now(),
     phase: initialPhase,
     cycleCount: 0,
+    isPrReview,
   };
   active.set(taskId, a);
 
@@ -359,7 +382,15 @@ async function startRunInternal(
   // don't lose early events.
   try {
     const cwd = task.worktree_path ?? REPO_ROOT;
-    if (startInPlan) {
+    if (isPrReview) {
+      // PR review: no worktree, no spec — input_payload already carries
+      // the rendered "PR title + diff" message from the integrations
+      // endpoint. Reviewer agent runs straight on it.
+      const sharedPrompt = renderSharedPrompt(taskId, cwd);
+      await session.send(task.input_payload, {
+        system: buildReviewerSystemPrompt(sharedPrompt),
+      });
+    } else if (startInPlan) {
       // Planner gets the same skills + repo-context block as the coder
       // and reviewer — the planner is the agent that most needs it,
       // since its whole job is exploring.
@@ -774,6 +805,10 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
               ? decision.notes ?? null
               : decision.feedback,
           raw_text: r.assistantText ?? null,
+          confidence: decision.confidence ?? null,
+          findings_json: decision.findings && decision.findings.length > 0
+            ? JSON.stringify(decision.findings)
+            : null,
         });
       } catch (err) {
         log.warn("orchestrator.reviewer.persist_failed", {
@@ -787,6 +822,20 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
           taskId,
           cycleCount: a.cycleCount,
           notes: decision.notes ? decision.notes.slice(0, 280) : undefined,
+        });
+        finalizeTask(task, "done", "ready", lastError);
+        return;
+      }
+
+      // PR review: no coder to send back to. Whatever the reviewer
+      // said is the deliverable; finalize and let the user read it.
+      // The decision row + raw_text + alternatives are persisted, so
+      // "send_back" findings still surface — they just don't trigger
+      // another agent loop.
+      if (a.isPrReview) {
+        log.info("orchestrator.reviewer.pr_review_finalizing", {
+          taskId,
+          decision: decision.action,
         });
         finalizeTask(task, "done", "ready", lastError);
         return;

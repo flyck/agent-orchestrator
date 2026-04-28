@@ -81,6 +81,11 @@ function applyMigrations(db: Database) {
   // user remembers it existed (and any rating / activity log entries
   // remain readable). null = active; a timestamp = abandoned at that ms.
   ensureColumn("tasks", "abandoned_at", "INTEGER");
+  // Reviewer-supplied confidence + structured findings (added with the
+  // Claude code-review skill adaptation). Default-null so older review
+  // rows from before this column existed stay readable.
+  ensureColumn("task_reviews", "confidence", "TEXT");
+  ensureColumn("task_reviews", "findings_json", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

@@ -188,9 +188,59 @@ export function buildReviewerSystemPrompt(
 ${REVIEWER_PROMPT}`;
 }
 
+export type Confidence = "high" | "medium" | "low";
+
+export interface ReviewFinding {
+  severity: "info" | "low" | "medium" | "high";
+  confidence: Confidence;
+  location: string;
+  title: string;
+  detail: string;
+}
+
 export type ReviewDecision =
-  | { action: "accept"; notes?: string }
-  | { action: "send_back"; feedback: string };
+  | {
+      action: "accept";
+      notes?: string;
+      confidence?: Confidence;
+      findings?: ReviewFinding[];
+    }
+  | {
+      action: "send_back";
+      feedback: string;
+      confidence?: Confidence;
+      findings?: ReviewFinding[];
+    };
+
+const CONFIDENCE_VALUES: Confidence[] = ["high", "medium", "low"];
+function parseConfidence(raw: unknown): Confidence | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.toLowerCase().trim() as Confidence;
+  return CONFIDENCE_VALUES.includes(v) ? v : undefined;
+}
+
+function parseFindings(raw: unknown): ReviewFinding[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReviewFinding[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const title = typeof o["title"] === "string" ? o["title"] : "";
+    const detail = typeof o["detail"] === "string" ? o["detail"] : "";
+    if (!title && !detail) continue;
+    const severity = (typeof o["severity"] === "string" ? o["severity"] : "info").toLowerCase();
+    out.push({
+      severity: (["info", "low", "medium", "high"].includes(severity)
+        ? severity
+        : "info") as ReviewFinding["severity"],
+      confidence: parseConfidence(o["confidence"]) ?? "medium",
+      location: typeof o["location"] === "string" ? o["location"] : "general",
+      title,
+      detail,
+    });
+  }
+  return out;
+}
 
 /**
  * Parse the reviewer's YAML reply into a structured decision.
@@ -229,21 +279,23 @@ export function parseReviewerDecision(rawText: string): ReviewDecision {
 
   const obj = parsed as Record<string, unknown>;
   const decision = String(obj["decision"] ?? "").toLowerCase().trim();
+  const confidence = parseConfidence(obj["confidence"]);
+  const findings = parseFindings(obj["findings"]);
 
   if (decision === "send_back") {
     const feedback = typeof obj["feedback"] === "string" ? obj["feedback"].trim() : "";
     if (!feedback) {
       log.warn("orchestrator.reviewer.send_back_without_feedback");
       // Send-back without feedback is useless to the coder. Accept.
-      return { action: "accept" };
+      return { action: "accept", confidence, findings };
     }
-    return { action: "send_back", feedback };
+    return { action: "send_back", feedback, confidence, findings };
   }
 
   // Anything other than send_back → accept. Includes 'accept', misspellings,
   // missing field, etc. Capture optional notes so they can be logged.
   const notes = typeof obj["notes"] === "string" ? obj["notes"].trim() : undefined;
-  return { action: "accept", notes };
+  return { action: "accept", notes, confidence, findings };
 }
 
 /** Hard cap on how many times the reviewer can send back. After this

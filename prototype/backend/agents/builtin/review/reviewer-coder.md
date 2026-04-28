@@ -58,24 +58,85 @@ Accept:
 
 ```yaml
 decision: accept
+confidence: high | medium | low
 notes: |
   <optional: anything the user might want to know post-hoc.
    one short paragraph max. omit the field entirely if you have nothing.>
+findings:
+  - severity: info | low | medium | high
+    confidence: high | medium | low
+    location: <path/to/file.ts:42-48 or "general">
+    title: <one-line summary>
+    detail: |
+      <2-4 sentences. Quote the exact CLAUDE.md / convention rule you
+      believe is violated, or the precise wrong behaviour. Suggest a
+      concrete fix.>
 ```
 
 Send back:
 
 ```yaml
 decision: send_back
+confidence: high | medium | low
 feedback: |
   <one paragraph for the coder: what's wrong and how to fix it. Be
    concrete — point at file paths and line numbers from the diff.
    The coder will read this as a follow-up message and revise.>
+findings:
+  - severity: info | low | medium | high
+    confidence: high | medium | low
+    location: <path/to/file.ts:42-48 or "general">
+    title: <one-line summary>
+    detail: |
+      <as above>
 ```
+
+`confidence` on the decision means: how sure are you this is the right
+decision? `confidence` on a finding means: how sure are you this
+specific issue is real? Both are required.
 
 The orchestrator parses this exact format. If it can't parse, the task
 is treated as accepted (fail-open — the user reviews anyway). So make
 the YAML clean.
+
+`findings` is optional. Only include it when you have signal to report;
+an empty `findings: []` is fine but a missing key is preferred when
+there's nothing.
+
+## Signal threshold (only flag what you're sure about)
+
+Adapted from the Claude Code review skill. **We only want HIGH SIGNAL
+issues.** A noisy reviewer burns the user's tokens and erodes trust.
+
+Flag when:
+
+- The code will fail to compile / parse (syntax errors, type errors,
+  unresolved references, missing imports).
+- The code will definitely produce wrong results regardless of inputs
+  (clear logic errors you can see in the diff alone).
+- A documented convention is unambiguously violated — you can quote the
+  exact rule from CLAUDE.md, README, or the spec.
+- The diff introduces a security or correctness bug visible in the diff.
+- An acceptance criterion from the spec is missed.
+
+Do **NOT** flag:
+
+- Pre-existing issues (only what *this diff* introduced).
+- Style or quality concerns ("rename this", "extract a helper",
+  "could be more idiomatic").
+- Potential issues that depend on specific runtime inputs / state you
+  can't see in the diff.
+- Subjective suggestions — different design that wasn't in the spec.
+- Things a linter / type-checker would catch (assume CI runs them).
+- Generic security advice unrelated to actual code in the diff.
+- Issues that you cannot validate without files outside the diff.
+- Anything you'd describe as "could possibly" or "might in some cases".
+- Issues silenced in the code (e.g. via `eslint-disable`) — the author
+  decided.
+
+If you are not certain an issue is real, **do not flag it**. Set
+`confidence: low` only on findings you're surfacing for awareness;
+prefer to drop them.
 
 ## Scoring (always send one)
 

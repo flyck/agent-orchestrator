@@ -6,6 +6,7 @@ import { catchError, of, Subject, merge, switchMap, takeUntil, timer } from 'rxj
 import { SettingsService } from '../../services/settings.service';
 import {
   TasksService,
+  type ReviewFinding,
   type Task,
   type TaskAlternativeRow,
   type TaskReviewRow,
@@ -545,6 +546,18 @@ export class HomePage {
       next: (r) => this.scoring.set(r.scoring),
       error: () => this.scoring.set([]),
     });
+  }
+
+  /** Parse a TaskReviewRow's findings_json blob. Tolerant — unknown
+   *  shapes return []. */
+  protected parseFindings(rv: TaskReviewRow): ReviewFinding[] {
+    if (!rv.findings_json) return [];
+    try {
+      const parsed = JSON.parse(rv.findings_json);
+      return Array.isArray(parsed) ? (parsed as ReviewFinding[]) : [];
+    } catch {
+      return [];
+    }
   }
 
   refreshReviews(taskId: string) {

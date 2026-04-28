@@ -529,10 +529,35 @@
                         [class.send-back]="rv.decision === 'send_back'">
                     {{ rv.decision === 'accept' ? 'accepted' : 'sent back' }}
                   </span>
+                  @if (rv.confidence) {
+                    <span class="confidence-pill" [attr.data-confidence]="rv.confidence">
+                      {{ rv.confidence }} confidence
+                    </span>
+                  }
                   <span class="meta">{{ relativeTs(rv.created_at) }}</span>
                 </header>
                 @if (rv.notes) {
                   <p class="review-notes">{{ rv.notes }}</p>
+                }
+                @let findings = parseFindings(rv);
+                @if (findings.length > 0) {
+                  <ul class="findings">
+                    @for (f of findings; track f.title) {
+                      <li class="finding" [attr.data-severity]="f.severity">
+                        <header class="finding-head">
+                          <span class="finding-severity">{{ f.severity }}</span>
+                          <span class="finding-title">{{ f.title }}</span>
+                          <span class="confidence-pill" [attr.data-confidence]="f.confidence">
+                            {{ f.confidence }}
+                          </span>
+                        </header>
+                        @if (f.location && f.location !== 'general') {
+                          <p class="finding-loc mono">{{ f.location }}</p>
+                        }
+                        <p class="finding-detail">{{ f.detail }}</p>
+                      </li>
+                    }
+                  </ul>
                 }
                 @if (rv.raw_text) {
                   <details class="review-raw">
