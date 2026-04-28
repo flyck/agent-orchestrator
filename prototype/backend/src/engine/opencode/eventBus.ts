@@ -42,6 +42,17 @@ export class EventBus {
   private reader: { cancel: () => Promise<void> } | null = null;
   /** Last-seen sessionID for events that don't carry one — best-effort. */
   private onError?: (err: unknown) => void;
+  /** ms since epoch of the most recent *anything* received on the SSE
+   *  stream (event or heartbeat). Drives the stall detector. */
+  private lastReceivedAt = 0;
+  /** Force-reconnect when the SSE stream goes silent for this long while
+   *  at least one queue is subscribed. opencode has been observed to
+   *  silently stop pushing without closing the connection — `reader.read()`
+   *  then blocks forever and the run wedges. 25s gives normal turns
+   *  plenty of room while still recovering before the orchestrator's
+   *  60s watchdog kicks in. */
+  private static readonly STALL_TIMEOUT_MS = 25_000;
+  private stallTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly client: OpenCodeClient, opts: { onError?: (e: unknown) => void } = {}) {
     this.onError = opts.onError;
@@ -67,6 +78,10 @@ export class EventBus {
 
   async shutdown(): Promise<void> {
     this.aborted = true;
+    if (this.stallTimer) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
     try {
       await this.reader?.cancel();
     } catch {
@@ -76,7 +91,41 @@ export class EventBus {
     this.queues.clear();
   }
 
+  /**
+   * Cancel the current reader so the run-loop reconnects. Used by the
+   * stall detector — opencode sometimes stops streaming without closing
+   * the connection, leaving reader.read() blocked forever.
+   */
+  private async forceReconnect(reason: string): Promise<void> {
+    this.onError?.(new Error(`event-bus stall: ${reason}`));
+    try {
+      await this.reader?.cancel();
+    } catch {
+      /* the reader is already gone or canceling errored — either is fine */
+    }
+  }
+
   private async run(): Promise<void> {
+    // Stall detector: if there's at least one active subscription but no
+    // bytes have arrived from opencode for STALL_TIMEOUT_MS, cancel the
+    // reader so we reconnect. opencode has been observed to silently
+    // stop pushing without closing the underlying HTTP connection — in
+    // that case reader.read() blocks forever and the entire orchestrator
+    // run wedges. We start the timer once and let it run for the bus
+    // lifetime; shutdown() clears it.
+    if (!this.stallTimer) {
+      this.stallTimer = setInterval(() => {
+        if (this.aborted) return;
+        if (this.queues.size === 0) return; // idle bus, nothing to recover
+        const silentMs = Date.now() - this.lastReceivedAt;
+        if (silentMs > EventBus.STALL_TIMEOUT_MS) {
+          // Reset so we don't fire repeatedly while reconnecting.
+          this.lastReceivedAt = Date.now();
+          void this.forceReconnect(`silent for ${silentMs}ms`);
+        }
+      }, 5_000);
+    }
+
     // Reconnect-loop: if the SSE stream drops, wait briefly and reopen.
     // We do NOT close active queues across reconnects — sessions stay alive
     // and start receiving events again on the new connection. Without this,
@@ -88,12 +137,14 @@ export class EventBus {
         const res = await this.client.openEventStream();
         const reader = res.body!.getReader();
         this.reader = reader;
+        this.lastReceivedAt = Date.now(); // fresh connection — reset stall clock
         const decoder = new TextDecoder();
         let buf = "";
         attempt = 0; // reset backoff on a successful connect
         while (!this.aborted) {
           const { value, done } = await reader.read();
           if (done) break; // SSE closed cleanly — will reconnect below
+          this.lastReceivedAt = Date.now();
           buf += decoder.decode(value, { stream: true });
           const lines = buf.split("\n");
           buf = lines.pop() ?? "";
@@ -135,5 +186,9 @@ export class EventBus {
     // Only on explicit shutdown: close all queues so iterators terminate.
     for (const q of this.queues.values()) q.close();
     this.queues.clear();
+    if (this.stallTimer) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
   }
 }
