@@ -620,6 +620,16 @@ export class HomePage {
     });
   }
 
+  finishSelectedTask() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.tasksApi.finish(sel.raw.id).subscribe({
+      next: () => this.refreshTasks(),
+      error: (e) =>
+        this.finalizeError.set(`finish failed: ${e?.error?.message ?? e?.message ?? e}`),
+    });
+  }
+
   /** Spec-editor dialog. The "+ new task" button calls show() on it,
    *  and on success we auto-select the new task so the user lands on
    *  its detail panel and can watch the live stream immediately.

@@ -14,6 +14,7 @@ import {
   setTaskProgress,
   setUserRating,
   updateTaskSpec,
+  updateTaskStatus,
   type TaskWorkspace,
   type TaskStatus,
 } from "../db/tasks";
@@ -496,6 +497,28 @@ tasks.post("/:id/cancel", async (c) => {
   if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   await cancelRun(id);
   return c.json({ ok: true });
+});
+
+/**
+ * Finish a task — manual mark-as-done. Cancels any active run, moves
+ * the task to current_state='finalize' / status='done', and records a
+ * `finalize` activity event. Distinct from POST /:id/finalize (which
+ * runs git operations) — this is the "I dealt with it manually, just
+ * move it forward" button.
+ */
+tasks.post("/:id/finish", async (c) => {
+  const id = c.req.param("id");
+  const t = getTask(id);
+  if (!t) return c.json({ error: "not_found" }, 404);
+  try {
+    await cancelRun(id);
+  } catch {
+    /* already idle */
+  }
+  const updated = updateTaskStatus(id, "done", "finalize");
+  recordActivity("finalize", "user", id, "manual finish");
+  log.info("api.tasks.finished", { id });
+  return c.json(updated);
 });
 
 /**

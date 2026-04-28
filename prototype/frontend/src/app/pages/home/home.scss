@@ -369,13 +369,19 @@
 }
 .detail-close,
 .detail-delete,
-.detail-abandon {
+.detail-abandon,
+.detail-finish {
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: transparent;
   border-color: var(--rule-strong);
 }
+.detail-finish {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.detail-finish:hover { background: var(--paper-soft); }
 .detail-abandon {
   color: var(--ink-red);
   border-color: var(--ink-red);

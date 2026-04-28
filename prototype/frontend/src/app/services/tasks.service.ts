@@ -148,6 +148,14 @@ export class TasksService {
     return this.http.post<Task>(`/api/tasks/${id}/abandon`, {});
   }
 
+  /** Manual mark-as-done. Cancels any active run and moves the task to
+   *  current_state='finalize' / status='done'. Distinct from finalize()
+   *  which runs git ops — this just transitions the row, for when the
+   *  user dealt with the work outside the orchestrator. */
+  finish(id: string): Observable<Task> {
+    return this.http.post<Task>(`/api/tasks/${id}/finish`, {});
+  }
+
   clearFeedback(id: string): Observable<Task> {
     return this.http.post<Task>(`/api/tasks/${id}/clear-feedback`, {});
   }

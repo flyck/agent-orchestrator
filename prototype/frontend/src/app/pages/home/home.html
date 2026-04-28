@@ -205,6 +205,12 @@
           </button>
         }
         <button class="detail-delete" type="button" (click)="deleteSelectedTask()" title="Delete this task entirely (no record)">delete</button>
+        @if (sel.state !== 'finalize' && sel.raw.abandoned_at === null) {
+          <button class="detail-finish" type="button" (click)="finishSelectedTask()"
+                  title="Mark as done and move to Finalize. Use when you handled the work yourself — no git operations.">
+            finish
+          </button>
+        }
         @if (sel.raw.abandoned_at === null) {
           <button class="detail-abandon" type="button" (click)="abandonSelectedTask()"
                   title="Give up on this task. Cancels any active run; the row + activity log stay so it shows as a red square in the overview.">

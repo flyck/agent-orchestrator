@@ -33,6 +33,11 @@ import {
 import { incrementCompletedSinceNudge, readAllSettings } from "../db/settings";
 import { listSkills, renderSkillsSection } from "./skills";
 import {
+  buildPlannerMessage,
+  buildPlannerSystemPrompt,
+  openPlannerSession,
+} from "./planner";
+import {
   buildReviewerMessage,
   buildReviewerSystemPrompt,
   MAX_REVIEW_CYCLES,
@@ -88,8 +93,16 @@ interface ActiveTask {
    *  instead of continuing. */
   forceCompleted?: boolean;
   /** Which agent owns the current session. Drives the lifecycle
-   *  controller's branch on terminal. */
-  phase: "code" | "review";
+   *  controller's branch on terminal. Plan runs first on initial runs;
+   *  send-backs skip Plan and start at Code (the planner's notes file
+   *  in .agent-notes/<id>.md is the cache). */
+  phase: "plan" | "code" | "review";
+  /** True when the watchdog detected the engine session finished but
+   *  the SSE bus missed the events. Lifecycle treats this as "phase
+   *  finished cleanly" and proceeds to the next phase, instead of
+   *  bailing to ready (which is what user-triggered force-complete
+   *  does). */
+  watchdogRecovered?: boolean;
   /** How many times the reviewer has sent the task back to the coder
    *  in *this run*. Capped by MAX_REVIEW_CYCLES. */
   cycleCount: number;
@@ -278,17 +291,27 @@ async function startRunInternal(
     throw err;
   }
 
+  // Initial vs. send-back: initial runs go through Plan first so the
+  // planner agent populates .agent-notes/<id>.md. Send-backs skip Plan
+  // — the cache from the prior pass is the planner's residue, and the
+  // user wants the coder to address feedback, not to re-explore.
+  const startInPlan = !opts.followUp;
+  const initialPhase: ActiveTask["phase"] = startInPlan ? "plan" : "code";
+
   let session: EngineSession;
   try {
-    session = await engine.openSession({
-      title: task.title,
-      cwd: task.worktree_path ?? undefined,
-    });
+    session = startInPlan
+      ? await openPlannerSession(task, taskId)
+      : await engine.openSession({
+          title: task.title,
+          cwd: task.worktree_path ?? undefined,
+        });
     setLastSessionId(taskId, session.id);
     log.info("orchestrator.run.session_opened", {
       taskId,
       sessionId: session.id,
       cwd: task.worktree_path,
+      phase: initialPhase,
     });
   } catch (err) {
     log.error("orchestrator.run.open_session_failed", {
@@ -299,7 +322,7 @@ async function startRunInternal(
     throw err;
   }
 
-  updateTaskStatus(taskId, "running", "code");
+  updateTaskStatus(taskId, "running", initialPhase);
 
   const a: ActiveTask = {
     taskId,
@@ -307,7 +330,7 @@ async function startRunInternal(
     listeners: new Set(),
     pump: undefined as unknown as Promise<void>,
     lastEventTs: Date.now(),
-    phase: "code",
+    phase: initialPhase,
     cycleCount: 0,
   };
   active.set(taskId, a);
@@ -321,10 +344,21 @@ async function startRunInternal(
   // don't lose early events.
   try {
     const cwd = task.worktree_path ?? REPO_ROOT;
-    await session.send(buildInitialMessage(task, opts.followUp), {
-      system: buildSystemPrompt(taskId, cwd),
+    if (startInPlan) {
+      const sharedPrompt = renderSharedPrompt(taskId, cwd);
+      await session.send(buildPlannerMessage(task), {
+        system: buildPlannerSystemPrompt(sharedPrompt),
+      });
+    } else {
+      await session.send(buildInitialMessage(task, opts.followUp), {
+        system: buildSystemPrompt(taskId, cwd),
+      });
+    }
+    log.info("orchestrator.run.initial_message_sent", {
+      taskId,
+      sessionId: session.id,
+      phase: initialPhase,
     });
-    log.info("orchestrator.run.initial_message_sent", { taskId, sessionId: session.id });
   } catch (err) {
     log.error("orchestrator.run.send_failed", {
       taskId,
@@ -584,8 +618,49 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
       const r = await pumpUntilTerminal(a);
       lastError = r.lastError ?? lastError;
 
-      // forceComplete short-circuits everything: user said it's done.
+      // forceComplete short-circuits, but with a nuance: if the watchdog
+      // (not the user) triggered it AND we're in a phase that has a
+      // natural successor, treat it as the phase finishing cleanly. The
+      // watchdog only fires when opencode reports finish=stop, so the
+      // work is already done — only the SSE bus missed events. Skipping
+      // review on a code-phase recovery is what the user complained
+      // about ("review step doesn't complete for self-created tasks");
+      // promoting to next phase fixes that.
       if (a.forceCompleted === true) {
+        if (a.watchdogRecovered && a.phase === "plan") {
+          await safeClose(a.session, taskId, "plan_recovered");
+          a.forceCompleted = false;
+          a.watchdogRecovered = false;
+          try {
+            await switchToCoder(a, task);
+            continue;
+          } catch (err) {
+            log.warn("orchestrator.coder.start_failed_after_plan", {
+              taskId,
+              error: String(err),
+            });
+            finalizeTask(task, "done", "ready", lastError);
+            return;
+          }
+        }
+        if (a.watchdogRecovered && a.phase === "code") {
+          await safeClose(a.session, taskId, "code_recovered");
+          a.forceCompleted = false;
+          a.watchdogRecovered = false;
+          try {
+            await switchToReviewer(a, task);
+            continue;
+          } catch (err) {
+            log.warn("orchestrator.reviewer.start_failed_after_recovery", {
+              taskId,
+              error: String(err),
+            });
+            finalizeTask(task, "done", "ready", lastError);
+            return;
+          }
+        }
+        // User-triggered force-complete (or watchdog at review phase) —
+        // bail to ready as before.
         await safeClose(a.session, taskId, "force_completed");
         finalizeTask(task, "done", "ready", lastError);
         return;
@@ -598,9 +673,25 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
         return;
       }
 
-      // Session error in either phase fails the whole task. (Reviewer
-      // errors are downgraded to accept further down — but a session-
-      // level error means the engine itself failed, not just bad output.)
+      // Session error in any phase before review fails the whole task.
+      // Reviewer errors get downgraded to accept further down — but a
+      // session-level error means the engine itself failed, not just
+      // bad output.
+      if (r.terminal === "error" && a.phase === "plan") {
+        log.warn("orchestrator.planner.session_error_falling_through_to_code", {
+          taskId,
+        });
+        await safeClose(a.session, taskId, "plan_error");
+        // Plan failure is not fatal — the coder can still attempt the
+        // task without notes. Fall through to coder.
+        try {
+          await switchToCoder(a, task);
+          continue;
+        } catch (err) {
+          finalizeTask(task, "failed", task.current_state, lastError);
+          return;
+        }
+      }
       if (r.terminal === "error" && a.phase === "code") {
         await safeClose(a.session, taskId, "code_error");
         finalizeTask(task, "failed", task.current_state, lastError);
@@ -617,6 +708,20 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
       }
 
       // r.terminal === "idle" — clean finish for this phase. Branch on phase.
+      if (a.phase === "plan") {
+        await safeClose(a.session, taskId, "plan_done");
+        try {
+          await switchToCoder(a, task);
+          continue;
+        } catch (err) {
+          log.warn("orchestrator.coder.start_failed_after_plan", {
+            taskId,
+            error: String(err),
+          });
+          finalizeTask(task, "done", "ready", lastError);
+          return;
+        }
+      }
       if (a.phase === "code") {
         await safeClose(a.session, taskId, "code_done");
         // Try to switch to reviewer. On any failure, accept the coder's
@@ -739,11 +844,14 @@ async function switchToReviewer(a: ActiveTask, task: TaskRow): Promise<void> {
 }
 
 /**
- * Open a fresh coder session in the same worktree, prepending the
- * reviewer's feedback as the follow-up message. Updates a.session +
- * a.phase + the task's current_state.
+ * Open a fresh coder session in the same worktree. Used in three places:
+ *   1. After Plan phase ends — no feedback, the coder reads the spec
+ *      and the planner's notes file.
+ *   2. After a reviewer send-back — feedback is the reviewer's prose;
+ *      coder should address it.
+ *   3. Plan recovery / plan-error fallback — same as case 1.
  */
-async function switchToCoder(a: ActiveTask, task: TaskRow, feedback: string): Promise<void> {
+async function switchToCoder(a: ActiveTask, task: TaskRow, feedback?: string): Promise<void> {
   const taskId = task.id;
   const engine = await getEngine();
   const session = await engine.openSession({
@@ -759,15 +867,22 @@ async function switchToCoder(a: ActiveTask, task: TaskRow, feedback: string): Pr
   updateTaskStatus(taskId, "running", "code");
 
   const cwd = task.worktree_path ?? REPO_ROOT;
-  const followUp = `The reviewer flagged issues with your previous pass. Address them and revise.\n\n## Reviewer feedback\n\n${feedback}`;
+  const followUp = feedback
+    ? `The reviewer flagged issues with your previous pass. Address them and revise.\n\n## Reviewer feedback\n\n${feedback}`
+    : undefined;
   await session.send(buildInitialMessage(task, followUp), {
     system: buildSystemPrompt(taskId, cwd),
   });
-  log.info("orchestrator.coder.restarted_after_review", {
-    taskId,
-    sessionId: session.id,
-    cycleCount: a.cycleCount,
-  });
+  log.info(
+    feedback
+      ? "orchestrator.coder.restarted_after_review"
+      : "orchestrator.coder.started_after_plan",
+    {
+      taskId,
+      sessionId: session.id,
+      cycleCount: a.cycleCount,
+    },
+  );
 }
 
 function buildInitialMessage(task: TaskRow, followUp?: string): string {
@@ -836,11 +951,14 @@ async function watchdogTick(): Promise<void> {
       if (lastInfo?.role === "assistant" && (lastInfo.finish || lastInfo.error)) {
         log.warn("orchestrator.watchdog.recovered", {
           taskId: a.taskId,
+          phase: a.phase,
           finish: lastInfo.finish,
           hadError: !!lastInfo.error,
         });
-        // Use the public force-complete path so the queue slot also
-        // releases and the next pending task can promote.
+        // Mark this as a watchdog recovery so the lifecycle promotes to
+        // the next phase instead of bailing to ready (which would skip
+        // review on a code-phase task that opencode actually finished).
+        a.watchdogRecovered = true;
         await forceComplete(a.taskId);
       } else {
         log.info("orchestrator.watchdog.still_working", { taskId: a.taskId });
