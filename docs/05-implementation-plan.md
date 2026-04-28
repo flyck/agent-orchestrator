@@ -165,6 +165,43 @@ Render a placeholder describing the planned agent composition. Shares `Orchestra
 8. **Finalize: rebase fallback + state transition + base-ref reset.** When parent has moved past the task base, finalize attempts a rebase of the agent branch onto parent's tip and re-FFs; conflicts abort cleanly with a clear message. Successful finalize transitions to `current_state='finalize'` (was `ready`) and updates `worktree_base_ref` to the rebased commit's parent so the Files tab shows just the agent's diff post-commit.
 9. **State-aware default tab.** Selecting a task lands on a tab matching its state — spec→Spec, finalize→Files, ready→Review, otherwise Stream. URL `?tab=` still wins for direct links.
 
+## Phase 16 — PR review pipeline (multi-phase, configurable)
+
+GitHub PR reviews don't fit the local code-task lifecycle. The work has
+already shipped, the input is a diff + author intent (not a
+user-authored spec), and the user ideally wants depth tuned to the PR.
+Two designs are spec'd in [`17-pr-review-pipeline.md`](17-pr-review-pipeline.md):
+
+- **A: Gate-driven.** spec-intake → solution-explorer → user-approval
+  gate → parallel(security · performance · bugs) → synthesizer.
+- **B: Triage-first (recommended default).** triage → parallel(intake ·
+  planner-map) → parallel reviewers (depth-gated by triage tag) →
+  synthesizer.
+
+Implementation breaks into:
+
+1. **Pipeline configuration model** — typed phase list per pipeline id,
+   eventually persisted in DB / overridable per repo. v1 is two
+   hard-coded pipelines (`code-task` and `pr-review`) wired in
+   `orchestrator/pipelines.ts`.
+2. **Multi-phase runner** — `runLifecycle` becomes pipeline-driven; it
+   walks phases instead of hard-coded `plan`/`code`/`review` branches.
+   Phase kinds: `agent`, `parallel`, `gate`.
+3. **Agents** — `pr-spec-intake` and `solution-explorer` written in
+   `agents/builtin/review/`. The existing `reviewer-security`,
+   `reviewer-performance`, `reviewer-architecture`, `synthesizer` are
+   reused. A `triage` agent + a `reviewer-bug-finder` (refactor of
+   `reviewer-coder` for the bug specialty only) land with the runner.
+4. **User gate** — model task-level `awaiting_user_decision` so the
+   orchestrator pauses cleanly. UI affordance: "approve direction" /
+   "send back with feedback" — both already-existing patterns.
+5. **Per-repo pipeline choice** — `github_repo_overrides.pipeline_kind`
+   selects A or B per watched repo. Default: B.
+
+Phase 15 shipped the foundations Phase 16 builds on (Plan +
+watchdog→next-phase + alternatives + reviewer findings). Phase 16
+lands the runner + the new agents.
+
 ## Out of scope for v1 (explicit)
 
 - GitHub/GitLab PR ingestion or comment posting.
