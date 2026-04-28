@@ -18,6 +18,12 @@ export const routes: Routes = [
     title: 'Background',
   },
   {
+    path: 'architecture',
+    loadComponent: () =>
+      import('./pages/architecture/architecture').then((m) => m.ArchitecturePage),
+    title: 'Architecture',
+  },
+  {
     path: 'settings',
     loadComponent: () => import('./pages/settings/settings').then((m) => m.SettingsPage),
     title: 'Settings',

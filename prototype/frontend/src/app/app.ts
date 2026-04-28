@@ -12,11 +12,12 @@ interface HealthResponse {
 }
 
 const TABS: { path: string; label: string }[] = [
-  { path: 'home',       label: 'Home' },
-  { path: 'review',     label: 'Review' },
-  { path: 'background', label: 'Background' },
-  { path: 'settings',   label: 'Settings' },
-  { path: 'cost',       label: 'Cost' },
+  { path: 'home',         label: 'Home' },
+  { path: 'review',       label: 'Review' },
+  { path: 'architecture', label: 'Architecture' },
+  { path: 'background',   label: 'Background' },
+  { path: 'settings',     label: 'Settings' },
+  { path: 'cost',         label: 'Cost' },
 ];
 
 @Component({
