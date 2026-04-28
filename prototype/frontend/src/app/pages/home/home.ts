@@ -410,6 +410,13 @@ export class HomePage {
   // One row per reviewer pass — newest cycle first. Drives the Review tab.
   protected readonly reviews = signal<TaskReviewRow[]>([]);
 
+  // ─── Planner notes for selected task ─────────────────────────────────
+  // .agent-notes/<id>.md content — written by the plan-coder agent and
+  // read by the coder. Surfaced in the Spec tab once it exists so the
+  // user can see what context the coder is working from.
+  protected readonly notesContent = signal<string | null>(null);
+  protected readonly notesPath = signal<string | null>(null);
+
   // ─── Working-tree changes for selected task ───────────────────────────
   protected readonly diff = signal<DiffResponse | null>(null);
   protected readonly diffLoading = signal(false);
@@ -471,6 +478,7 @@ export class HomePage {
       this.refreshDiff();
       this.refreshScoring(next);
       this.refreshReviews(next);
+      this.refreshNotes(next);
       this.openStream(next);
       const t = this.tasks().find((x) => x.raw.id === next);
       // Land on a state-appropriate tab when the URL hasn't pinned one.
@@ -494,6 +502,8 @@ export class HomePage {
       this.diff.set(null);
       this.scoring.set([]);
       this.reviews.set([]);
+      this.notesContent.set(null);
+      this.notesPath.set(null);
       this.transcriptTail.set([]);
       this.closeStream();
     }
@@ -510,6 +520,19 @@ export class HomePage {
     this.tasksApi.getReviews(taskId).subscribe({
       next: (r) => this.reviews.set(r.reviews),
       error: () => this.reviews.set([]),
+    });
+  }
+
+  refreshNotes(taskId: string) {
+    this.tasksApi.getNotes(taskId).subscribe({
+      next: (r) => {
+        this.notesContent.set(r.exists ? r.content : null);
+        this.notesPath.set(r.path ?? null);
+      },
+      error: () => {
+        this.notesContent.set(null);
+        this.notesPath.set(null);
+      },
     });
   }
 
@@ -1002,11 +1025,13 @@ export class HomePage {
         this.tasksLoading.set(false);
         this.tasksError.set(null);
         // Pick up new scoring rows the reviewer agent may have just POSTed,
-        // and any newly-persisted review verdicts. Cheap — one request each.
+        // any newly-persisted review verdicts, and the planner's notes
+        // file once it lands. Cheap — one request each.
         const sel = this.selectedId();
         if (sel) {
           this.refreshScoring(sel);
           this.refreshReviews(sel);
+          this.refreshNotes(sel);
         }
       });
 

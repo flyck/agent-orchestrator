@@ -226,6 +226,15 @@ export class TasksService {
     return this.http.post<Task>(`/api/tasks/${id}/rating`, { rating, comment });
   }
 
+  /** Read the planner agent's execution-context notes from
+   *  `.agent-notes/<task_id>.md` in the worktree. exists=false when
+   *  the planner hasn't produced one yet. */
+  getNotes(id: string): Observable<{ exists: boolean; content: string | null; path?: string }> {
+    return this.http.get<{ exists: boolean; content: string | null; path?: string }>(
+      `/api/tasks/${id}/notes`,
+    );
+  }
+
   /** Read the task's radar-chart scoring (per-axis rows). */
   getScoring(id: string): Observable<{ scoring: TaskScoringRow[] }> {
     return this.http.get<{ scoring: TaskScoringRow[] }>(`/api/tasks/${id}/scoring`);

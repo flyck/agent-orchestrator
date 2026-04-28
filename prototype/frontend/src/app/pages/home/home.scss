@@ -543,6 +543,33 @@
   word-break: break-word;
 }
 
+/* ─── Plan notes (Spec tab) ──────────────────────────────────────────── */
+.notes-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+}
+.notes-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+  .meta { margin: 0; }
+  .notes-path { font-size: 11px; color: var(--ink-muted); }
+}
+.notes-body {
+  background: var(--paper-soft);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ─── Live stream block ───────────────────────────────────────────────── */
 .stream-section {
   margin-top: 16px;

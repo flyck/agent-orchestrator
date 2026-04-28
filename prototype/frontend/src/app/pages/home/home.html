@@ -360,6 +360,23 @@
         </header>
         <pre class="spec-body mono">{{ sel.raw.input_payload }}</pre>
       </section>
+
+      <!-- Plan notes: the planner agent writes .agent-notes/<id>.md
+           which the coder reads on its first turn. Surfacing the same
+           content here so the user knows what context is being passed
+           down. Hidden until the file actually exists — empty would be
+           noise. -->
+      @if (notesContent()) {
+        <section class="notes-section">
+          <header class="notes-head">
+            <p class="meta">execution context · written by the planner</p>
+            @if (notesPath()) {
+              <span class="meta mono notes-path">{{ notesPath() }}</span>
+            }
+          </header>
+          <pre class="notes-body mono">{{ notesContent() }}</pre>
+        </section>
+      }
     }
 
     <!-- ═══ Stream tab ═════════════════════════════════════════════ -->

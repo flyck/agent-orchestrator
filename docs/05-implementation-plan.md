@@ -153,6 +153,18 @@ Render a placeholder describing the planned agent composition. Shares `Orchestra
 4. **Per-stage entry counter on cards** — `tasks.stage_entries_json` JSON map bumped on each state transition. Pipeline cards render a small "×N" bubble next to the kind label when the current stage has been entered more than once (typically a reviewer send-back loop). The Finalize column reuses the bubble to show the agent's total reported step count instead.
 5. **Solution scoring radar** — `task_scorings` table; reviewer (and any other producer instructed in its system prompt) POSTs five-axis scores (complexity / parts / LoC / user benefit / maintainability) on a 1–10 scale. Detail panel renders an ApexCharts radar; future phases extend to spec/plan agents and to user-driven reviews of others' code.
 
+## Phase 15 — Lifecycle robustness + Plan phase + manual flow controls
+
+1. **Plan phase before Code.** New `agents/builtin/plan/planner.md` agent runs first on every initial task run. It explores the worktree and writes `.agent-notes/<TASK_ID>.md` — the execution-context file the coder picks up via the shared "read your notes file first" protocol. Send-backs skip Plan; the prior notes file is the cache.
+2. **Review actually completes after watchdog recovery.** When the SSE bus stalls but opencode reports `finish=stop`, the watchdog now flags `watchdogRecovered=true` and the lifecycle promotes plan→code or code→review instead of bailing straight to ready. User-triggered force-complete still ends in ready as before.
+3. **SSE event-bus stall detector.** `EventBus` tracks `lastReceivedAt` and force-reconnects when 25s pass with no traffic and at least one queue is subscribed. Recovers from opencode silently dropping the stream without closing the connection — the failure mode that was producing `eventCount:0` runs.
+4. **Persisted reviewer verdicts + Review tab.** New `task_reviews` table; orchestrator records each reviewer pass (decision / notes / raw reply). Detail panel gets a Review tab between Stream and Files; the scoring radar moves there.
+5. **`data/user-settings.yaml` overlay.** Loaded on every boot, gitignored, `USER_SETTINGS_PATH` env override. Machine-specific knobs (IDE / emacs / magit open commands, paths) live in a portable text file rather than the SQLite db.
+6. **Engine health on the topbar.** `ok / cold / stalled` next to backend status so a hung opencode is visible without trying to run a task.
+7. **Abandon + Finish actions.** Abandon cancels the run, stamps `tasks.abandoned_at`, surfaces as red squares in the activity panel — distinct from delete (which removes the row entirely). Finish moves a task to Finalize without git ops, for when the user handled the work outside the orchestrator.
+8. **Finalize: rebase fallback + state transition + base-ref reset.** When parent has moved past the task base, finalize attempts a rebase of the agent branch onto parent's tip and re-FFs; conflicts abort cleanly with a clear message. Successful finalize transitions to `current_state='finalize'` (was `ready`) and updates `worktree_base_ref` to the rebased commit's parent so the Files tab shows just the agent's diff post-commit.
+9. **State-aware default tab.** Selecting a task lands on a tab matching its state — spec→Spec, finalize→Files, ready→Review, otherwise Stream. URL `?tab=` still wins for direct links.
+
 ## Out of scope for v1 (explicit)
 
 - GitHub/GitLab PR ingestion or comment posting.

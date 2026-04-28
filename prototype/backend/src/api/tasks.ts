@@ -322,6 +322,30 @@ tasks.get("/:id/revisions", (c) => {
 });
 
 /**
+ * Read the planner's execution-context file for this task. Lives at
+ * `<worktree>/.agent-notes/<task_id>.md`. Returns 404 when the planner
+ * hasn't run yet or the file isn't where we expect; the frontend
+ * treats absence as "no notes".
+ */
+tasks.get("/:id/notes", async (c) => {
+  const id = c.req.param("id");
+  const t = getTask(id);
+  if (!t) return c.json({ error: "not_found" }, 404);
+  if (!t.worktree_path) return c.json({ exists: false, content: null });
+  const { existsSync, readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const path = join(t.worktree_path, ".agent-notes", `${id}.md`);
+  if (!existsSync(path)) return c.json({ exists: false, content: null });
+  try {
+    const content = readFileSync(path, "utf8");
+    return c.json({ exists: true, content, path });
+  } catch (err) {
+    log.warn("api.tasks.notes.read_failed", { id, error: String(err) });
+    return c.json({ exists: false, content: null, error: String(err) }, 200);
+  }
+});
+
+/**
  * History of reviewer-agent verdicts for this task. Newest cycle first.
  * Empty array when the reviewer hasn't run yet (or the task predates
  * the persistence wiring).
