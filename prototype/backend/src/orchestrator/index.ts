@@ -32,6 +32,7 @@ import {
 } from "../db/tasks";
 import { incrementCompletedSinceNudge, readAllSettings } from "../db/settings";
 import { listSkills, renderSkillsSection } from "./skills";
+import { renderRepoContext } from "./repoContext";
 import {
   buildPlannerMessage,
   buildPlannerSystemPrompt,
@@ -155,12 +156,26 @@ function renderSharedPrompt(taskId: string, cwd: string): string {
     .replaceAll("{{REPO_ROOT}}", cwd);
 }
 
-function buildSystemPrompt(taskId: string, cwd: string): string {
-  // Per-run skills lookup — cheap (one stat + a few reads), and lets the
-  // user drop a new skill into the directory without restarting backend.
+/**
+ * Skills + repo-context blocks concatenated. Used by every agent's
+ * system prompt — coder, reviewer, planner — so they all see the same
+ * ambient project background. Cheap to compute (one stat + a few file
+ * reads) so we recompute per-run rather than caching.
+ */
+function ambientContext(cwd: string): string {
   const settings = readAllSettings();
   const skillsSection = renderSkillsSection(listSkills(settings.skills_directory));
+  const repoContextSection = settings.repo_context_enabled
+    ? renderRepoContext({
+        cwd,
+        readmeTokenBudget: settings.readme_token_budget,
+        backlogTokenBudget: settings.backlog_token_budget,
+      })
+    : "";
+  return `${skillsSection}${repoContextSection}`;
+}
 
+function buildSystemPrompt(taskId: string, cwd: string): string {
   return `${renderSharedPrompt(taskId, cwd)}
 
 ---
@@ -175,7 +190,7 @@ Use the file-editing tools available to you. Keep the change scoped — touch on
 
 Do not run \`git add\`, \`git commit\`, \`git push\`, \`git checkout\`, \`git branch\`, or any other git command. Even if your bash tool would let you. The orchestrator owns this worktree's branch and will commit your edits when the user clicks Finalize. If you commit yourself you'll create messages the user didn't write and confuse the finalize step. Just edit the files; leave them uncommitted.
 
-When you are done, summarize what you changed in 2-3 sentences. The user reviews via Finalize → Commit to current branch / new branch.${skillsSection}`;
+When you are done, summarize what you changed in 2-3 sentences. The user reviews via Finalize → Commit to current branch / new branch.${ambientContext(cwd)}`;
 }
 
 const active = new Map<string, ActiveTask>();
@@ -345,7 +360,10 @@ async function startRunInternal(
   try {
     const cwd = task.worktree_path ?? REPO_ROOT;
     if (startInPlan) {
-      const sharedPrompt = renderSharedPrompt(taskId, cwd);
+      // Planner gets the same skills + repo-context block as the coder
+      // and reviewer — the planner is the agent that most needs it,
+      // since its whole job is exploring.
+      const sharedPrompt = renderSharedPrompt(taskId, cwd) + ambientContext(cwd);
       await session.send(buildPlannerMessage(task), {
         system: buildPlannerSystemPrompt(sharedPrompt),
       });
@@ -834,7 +852,9 @@ async function switchToReviewer(a: ActiveTask, task: TaskRow): Promise<void> {
     cycleCount: a.cycleCount,
     priorFeedback: a.lastReviewerFeedback,
   });
-  const systemPrompt = buildReviewerSystemPrompt(renderSharedPrompt(taskId, cwd));
+  const systemPrompt = buildReviewerSystemPrompt(
+    renderSharedPrompt(taskId, cwd) + ambientContext(cwd),
+  );
   await session.send(message, { system: systemPrompt });
   log.info("orchestrator.reviewer.message_sent", {
     taskId,

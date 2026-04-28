@@ -220,6 +220,27 @@ CREATE TABLE IF NOT EXISTS bug_reports (
 
 CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC);
 
+-- Alternative-solution suggestions from the reviewer agent. Each row is
+-- one candidate alternative the reviewer considered, with its own
+-- five-axis scoring map and a verdict on whether it would be better,
+-- equal, or worse than the implementation actually shipped. Replaced
+-- on every reviewer pass (latest wins) — the orchestrator wipes by
+-- task_id before inserting a new batch.
+CREATE TABLE IF NOT EXISTS task_alternatives (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id         TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  label           TEXT NOT NULL,
+  description     TEXT NOT NULL,
+  scores_json     TEXT NOT NULL,             -- {dimension: 1-10}
+  rationales_json TEXT,                      -- {dimension: prose} (optional)
+  verdict         TEXT NOT NULL,             -- better | equal | worse
+  rationale       TEXT,                      -- one-paragraph justification
+  set_by          TEXT NOT NULL,             -- agent slug or 'user'
+  created_at      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_alternatives_task ON task_alternatives(task_id);
+
 -- One row per reviewer agent pass. Cycle 0 is the initial review;
 -- cycle N>0 is the reviewer's verdict on the (N+1)-th coder pass after
 -- N send-backs. raw_text is the reviewer's full assistant reply (for

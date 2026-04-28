@@ -245,6 +245,14 @@ export class TasksService {
   getReviews(id: string): Observable<{ reviews: TaskReviewRow[] }> {
     return this.http.get<{ reviews: TaskReviewRow[] }>(`/api/tasks/${id}/reviews`);
   }
+
+  /** Alternative-solution candidates the reviewer suggested for this
+   *  task. Each carries its own complexity-radar scoring + verdict. */
+  getAlternatives(id: string): Observable<{ alternatives: TaskAlternativeRow[] }> {
+    return this.http.get<{ alternatives: TaskAlternativeRow[] }>(
+      `/api/tasks/${id}/alternatives`,
+    );
+  }
 }
 
 export interface TaskScoringRow {
@@ -263,6 +271,23 @@ export interface TaskReviewRow {
   decision: 'accept' | 'send_back';
   notes: string | null;
   raw_text: string | null;
+  created_at: number;
+}
+
+export type AlternativeVerdict = 'better' | 'equal' | 'worse';
+
+export interface TaskAlternativeRow {
+  id: number;
+  task_id: string;
+  label: string;
+  description: string;
+  /** JSON-encoded `Record<dimension, 1..10>`. Parse client-side. */
+  scores_json: string;
+  /** JSON-encoded `Record<dimension, sentence>`, optional. */
+  rationales_json: string | null;
+  verdict: AlternativeVerdict;
+  rationale: string | null;
+  set_by: string;
   created_at: number;
 }
 

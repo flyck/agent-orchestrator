@@ -147,3 +147,46 @@ curl -s -X POST '{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring' \
 Partial updates are accepted — a follow-up call only needs to include
 the axes you want to change. If the request fails, do not retry; this
 is a UI affordance, not a correctness signal.
+
+## 5. Alternative solutions (radar tabs)
+
+Some agents are asked to consider alternative ways the spec could have
+been satisfied — different algorithms, library choices, refactor shapes.
+When you POST alternatives, the orchestrator surfaces them as tabs in
+the Review pane, each with its own complexity radar.
+
+**Most agent roles do not post alternatives** — leave the list empty
+unless your role-specific prompt explicitly tells you to. Posting
+alternatives wipes the previous batch for the task; only do this when
+you've actually compared the implementation against viable options.
+
+```bash
+curl -s -X POST '{{BASE_URL}}/api/tasks/{{TASK_ID}}/alternatives' \
+  -H 'content-type: application/json' \
+  -d '{
+    "set_by": "<your-agent-slug>",
+    "alternatives": [
+      {
+        "label": "<short name, ~5 words>",
+        "description": "<one short paragraph: what the alternative would do, concretely>",
+        "verdict": "better" | "equal" | "worse",
+        "rationale": "<one paragraph: why better / worse / equal compared to what shipped>",
+        "scores": {
+          "complexity":      <1-10>,
+          "involved_parts":  <1-10>,
+          "lines_of_code":   <1-10>,
+          "user_benefit":    <1-10>,
+          "maintainability": <1-10>
+        },
+        "rationales": {
+          "complexity": "<one sentence>",
+          "...": "..."
+        }
+      }
+    ]
+  }'
+```
+
+Empty `alternatives: []` is legal and means "I considered, none worth
+showing" — useful when the implementation is the only sensible shape
+and you don't want to fabricate options.

@@ -452,11 +452,56 @@
 
     <!-- ═══ Review tab ═════════════════════════════════════════════ -->
     @if (detailTab() === 'review') {
-      <!-- Radar of the reviewer's solution scoring. The reviewer-coder
-           prompt instructs the agent to POST scores at the end of every
-           pass, so this populates as soon as the first pass lands. -->
-      @if (scoringVisible()) {
-        <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
+      <!-- Solution sub-tabs: "Implementation" is the diff that shipped;
+           each subsequent tab is an alternative the reviewer scored.
+           Hidden when there's neither scoring nor alternatives — empty
+           tabs would just be noise. -->
+      @if (scoringVisible() || alternatives().length > 0) {
+        <nav class="solution-tabs" aria-label="Solution variants">
+          <button type="button"
+                  class="solution-tab"
+                  [class.active]="altTabIndex() === -1"
+                  (click)="setAltTab(-1)">
+            Implementation
+          </button>
+          @for (alt of alternatives(); track alt.id; let i = $index) {
+            <button type="button"
+                    class="solution-tab"
+                    [class.active]="altTabIndex() === i"
+                    [attr.data-verdict]="alt.verdict"
+                    (click)="setAltTab(i)">
+              {{ alt.label }}
+              <span class="verdict-pill" [attr.data-verdict]="alt.verdict">
+                {{ alt.verdict }}
+              </span>
+            </button>
+          }
+        </nav>
+
+        @if (altTabIndex() === -1) {
+          @if (scoringVisible()) {
+            <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
+          }
+        } @else {
+          @let alt = alternatives()[altTabIndex()];
+          @if (alt) {
+            <section class="alt-section">
+              <header class="alt-head">
+                <h3>{{ alt.label }}</h3>
+                <span class="verdict-pill" [attr.data-verdict]="alt.verdict">
+                  {{ alt.verdict }} than implementation
+                </span>
+              </header>
+              <p class="alt-description">{{ alt.description }}</p>
+              @if (alt.rationale) {
+                <p class="alt-rationale meta">why: {{ alt.rationale }}</p>
+              }
+              <app-scoring-radar
+                [scoring]="scoringForAlt(alt)"
+                [darkMode]="darkMode()" />
+            </section>
+          }
+        }
       }
 
       <section class="review-section">

@@ -22,6 +22,7 @@ import { recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, upsertScoring } from "../db/scorings";
 import { listReviewsForTask } from "../db/reviews";
+import { listForTask as listAlternativesForTask, replaceForTask as replaceAlternatives } from "../db/alternatives";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
 import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
@@ -85,6 +86,22 @@ const scoringSchema = z.object({
   /** Optional per-dimension prose, same keys as scores. */
   rationale: z.record(z.string().min(1).max(60), z.string().max(2000).nullable()).optional(),
   /** Producer slug (agent slug or 'user'). */
+  set_by: z.string().min(1).max(80),
+});
+
+const alternativeItemSchema = z.object({
+  label: z.string().min(1).max(120),
+  description: z.string().min(1).max(4000),
+  scores: z.record(z.string().min(1).max(60), z.number().int().min(1).max(10)),
+  rationales: z.record(z.string().min(1).max(60), z.string().max(2000).nullable()).optional(),
+  verdict: z.enum(["better", "equal", "worse"]),
+  rationale: z.string().max(2000).nullable().optional(),
+});
+
+const alternativesSchema = z.object({
+  /** Empty array is allowed and means "I considered, none worth listing".
+   *  This still wipes prior alternatives for the task. */
+  alternatives: z.array(alternativeItemSchema).max(8),
   set_by: z.string().min(1).max(80),
 });
 
@@ -343,6 +360,43 @@ tasks.get("/:id/notes", async (c) => {
     log.warn("api.tasks.notes.read_failed", { id, error: String(err) });
     return c.json({ exists: false, content: null, error: String(err) }, 200);
   }
+});
+
+/**
+ * Read alternative-solution suggestions the reviewer posted for this
+ * task. Empty list when the reviewer hasn't run, considered no
+ * alternatives, or judged none worth listing.
+ */
+tasks.get("/:id/alternatives", (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  return c.json({ alternatives: listAlternativesForTask(id) });
+});
+
+/**
+ * Replace the alternative-solution list for this task. The reviewer
+ * agent posts a fresh batch on every pass; this endpoint wipes prior
+ * rows and inserts the new set in one tx, so the user sees only the
+ * latest reviewer's view.
+ *
+ * Every agent sees the protocol in the shared system prompt; only the
+ * reviewer's prompt instructs them to actually call it.
+ */
+tasks.post("/:id/alternatives", async (c) => {
+  const id = c.req.param("id");
+  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => null);
+  const parsed = alternativesSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_alternatives", issues: parsed.error.issues }, 400);
+  }
+  const rows = replaceAlternatives(id, parsed.data);
+  log.info("api.tasks.alternatives", {
+    id,
+    set_by: parsed.data.set_by,
+    count: parsed.data.alternatives.length,
+  });
+  return c.json({ alternatives: rows });
 });
 
 /**

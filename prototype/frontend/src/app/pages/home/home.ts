@@ -7,6 +7,7 @@ import { SettingsService } from '../../services/settings.service';
 import {
   TasksService,
   type Task,
+  type TaskAlternativeRow,
   type TaskReviewRow,
   type TaskScoringRow,
   type TaskState,
@@ -410,6 +411,33 @@ export class HomePage {
   // One row per reviewer pass — newest cycle first. Drives the Review tab.
   protected readonly reviews = signal<TaskReviewRow[]>([]);
 
+  // ─── Alternative solutions for selected task ─────────────────────────
+  // The reviewer agent suggests viable alternatives; each row has its
+  // own complexity-radar map + verdict (better/equal/worse). Drives the
+  // solution sub-tabs in the Review tab.
+  protected readonly alternatives = signal<TaskAlternativeRow[]>([]);
+  /** Index of the active solution sub-tab. -1 = "Implementation" (the
+   *  shipped diff's scoring); 0..N-1 = alternative at that index. */
+  protected readonly altTabIndex = signal<number>(-1);
+  setAltTab(idx: number) { this.altTabIndex.set(idx); }
+
+  /** Convert an alternative row into the TaskScoringRow shape so the
+   *  existing scoring-radar component can render it without a refactor. */
+  protected scoringForAlt(alt: TaskAlternativeRow): TaskScoringRow[] {
+    let scores: Record<string, number> = {};
+    let rationales: Record<string, string> = {};
+    try { scores = JSON.parse(alt.scores_json) ?? {}; } catch { scores = {}; }
+    try { rationales = alt.rationales_json ? JSON.parse(alt.rationales_json) : {}; } catch {}
+    return Object.entries(scores).map(([dimension, score]) => ({
+      task_id: alt.task_id,
+      dimension,
+      score,
+      rationale: rationales[dimension] ?? null,
+      set_by: alt.set_by,
+      updated_at: alt.created_at,
+    }));
+  }
+
   // ─── Planner notes for selected task ─────────────────────────────────
   // .agent-notes/<id>.md content — written by the plan-coder agent and
   // read by the coder. Surfaced in the Spec tab once it exists so the
@@ -478,8 +506,10 @@ export class HomePage {
       this.refreshDiff();
       this.refreshScoring(next);
       this.refreshReviews(next);
+      this.refreshAlternatives(next);
       this.refreshNotes(next);
       this.openStream(next);
+      this.altTabIndex.set(-1);
       const t = this.tasks().find((x) => x.raw.id === next);
       // Land on a state-appropriate tab when the URL hasn't pinned one.
       // If the URL has ?tab=foo, the queryParamMap subscriber already set
@@ -502,6 +532,7 @@ export class HomePage {
       this.diff.set(null);
       this.scoring.set([]);
       this.reviews.set([]);
+      this.alternatives.set([]);
       this.notesContent.set(null);
       this.notesPath.set(null);
       this.transcriptTail.set([]);
@@ -520,6 +551,18 @@ export class HomePage {
     this.tasksApi.getReviews(taskId).subscribe({
       next: (r) => this.reviews.set(r.reviews),
       error: () => this.reviews.set([]),
+    });
+  }
+
+  refreshAlternatives(taskId: string) {
+    this.tasksApi.getAlternatives(taskId).subscribe({
+      next: (r) => {
+        this.alternatives.set(r.alternatives);
+        // If the active sub-tab points past the new list, snap back to
+        // Implementation. Avoids a confusing empty state on reload.
+        if (this.altTabIndex() >= r.alternatives.length) this.altTabIndex.set(-1);
+      },
+      error: () => this.alternatives.set([]),
     });
   }
 
@@ -1031,6 +1074,7 @@ export class HomePage {
         if (sel) {
           this.refreshScoring(sel);
           this.refreshReviews(sel);
+          this.refreshAlternatives(sel);
           this.refreshNotes(sel);
         }
       });

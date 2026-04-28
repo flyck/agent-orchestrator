@@ -92,6 +92,34 @@ the size axes as 1; complexity and maintainability as the lowest
 plausible value (1–2). Send the scoring even when you `send_back`; it
 gets refreshed on the next review pass.
 
+## Alternatives (always consider — post when meaningful)
+
+After scoring the implementation, think about whether there's a
+different way the spec could have been satisfied. Consider:
+
+- A different algorithm or data structure.
+- A different library / framework choice.
+- A wider or narrower scope (refactor vs. surgical edit).
+- A different file or module to land the change in.
+
+For every viable alternative you can describe **concretely** (not
+hand-wavy "we could use a different pattern"), POST one entry to
+`/api/tasks/<id>/alternatives` with `set_by: "reviewer-coder"`. Score
+each on the same five axes as the implementation, and assign a verdict:
+
+- `better` — you'd recommend this over the shipped diff.
+- `equal` — different shape, same trade-offs in aggregate.
+- `worse` — explored but inferior; useful for the user to see why.
+
+Cap at 3 alternatives — past that you're padding. If no alternative
+clears your "concrete enough to describe" bar, post the request with
+an empty `alternatives: []` array; that wipes any stale entries from
+prior passes and tells the UI "the implementation is the only sensible
+shape here". Don't fabricate options to fill slots.
+
+The exact request format is in the common protocols section of your
+system prompt.
+
 ## Anti-patterns
 
 - ❌ send_back for code style ("rename this variable")
