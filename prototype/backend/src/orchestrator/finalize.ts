@@ -14,6 +14,7 @@ import { recordActivity } from "../db/activities";
 import {
   commitInWorktree,
   fastForwardParent,
+  rebaseAndFastForward,
   renameBranch,
 } from "./worktree";
 
@@ -133,16 +134,50 @@ export async function finalizeTask(
   }
 
   // strategy === "current": fast-forward parent's current branch.
-  const ff = fastForwardParent({ parentRoot, worktreeBranch: task.worktree_branch });
+  // If parent has moved on and FF is refused, attempt a rebase fallback —
+  // a clean rebase makes the agent branch a linear extension of parent
+  // and lets the second FF succeed. Only conflicts are surfaced as
+  // failures; the user can then pick "Commit to new branch" instead.
+  let ff = fastForwardParent({ parentRoot, worktreeBranch: task.worktree_branch });
   trail.push(...ff.log);
   if (!ff.ok) {
-    return {
-      ok: false,
-      branch: task.worktree_branch,
-      commit: commit.sha,
-      files_committed: commit.files,
-      log: [...trail, ff.message ?? "fast-forward failed"],
-    };
+    log.warn("orchestrator.finalize.ff_failed_attempting_rebase", {
+      taskId,
+      parentBranch: ff.parentBranch,
+      message: ff.message,
+    });
+    trail.push(
+      `fast-forward refused on '${ff.parentBranch}' — attempting rebase fallback`,
+    );
+    const rebased = rebaseAndFastForward({
+      parentRoot,
+      worktreePath: task.worktree_path,
+      worktreeBranch: task.worktree_branch,
+    });
+    trail.push(...rebased.log);
+    if (rebased.ok) {
+      log.info("orchestrator.finalize.rebase_recovered", {
+        taskId,
+        parentBranch: rebased.parentBranch,
+      });
+      ff = rebased;
+    } else {
+      log.warn("orchestrator.finalize.rebase_failed", {
+        taskId,
+        parentBranch: rebased.parentBranch,
+        message: rebased.message,
+      });
+      return {
+        ok: false,
+        branch: task.worktree_branch,
+        commit: commit.sha,
+        files_committed: commit.files,
+        log: [
+          ...trail,
+          rebased.message ?? "rebase fallback failed",
+        ],
+      };
+    }
   }
   updateTaskStatus(taskId, "done", "ready");
   log.info("orchestrator.finalize.ok", {

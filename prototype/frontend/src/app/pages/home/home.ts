@@ -748,7 +748,11 @@ export class HomePage {
           );
           this.refreshTasks();
         } else {
-          this.finalizeError.set('Nothing to commit — working tree was clean.');
+          // Surface the actual reason from the backend's log trail instead
+          // of a generic "Nothing to commit". The last entry is the most
+          // informative — fastForwardParent.message, "tree was clean", etc.
+          const reason = r.log?.[r.log.length - 1] ?? 'Working tree was clean.';
+          this.finalizeError.set(reason);
         }
       },
       error: (e) => {

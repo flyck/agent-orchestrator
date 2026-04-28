@@ -251,6 +251,72 @@ export function fastForwardParent(input: FastForwardInput): FastForwardResult {
 }
 
 /**
+ * Attempt to rebase the worktree's agent branch onto the parent's
+ * current branch, then fast-forward the parent. Used when a plain FF
+ * fails because the parent moved on while the agent worked.
+ *
+ * Strategy: rebase happens IN THE WORKTREE (so the parent's working tree
+ * is untouched). If the rebase has no conflicts it succeeds silently and
+ * we follow up with a normal FF, which is now guaranteed to work because
+ * the agent branch is by definition ahead of the parent. On conflicts we
+ * `git rebase --abort` and return ok:false with a clear message.
+ */
+export interface RebaseAndFastForwardInput {
+  parentRoot: string;
+  worktreePath: string;
+  worktreeBranch: string;
+}
+
+export function rebaseAndFastForward(
+  input: RebaseAndFastForwardInput,
+): FastForwardResult {
+  const trail: string[] = [];
+  const sayRun = (label: string, r: { code: number; stdout: string; stderr: string }) => {
+    trail.push(`${label} → exit ${r.code}` + (r.stderr ? ` · ${r.stderr.trim().split("\n").slice(-2).join(" | ")}` : ""));
+  };
+
+  const headCmd = git(input.parentRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  sayRun("git rev-parse HEAD (parent)", headCmd);
+  const parentBranch = headCmd.stdout.trim();
+
+  // Rebase the agent branch onto the parent's tip. Done in the worktree
+  // since that's where the agent branch is checked out.
+  const rebase = git(input.worktreePath, ["rebase", parentBranch]);
+  sayRun(`git rebase ${parentBranch} (in worktree)`, rebase);
+  if (rebase.code !== 0) {
+    // Conflicts. Abort cleanly so the worktree returns to its prior
+    // state and the user can pick "Commit to new branch" instead.
+    const abort = git(input.worktreePath, ["rebase", "--abort"]);
+    sayRun("git rebase --abort", abort);
+    return {
+      ok: false,
+      parentBranch,
+      message:
+        `Rebase onto '${parentBranch}' produced conflicts — aborted. Use ` +
+        `'Commit to new branch' to keep the agent's commits on ` +
+        `'${input.worktreeBranch}', or resolve manually.`,
+      log: trail,
+    };
+  }
+
+  // Rebase succeeded. The agent branch is now strictly ahead of the
+  // parent's current branch, so FF is guaranteed.
+  const merge = git(input.parentRoot, ["merge", "--ff-only", input.worktreeBranch]);
+  sayRun(`git merge --ff-only ${input.worktreeBranch}`, merge);
+  if (merge.code !== 0) {
+    // Shouldn't happen post-rebase, but surface it instead of pretending.
+    return {
+      ok: false,
+      parentBranch,
+      message: `Post-rebase fast-forward of '${parentBranch}' still failed — see log for git output.`,
+      log: trail,
+    };
+  }
+
+  return { ok: true, parentBranch, log: trail };
+}
+
+/**
  * Rename the worktree's `agent/<id>` branch to a user-chosen name. The
  * worktree itself stays in place; from the parent repo, `git checkout
  * <name>` switches the parent's HEAD to that branch.
