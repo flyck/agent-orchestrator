@@ -1,0 +1,96 @@
+<article class="arch">
+  <header class="page-head">
+    <p class="meta">workspace</p>
+    <h1>Architecture</h1>
+    <p class="lead">
+      A scrapbook of concept diagrams from approved tasks. Each card on the left is a task that
+      finished — click one to pull its sketch up on the right. Useful when you want to ponder back
+      at a shape you took, before reaching for the next one.
+    </p>
+  </header>
+
+  @if (error()) {
+    <p class="error">failed to load: {{ error() }}</p>
+  }
+
+  <section class="layout">
+    <!-- Left: list of approved tasks with diagrams. Compact. -->
+    <aside class="list" aria-label="Approved tasks with diagrams">
+      <header class="list-head">
+        <p class="meta">approved tasks · {{ tasks().length }}</p>
+      </header>
+
+      @if (loading() && tasks().length === 0) {
+        <p class="muted small empty">loading…</p>
+      } @else if (tasks().length === 0) {
+        <p class="muted small empty">
+          no approved diagrams yet. Tasks show up here once their pipeline reaches done and the
+          intake or reviewer drew a concept diagram.
+        </p>
+      } @else {
+        <ol class="cards">
+          @for (t of tasks(); track t.id) {
+            <li>
+              <button type="button"
+                      class="card"
+                      [class.active]="selected()?.id === t.id"
+                      (click)="select(t.id)">
+                <p class="card-title">{{ t.title }}</p>
+                <p class="card-meta">
+                  <span class="chip">{{ workspaceLabel(t.workspace) }}</span>
+                  <span class="muted small">· {{ formatDate(t.completed_at) }}</span>
+                  <span class="muted small">· {{ t.diagrams.length }} diagram(s)</span>
+                </p>
+              </button>
+            </li>
+          }
+        </ol>
+      }
+    </aside>
+
+    <!-- Right: bigger pane for the selected task's diagrams. -->
+    <section class="canvas" aria-label="Selected task diagrams">
+      @if (selected(); as sel) {
+        <header class="canvas-head">
+          <p class="meta">approved · {{ formatDate(sel.completed_at) }}</p>
+          <h2>{{ sel.title }}</h2>
+          <p class="canvas-meta">
+            <span class="chip">{{ workspaceLabel(sel.workspace) }}</span>
+            @if (sel.repo_path) {
+              <span class="muted small mono">· {{ sel.repo_path }}</span>
+            }
+            <button type="button"
+                    class="meta-action"
+                    (click)="openTask(sel.id, $event)">
+              open task →
+            </button>
+          </p>
+        </header>
+
+        @for (d of sel.diagrams; track $index) {
+          <section class="diagram-block">
+            <header class="diagram-head">
+              @if (d.kind === 'intake') {
+                <p class="meta">concept · drawn by the intake agent</p>
+              } @else {
+                <p class="meta">
+                  alternative · {{ d.label }}
+                  @if (d.verdict) {
+                    <span class="verdict-pill" [attr.data-verdict]="d.verdict">
+                      {{ d.verdict }}
+                    </span>
+                  }
+                </p>
+              }
+            </header>
+            <app-mermaid-diagram [source]="d.source" [darkMode]="darkMode()" />
+          </section>
+        }
+      } @else {
+        <div class="canvas-empty muted">
+          <p>Select a task on the left to view its diagrams.</p>
+        </div>
+      }
+    </section>
+  </section>
+</article>

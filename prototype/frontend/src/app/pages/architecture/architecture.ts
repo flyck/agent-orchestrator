@@ -1,123 +1,117 @@
-import { Component } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
+import { catchError, of, Subject, switchMap, takeUntil, timer } from 'rxjs';
+import { MermaidDiagram } from '../../components/mermaid-diagram';
+import {
+  ArchitectureService,
+  type ArchitectureTask,
+} from '../../services/architecture.service';
 
+/**
+ * Architecture page. Browse the concept diagrams from approved
+ * (status='done') tasks — pull-back at past architectural sketches
+ * the intake / explorer agents drew. Two-pane layout: compact list
+ * on the left, large diagram canvas on the right.
+ *
+ * Task list comes from /api/architecture/diagrams, which already
+ * filters out tasks without a mermaid block. The list is read-only;
+ * clicking a task pins it to the right pane.
+ */
 @Component({
   selector: 'app-architecture-page',
   standalone: true,
-  template: `
-    <article class="arch">
-      <header class="head">
-        <p class="meta">workspace</p>
-        <h1>Architecture Compare</h1>
-        <p class="lead">
-          Map a codebase's current architecture, then have a counter-architecture agent propose an
-          alternative shape. Read both side-by-side and decide whether the boundaries you have are
-          the boundaries you want.
-        </p>
-      </header>
-
-      <hr />
-
-      <section class="section">
-        <p class="meta">v1 status</p>
-        <p>
-          Scaffolded only. The agents below share the same orchestrator, job queue, and websocket hub
-          as the Review and Build pipelines — when this tab is wired, the agent panes behave like
-          any other task on the Home pipeline.
-        </p>
-      </section>
-
-      <section class="section">
-        <p class="meta">planned agent composition</p>
-        <ol class="agent-list">
-          <li>
-            <h3>Architecture analyst</h3>
-            <p class="muted">
-              Walks the repository (skill-aware), produces a markdown map of modules, boundaries,
-              dependencies, and notable patterns. Output is plain markdown — no diagram rendering
-              in v1; v2 may layer a renderer on top of the same prose.
-            </p>
-          </li>
-          <li>
-            <h3>Counter-architecture agent</h3>
-            <p class="muted">
-              Reads the analyst's map and proposes one alternative shape with the trade-offs called
-              out. Strict no-implementation rule: this agent describes, it does not refactor.
-            </p>
-          </li>
-          <li>
-            <h3>Synthesizer</h3>
-            <p class="muted">
-              Reconciles both views into a short, ranked list of decisions worth making and the
-              cost of each. Same role pattern as the Review synthesizer.
-            </p>
-          </li>
-        </ol>
-      </section>
-
-      <section class="section">
-        <p class="meta">non-goals (deferred)</p>
-        <ul class="muted">
-          <li>Architecture diagram rendering — v2.</li>
-          <li>Counter-architecture side-by-side compare UI — v2.</li>
-          <li>Auto-refactor toward the counter-architecture — out of scope, ever.</li>
-        </ul>
-      </section>
-
-      <section class="section">
-        <p class="meta">design reference</p>
-        <p>
-          See
-          <a href="../../docs/06-v1-scope-and-non-goals.md" target="_blank" rel="noopener">
-            docs/06-v1-scope-and-non-goals.md
-          </a>
-          and
-          <a href="../../docs/04-architecture.md" target="_blank" rel="noopener">
-            docs/04-architecture.md
-          </a>.
-        </p>
-      </section>
-    </article>
-  `,
-  styles: [
-    `
-      :host { display: block; }
-      .arch { max-width: 880px; }
-      .head { margin-bottom: 16px; }
-      .lead {
-        font-family: var(--font-serif);
-        font-size: 18px;
-        line-height: 1.45;
-        color: var(--ink);
-        margin: 8px 0 0;
-        max-width: 720px;
-      }
-      .section { margin: 20px 0; }
-      .section .meta { margin: 0 0 6px; }
-      .section p { margin: 4px 0; }
-      .agent-list {
-        list-style: none;
-        padding: 0;
-        margin: 8px 0 0;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-      }
-      .agent-list li {
-        border: 1px solid var(--rule);
-        background: var(--paper);
-        padding: 12px 16px;
-      }
-      .agent-list h3 {
-        margin: 0 0 4px;
-        font-family: var(--font-serif);
-        font-size: 16px;
-      }
-      .agent-list p { margin: 0; font-size: 14px; line-height: 1.5; }
-      ul.muted { padding-left: 18px; margin: 4px 0; }
-      ul.muted li { margin: 2px 0; }
-      .muted { color: var(--ink-muted); }
-      a { word-break: break-all; }
-    `,
-  ],
+  imports: [MermaidDiagram],
+  templateUrl: './architecture.html',
+  styleUrl: './architecture.scss',
 })
-export class ArchitecturePage {}
+export class ArchitecturePage {
+  private api = inject(ArchitectureService);
+  private router = inject(Router);
+  private destroy$ = new Subject<void>();
+
+  protected readonly tasks = signal<ArchitectureTask[]>([]);
+  protected readonly loading = signal(true);
+  protected readonly error = signal<string | null>(null);
+  protected readonly selectedId = signal<string | null>(null);
+
+  protected readonly darkMode = signal(
+    typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-color-scheme: dark)').matches === true,
+  );
+
+  protected readonly selected = computed<ArchitectureTask | null>(() => {
+    const id = this.selectedId();
+    if (!id) return this.tasks()[0] ?? null;
+    return this.tasks().find((t) => t.id === id) ?? this.tasks()[0] ?? null;
+  });
+
+  constructor() {
+    timer(0, 30_000)
+      .pipe(
+        takeUntil(this.destroy$),
+        switchMap(() => {
+          this.loading.set(true);
+          return this.api.list().pipe(
+            catchError((e) => {
+              this.error.set(e?.message ?? String(e));
+              return of(null);
+            }),
+          );
+        }),
+      )
+      .subscribe((r) => {
+        this.loading.set(false);
+        if (r) {
+          this.error.set(null);
+          this.tasks.set(r.tasks);
+          // If nothing selected yet, default to the most recent task.
+          if (!this.selectedId() && r.tasks.length > 0) {
+            this.selectedId.set(r.tasks[0]!.id);
+          }
+        }
+      });
+
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = (e: MediaQueryListEvent) => this.darkMode.set(e.matches);
+      mq.addEventListener('change', handler);
+      this.destroy$.subscribe(() => mq.removeEventListener('change', handler));
+    }
+  }
+
+  protected select(id: string): void {
+    this.selectedId.set(id);
+  }
+
+  protected openTask(id: string, event: MouseEvent): void {
+    event.stopPropagation();
+    this.router.navigate(['/home'], { queryParams: { task: id } });
+  }
+
+  protected formatDate(ts: number): string {
+    if (!Number.isFinite(ts)) return '';
+    const d = new Date(ts);
+    return d.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  }
+
+  protected workspaceLabel(w: string): string {
+    switch (w) {
+      case 'review':       return 'PR review';
+      case 'feature':      return 'feature';
+      case 'bugfix':       return 'bugfix';
+      case 'arch_compare': return 'architecture';
+      case 'background':   return 'background';
+      case 'internal':     return 'internal';
+      default:             return w;
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+}
