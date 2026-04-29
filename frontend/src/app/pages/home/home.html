@@ -633,7 +633,10 @@
           <div class="shell" #scrollContainer (scroll)="onStreamScroll($event)">
             @for (line of streamLines(); track $index) {
               <div class="shell-line" [attr.data-level]="line.level">
-                <span class="shell-tag">[{{ line.tag }}]</span><!--
+                @if (line.ts) {
+                  <span class="shell-time">{{ clockTs(line.ts) }}</span>
+                }<!--
+                --><span class="shell-tag">[{{ line.tag }}]</span><!--
                 -->@if (line.text) { <span class="shell-text">{{ line.text }}</span> }
               </div>
             }

@@ -16,6 +16,8 @@ interface JsonlLine {
   type?: string;
   sessionId?: string;
   cwd?: string;
+  /** ISO 8601 — Claude writes one of these on every assistant/user line. */
+  timestamp?: string;
   message?: {
     role?: string;
     model?: string;
@@ -36,8 +38,18 @@ export interface TranscriptMessage {
     tokens?: { input?: number; output?: number };
     modelID?: string;
     providerID?: string;
+    /** Wall-clock time of the message in ms since epoch. Mirrors the
+     *  OpenCode shape the frontend already reads (`info.time.created`)
+     *  so the transcript-tail UI shows timestamps without branching. */
+    time?: { created: number };
   };
   parts: Array<{ type: string; text?: string }>;
+}
+
+function parseTimestamp(s: string | undefined): number | undefined {
+  if (!s) return undefined;
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : undefined;
 }
 
 /** All possible transcript locations for a session id, newest first. */
@@ -93,6 +105,7 @@ export function readTranscript(sessionId: string, limit = 50): TranscriptMessage
       }
       continue;
     }
+    const tsMs = parseTimestamp(parsed.timestamp);
     if (parsed.type === "assistant" && parsed.message) {
       const u = parsed.message.usage ?? {};
       const inputTotal =
@@ -107,6 +120,7 @@ export function readTranscript(sessionId: string, limit = 50): TranscriptMessage
           tokens: { input: inputTotal, output: u.output_tokens ?? 0 },
           modelID: parsed.message.model ?? "",
           providerID: "anthropic",
+          ...(tsMs !== undefined ? { time: { created: tsMs } } : {}),
         },
         parts: (parsed.message.content ?? []).map((c) => ({
           type: c.type ?? "text",
@@ -115,7 +129,10 @@ export function readTranscript(sessionId: string, limit = 50): TranscriptMessage
       });
     } else if (parsed.type === "user" && parsed.message) {
       out.push({
-        info: { role: "user" },
+        info: {
+          role: "user",
+          ...(tsMs !== undefined ? { time: { created: tsMs } } : {}),
+        },
         parts: (Array.isArray(parsed.message.content)
           ? parsed.message.content
           : [{ type: "text", text: String(parsed.message.content ?? "") }]

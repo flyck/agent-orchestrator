@@ -11,6 +11,15 @@ export function formatTs(ms: number): string {
   return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
+/** Compact local clock time `HH:MM:SS` — for streaming logs where rows
+ *  arrive seconds apart and a relative "5s ago" reads as noise. */
+export function clockTs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 /** "5s ago", "12m ago", "2h ago", "3d ago" — coarse but consistent. */
 export function relativeTs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—';

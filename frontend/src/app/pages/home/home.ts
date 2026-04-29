@@ -182,7 +182,7 @@ interface ViewTask {
 
 // formatTs / relativeTs live in ../../util/time so peer pages don't
 // have to cross-import a sibling page module.
-import { formatTs, relativeTs } from "../../util/time";
+import { clockTs, formatTs, relativeTs } from "../../util/time";
 
 interface StreamLine {
   ts: number;
@@ -347,6 +347,7 @@ export class HomePage {
   protected readonly kindLabels = KIND_LABELS;
   protected readonly formatTs = formatTs;
   protected readonly relativeTs = relativeTs;
+  protected readonly clockTs = clockTs;
   protected readonly terminalStatuses = new Set(["done", "failed", "canceled"]);
 
   /** Ticks every second so the per-card "Xs in this stage" counters stay live

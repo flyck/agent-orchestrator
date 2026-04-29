@@ -636,6 +636,10 @@
 }
 .shell-line { white-space: pre-wrap; word-break: break-word; }
 .shell-line.muted { color: #8E8C84; }
+.shell-time {
+  color: #6E6C66;
+  margin-right: 8px;
+}
 .shell-tag {
   color: #8E8C84;
   margin-right: 8px;
