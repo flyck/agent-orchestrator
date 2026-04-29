@@ -261,6 +261,15 @@
   letter-spacing: 0.03em;
   cursor: help;
 }
+/* Reviewer-supplied complexity axis. Sits next to the difficulty chip
+   so the user can compare upfront estimate (d) vs. post-hoc reviewer
+   read (c) at a glance. */
+.complexity {
+  font-size: 11px;
+  color: var(--ink);
+  letter-spacing: 0.03em;
+  cursor: help;
+}
 /* Stage re-entry bubble. Non-default stages show "×N" when N > 1; the
    finalize column shows the agent's total step count. Borders inset for
    the paper aesthetic — no fills, no shadows. */
@@ -565,28 +574,31 @@
   word-break: break-word;
 }
 
-/* ─── Plan notes (Spec tab) ──────────────────────────────────────────── */
+/* ─── Plan notes (Planner tab) ──────────────────────────────────────── */
 .notes-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--rule);
+  margin-top: 8px;
 }
 .notes-head {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   .meta { margin: 0; }
   .notes-path { font-size: 11px; color: var(--ink-muted); }
+}
+.notes-handoff {
+  margin: 0 0 10px;
+  max-width: 720px;
 }
 .notes-body {
   background: var(--paper-soft);
   border: 1px solid var(--rule);
-  padding: 10px 12px;
+  padding: 12px 14px;
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
   margin: 0;
-  max-height: 360px;
+  // Planner tab now owns this display, so let it grow without an
+  // arbitrary clip — the user opened the tab to read the whole thing.
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1003,6 +1015,109 @@
 }
 
 /* ─── Bad-experience rating block ─────────────────────────────────────── */
+/* ─── Linked GitHub issues — chips on cards + Spec-tab link panel ─────── */
+.task-issue-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.issue-chip {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--paper-soft);
+}
+.issue-chip:hover {
+  border-color: var(--ink);
+}
+.issue-links-section {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--rule);
+  border-radius: 2px;
+}
+.issue-links-head {
+  margin-bottom: 8px;
+}
+.issue-links-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.issue-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.issue-link-title {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.issue-link-add {
+  display: flex;
+  gap: 8px;
+  input { flex: 1; }
+}
+.issue-link-error {
+  margin: 6px 0 0;
+  color: var(--ink-red);
+}
+
+/* ─── Suggested next steps panel (Review tab footer, above rating) ────── */
+.suggestions {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+}
+.suggestions-head {
+  margin-bottom: 8px;
+  h3 { margin: 0 0 2px; font-size: 14px; font-weight: 500; }
+}
+.suggestions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.suggestion {
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.suggestion.pinned {
+  border-color: var(--ink);
+}
+.suggestion-title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.suggestion-body {
+  margin: 0;
+}
+.suggestion-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
+
 .rating {
   margin-top: 16px;
   padding-top: 16px;
@@ -1056,6 +1171,67 @@
   margin-top: 10px;
   color: var(--ink-red);
   font-size: 13px;
+}
+
+/* ─── Tokens tab ────────────────────────────────────────────────────── */
+.tokens-section {
+  margin: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tokens-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  h3 { margin: 0; font-family: var(--font-serif); font-size: 16px; }
+}
+.tokens-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  th, td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--rule);
+    text-align: left;
+  }
+  th { color: var(--ink-muted); font-weight: 500; font-size: 11px; letter-spacing: 0.04em; text-transform: lowercase; }
+  td.num, th.num { text-align: right; }
+  tfoot td { border-bottom: none; border-top: 1px solid var(--rule-strong); padding-top: 8px; }
+}
+
+/* ─── Agent-compiled commit message panel ───────────────────────────── */
+.commit-msg {
+  margin: 12px 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.commit-msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  .meta { margin: 0; }
+}
+.commit-msg-body {
+  width: 100%;
+  background: var(--paper-soft);
+  border: 1px solid var(--rule);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 96px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+.commit-msg-body:focus {
+  outline: none;
+  border-color: var(--rule-strong);
+}
+.commit-msg-hint {
+  margin: 0;
+  code { font-family: var(--font-mono); }
 }
 
 /* Pipeline-controls error chip */

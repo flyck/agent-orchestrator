@@ -1,9 +1,28 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
-import { NgApexchartsModule, type ApexOptions } from 'ng-apexcharts';
-import { catchError, of, Subject, merge, switchMap, takeUntil, timer } from 'rxjs';
-import { SettingsService } from '../../services/settings.service';
+import {
+  AfterViewChecked,
+  Component,
+  ElementRef,
+  type WritableSignal,
+  computed,
+  effect,
+  inject,
+  signal,
+  viewChild,
+} from "@angular/core";
+import { FormsModule } from "@angular/forms";
+import { ActivatedRoute, Router } from "@angular/router";
+import { NgApexchartsModule, type ApexOptions } from "ng-apexcharts";
+import {
+  catchError,
+  of,
+  Subject,
+  merge,
+  switchMap,
+  takeUntil,
+  timer,
+  type Observable,
+} from "rxjs";
+import { SettingsService } from "../../services/settings.service";
 import {
   TasksService,
   type ReviewFinding,
@@ -13,15 +32,26 @@ import {
   type TaskReviewRow,
   type TaskScoringRow,
   type TaskState,
-} from '../../services/tasks.service';
-import { CostService, type CostSummary } from '../../services/cost.service';
-import { RepoService, type DiffResponse } from '../../services/repo.service';
-import { TaskStreamService, type StreamEvent } from '../../services/task-stream.service';
-import { NewTaskDialog } from '../../components/new-task-dialog';
-import { ScoringRadar } from '../../components/scoring-radar';
-import { ActivityPanel } from '../../components/activity-panel';
-import { MermaidDiagram } from '../../components/mermaid-diagram';
-import type { Subscription } from 'rxjs';
+} from "../../services/tasks.service";
+import { CostService, type CostSummary } from "../../services/cost.service";
+import { RepoService, type DiffResponse } from "../../services/repo.service";
+import {
+  TaskStreamService,
+  type StreamEvent,
+} from "../../services/task-stream.service";
+import { NewTaskDialog } from "../../components/new-task-dialog";
+import { ScoringRadar } from "../../components/scoring-radar";
+import { ActivityPanel } from "../../components/activity-panel";
+import { MermaidDiagram } from "../../components/mermaid-diagram";
+import {
+  SuggestionsService,
+  type Suggestion,
+} from "../../services/suggestions.service";
+import {
+  IssueLinksService,
+  type TaskIssueLink,
+} from "../../services/issue-links.service";
+import type { Subscription } from "rxjs";
 
 /**
  * Pipeline state, in order. Each task lives in exactly one state.
@@ -30,63 +60,77 @@ import type { Subscription } from 'rxjs';
  * the task back to coding. After Ready, the user finalizes with a
  * commit-strategy choice.
  */
-export const PIPELINE_STATES = ['spec', 'plan', 'code', 'review', 'ready', 'finalize'] as const;
+export const PIPELINE_STATES = [
+  "spec",
+  "plan",
+  "code",
+  "review",
+  "ready",
+  "finalize",
+] as const;
 export type PipelineState = (typeof PIPELINE_STATES)[number];
 
 /** Who drives this state — used by the state strip to render a robot
  *  (agent) or engineer (human) icon over each node. */
-export const STATE_ROLE: Record<PipelineState, 'human' | 'agent'> = {
-  spec: 'human',
-  plan: 'agent',
-  code: 'agent',
-  review: 'agent',
-  ready: 'human',
-  finalize: 'human',
+export const STATE_ROLE: Record<PipelineState, "human" | "agent"> = {
+  spec: "human",
+  plan: "agent",
+  code: "agent",
+  review: "agent",
+  ready: "human",
+  finalize: "human",
 };
 
-export type TaskKind = 'feature' | 'bugfix' | 'arch';
+export type TaskKind = "feature" | "bugfix" | "arch";
 
 const STATE_LABELS: Record<PipelineState, string> = {
-  spec: 'Spec',
-  plan: 'Plan',
-  code: 'Code',
-  review: 'Review',
-  ready: 'Ready',
-  finalize: 'Finalize',
+  spec: "Spec",
+  plan: "Plan",
+  code: "Code",
+  review: "Review",
+  ready: "Ready",
+  finalize: "Finalize",
 };
 
 const KIND_LABELS: Record<TaskKind, string> = {
-  feature: 'feature',
-  bugfix: 'bugfix',
-  arch: 'arch',
+  feature: "feature",
+  bugfix: "bugfix",
+  arch: "arch",
 };
 
 function inferKind(workspace: string): TaskKind {
-  if (workspace === 'bugfix') return 'bugfix';
-  if (workspace === 'arch_compare') return 'arch';
-  return 'feature';
+  if (workspace === "bugfix") return "bugfix";
+  if (workspace === "arch_compare") return "arch";
+  return "feature";
 }
 
 function progressForState(state: TaskState | null, status: string): number {
-  if (status === 'done') return 1;
-  if (status === 'failed' || status === 'canceled') return 1;
+  if (status === "done") return 1;
+  if (status === "failed" || status === "canceled") return 1;
   switch (state) {
-    case 'spec': return 0.15;
-    case 'plan': return 0.35;
-    case 'code':
-    case 'build': return 0.55;
-    case 'review': return 0.75;
-    case 'ready': return 0.9;
-    case 'finalize': return 0.95;
-    default: return 0;
+    case "spec":
+      return 0.15;
+    case "plan":
+      return 0.35;
+    case "code":
+    case "build":
+      return 0.55;
+    case "review":
+      return 0.75;
+    case "ready":
+      return 0.9;
+    case "finalize":
+      return 0.95;
+    default:
+      return 0;
   }
 }
 
 /** Map a raw backend state to a pipeline-state display value. Legacy
  *  `build` rows render as `code`; everything else is identity. */
 function normalizeState(s: TaskState | null): PipelineState {
-  if (s === 'build') return 'code';
-  return (s ?? 'spec') as PipelineState;
+  if (s === "build") return "code";
+  return (s ?? "spec") as PipelineState;
 }
 
 function deriveProgress(t: Task): {
@@ -99,8 +143,8 @@ function deriveProgress(t: Task): {
   // refuse to fake a percentage — the bar stays empty and the label says
   // 0/0 (planning) so the user isn't misled by a bar stuck at 60%.
   if (
-    typeof t.current_step === 'number' &&
-    typeof t.total_steps === 'number' &&
+    typeof t.current_step === "number" &&
+    typeof t.total_steps === "number" &&
     t.total_steps > 0
   ) {
     return {
@@ -111,7 +155,8 @@ function deriveProgress(t: Task): {
     };
   }
   // Closed tasks: full bar. Otherwise: empty + 0/0.
-  const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
+  const closed =
+    t.status === "done" || t.status === "failed" || t.status === "canceled";
   return {
     progress: closed ? 1 : 0,
     hasReportedProgress: false,
@@ -123,7 +168,7 @@ function deriveProgress(t: Task): {
 interface ViewTask {
   raw: Task;
   state: PipelineState;
-  status: 'open' | 'closed';
+  status: "open" | "closed";
   kind: TaskKind;
   needsAttention: boolean;
   /** 0..1 — only used when hasReportedProgress; otherwise ignored. */
@@ -135,29 +180,16 @@ interface ViewTask {
   total: number;
 }
 
-/** ISO date + time, UTC. Hover shows the same; we just want unambiguous text. */
-export function formatTs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '—';
-  const d = new Date(ms);
-  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-}
-
-/** "5s ago", "12m ago", "2h ago", "3d ago" — coarse but consistent. */
-export function relativeTs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '—';
-  const diff = Math.max(0, Date.now() - ms);
-  if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
-  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
-  return `${Math.round(diff / 86_400_000)}d ago`;
-}
+// formatTs / relativeTs live in ../../util/time so peer pages don't
+// have to cross-import a sibling page module.
+import { formatTs, relativeTs } from "../../util/time";
 
 interface StreamLine {
   ts: number;
   tag: string;
   text: string;
   /** Severity affects visual treatment in the log. */
-  level: 'info' | 'tool' | 'text' | 'error' | 'status' | 'perm';
+  level: "info" | "tool" | "text" | "error" | "status" | "perm";
 }
 
 /** Persisted message tail — what the user sees in the "last responses"
@@ -178,74 +210,103 @@ export function formatStreamLine(ev: StreamEvent): StreamLine {
   const raw = ev.raw as { properties?: any };
   const props = raw?.properties ?? {};
   switch (ev.type) {
-    case 'message.part.updated': {
+    case "message.part.updated": {
       const part = props.part;
-      if (part?.type === 'text' && typeof part.text === 'string') {
+      if (part?.type === "text" && typeof part.text === "string") {
         const text = part.text.trim();
-        return { ts, tag: 'text', text, level: 'text' };
+        return { ts, tag: "text", text, level: "text" };
       }
-      if (part?.type === 'tool' || part?.type === 'tool-invocation' || part?.type === 'tool-result') {
+      if (
+        part?.type === "tool" ||
+        part?.type === "tool-invocation" ||
+        part?.type === "tool-result"
+      ) {
         const name = part.tool ?? part.toolName ?? part.type;
-        const id = part.id ? ` ${String(part.id).slice(0, 8)}` : '';
-        return { ts, tag: 'tool', text: `${name}${id}`, level: 'tool' };
+        const id = part.id ? ` ${String(part.id).slice(0, 8)}` : "";
+        return { ts, tag: "tool", text: `${name}${id}`, level: "tool" };
       }
-      return { ts, tag: 'part', text: part?.type ?? '?', level: 'info' };
+      return { ts, tag: "part", text: part?.type ?? "?", level: "info" };
     }
-    case 'message.updated': {
+    case "message.updated": {
       const info = props.info;
-      if (info?.role === 'assistant' && info?.finish) {
+      if (info?.role === "assistant" && info?.finish) {
         const tokens = info.tokens ?? {};
-        const cost = typeof info.cost === 'number' ? `$${info.cost.toFixed(4)}` : '?';
+        const cost =
+          typeof info.cost === "number" ? `$${info.cost.toFixed(4)}` : "?";
         return {
           ts,
-          tag: 'asst-done',
+          tag: "asst-done",
           text: `finish=${info.finish} in=${tokens.input ?? 0} out=${tokens.output ?? 0} ${cost}`,
-          level: 'info',
+          level: "info",
         };
       }
       if (info?.error) {
-        const msg = (info.error as { data?: { message?: string } })?.data?.message ?? 'error';
-        return { ts, tag: 'asst-error', text: String(msg).slice(0, 200), level: 'error' };
+        const msg =
+          (info.error as { data?: { message?: string } })?.data?.message ??
+          "error";
+        return {
+          ts,
+          tag: "asst-error",
+          text: String(msg).slice(0, 200),
+          level: "error",
+        };
       }
-      return { ts, tag: 'message', text: info?.role ?? '', level: 'info' };
+      return { ts, tag: "message", text: info?.role ?? "", level: "info" };
     }
-    case 'session.status': {
-      return { ts, tag: 'status', text: props.status?.type ?? '', level: 'status' };
+    case "session.status": {
+      return {
+        ts,
+        tag: "status",
+        text: props.status?.type ?? "",
+        level: "status",
+      };
     }
-    case 'session.diff': {
-      return { ts, tag: 'diff', text: 'session emitted file diff', level: 'info' };
+    case "session.diff": {
+      return {
+        ts,
+        tag: "diff",
+        text: "session emitted file diff",
+        level: "info",
+      };
     }
-    case 'session.idle': {
-      return { ts, tag: 'idle', text: 'session idle', level: 'status' };
+    case "session.idle": {
+      return { ts, tag: "idle", text: "session idle", level: "status" };
     }
-    case 'session.error': {
-      return { ts, tag: 'error', text: 'session error', level: 'error' };
+    case "session.error": {
+      return { ts, tag: "error", text: "session error", level: "error" };
     }
-    case 'permission.asked': {
-      const perm = props.permission ?? props.tool?.toolName ?? '?';
-      return { ts, tag: 'perm', text: `${perm} (auto-granted)`, level: 'perm' };
+    case "permission.asked": {
+      const perm = props.permission ?? props.tool?.toolName ?? "?";
+      return { ts, tag: "perm", text: `${perm} (auto-granted)`, level: "perm" };
     }
-    case 'subscribed': {
-      return { ts, tag: 'sse', text: 'subscribed', level: 'status' };
+    case "subscribed": {
+      return { ts, tag: "sse", text: "subscribed", level: "status" };
     }
     default:
-      return { ts, tag: ev.type, text: '', level: 'info' };
+      return { ts, tag: ev.type, text: "", level: "info" };
   }
 }
 
 function toViewTask(t: Task): ViewTask {
-  // Closed = task has reached a terminal status (done/failed/canceled).
-  const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
+  // Terminal status — task has stopped running.
+  const terminal =
+    t.status === "done" || t.status === "failed" || t.status === "canceled";
   // Map raw state to pipeline state. If the task is "done" its column should
   // be ready unless it's already in finalize. `build` is a legacy alias for
   // `code` (states pre-dating the code/review split).
   const baseState: PipelineState = normalizeState(t.current_state);
-  const state: PipelineState = closed && baseState !== 'finalize' ? 'ready' : baseState;
+  const state: PipelineState =
+    terminal && baseState !== "finalize" ? "ready" : baseState;
+  // Ready tasks are terminal status-wise but still awaiting user action
+  // (finalize / send back), so the "show closed" filter should keep them
+  // visible. Only tasks the user is fully done with — finalize, failed,
+  // canceled — count as closed.
+  const closed = terminal && state !== "ready";
   const p = deriveProgress(t);
   return {
     raw: t,
     state,
-    status: closed ? 'closed' : 'open',
+    status: closed ? "closed" : "open",
     kind: inferKind(t.workspace),
     needsAttention: t.needs_feedback === 1,
     progress: p.progress,
@@ -256,11 +317,18 @@ function toViewTask(t: Task): ViewTask {
 }
 
 @Component({
-  selector: 'app-home-page',
+  selector: "app-home-page",
   standalone: true,
-  imports: [NgApexchartsModule, FormsModule, NewTaskDialog, ScoringRadar, ActivityPanel, MermaidDiagram],
-  templateUrl: './home.html',
-  styleUrl: './home.scss',
+  imports: [
+    NgApexchartsModule,
+    FormsModule,
+    NewTaskDialog,
+    ScoringRadar,
+    ActivityPanel,
+    MermaidDiagram,
+  ],
+  templateUrl: "./home.html",
+  styleUrl: "./home.scss",
 })
 export class HomePage {
   private settingsApi = inject(SettingsService);
@@ -268,6 +336,8 @@ export class HomePage {
   private costApi = inject(CostService);
   private repoApi = inject(RepoService);
   private streamApi = inject(TaskStreamService);
+  private suggestionsApi = inject(SuggestionsService);
+  private issueLinksApi = inject(IssueLinksService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
@@ -277,7 +347,7 @@ export class HomePage {
   protected readonly kindLabels = KIND_LABELS;
   protected readonly formatTs = formatTs;
   protected readonly relativeTs = relativeTs;
-  protected readonly terminalStatuses = new Set(['done', 'failed', 'canceled']);
+  protected readonly terminalStatuses = new Set(["done", "failed", "canceled"]);
 
   /** Ticks every second so the per-card "Xs in this stage" counters stay live
    *  without waiting for the 5s task-list poll. Cheap — pure signal update,
@@ -295,7 +365,7 @@ export class HomePage {
 
   /** Compact context-token formatter — "12.3k" / "1.2M". */
   protected formatCtx(n: number): string {
-    if (!Number.isFinite(n) || n <= 0) return '0';
+    if (!Number.isFinite(n) || n <= 0) return "0";
     if (n < 1000) return String(n);
     if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
     return `${(n / 1_000_000).toFixed(1)}M`;
@@ -304,7 +374,7 @@ export class HomePage {
   protected ctxTooltip(t: ViewTask): string {
     const n = t.raw.latest_input_tokens ?? 0;
     const ts = t.raw.latest_tokens_ts;
-    const ago = ts ? relativeTs(ts) : 'never';
+    const ago = ts ? relativeTs(ts) : "never";
     return `Last reported context: ${n.toLocaleString()} input tokens (${ago}).\nUpdated each turn from opencode's message info.`;
   }
 
@@ -312,8 +382,10 @@ export class HomePage {
    *  malformed JSON; an empty object is treated as no entries. */
   private stageEntries(t: ViewTask): Record<string, number> {
     try {
-      const parsed = JSON.parse(t.raw.stage_entries_json || '{}');
-      return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {};
+      const parsed = JSON.parse(t.raw.stage_entries_json || "{}");
+      return parsed && typeof parsed === "object"
+        ? (parsed as Record<string, number>)
+        : {};
     } catch {
       return {};
     }
@@ -321,19 +393,21 @@ export class HomePage {
 
   /** Bubble label for the current pipeline stage. For the finalize stage
    *  it reads the agent's reported total steps (showing the agent's plan
-   *  size rather than re-entries). For every other stage, it returns the
-   *  per-stage entry count when greater than 1 — first-time visits don't
-   *  warrant a chip, since the timer already covers that. */
+   *  size rather than re-entries). For every other stage, it shows the
+   *  per-stage entry count. First entries render plain (no `×` prefix);
+   *  repeats render `×N` so re-entries pop visually. */
   protected stageBubble(t: ViewTask): string | null {
-    if (t.state === 'finalize') {
+    if (t.state === "finalize") {
       return t.total > 0 ? `${t.total} steps` : null;
     }
     const entries = this.stageEntries(t)[t.state] ?? 0;
-    return entries > 1 ? `×${entries}` : null;
+    if (entries <= 0) return null;
+    if (entries === 1) return "1";
+    return `×${entries}`;
   }
 
   protected stageBubbleTooltip(t: ViewTask): string {
-    if (t.state === 'finalize') {
+    if (t.state === "finalize") {
       return `Agent reported ${t.total} step(s) total during this task.`;
     }
     const entries = this.stageEntries(t)[t.state] ?? 0;
@@ -348,12 +422,17 @@ export class HomePage {
 
   protected readonly visibleTasks = computed(() => {
     const t = this.tasks();
-    return this.showClosed() ? t : t.filter((x) => x.status === 'open');
+    return this.showClosed() ? t : t.filter((x) => x.status === "open");
   });
 
   protected readonly tasksByState = computed(() => {
     const groups: Record<PipelineState, ViewTask[]> = {
-      spec: [], plan: [], code: [], review: [], ready: [], finalize: [],
+      spec: [],
+      plan: [],
+      code: [],
+      review: [],
+      ready: [],
+      finalize: [],
     };
     for (const t of this.visibleTasks()) groups[t.state].push(t);
     // Ready column gets a deterministic order (newest-updated first) so
@@ -365,38 +444,87 @@ export class HomePage {
   });
 
   protected readonly openCount = computed(
-    () => this.tasks().filter((t) => t.status === 'open').length,
+    () => this.tasks().filter((t) => t.status === "open").length,
   );
   protected readonly closedCount = computed(
-    () => this.tasks().filter((t) => t.status === 'closed').length,
+    () => this.tasks().filter((t) => t.status === "closed").length,
   );
-  protected readonly queueState = signal<{ active: string[]; pending: string[]; max: number } | null>(null);
-  protected readonly runningCount = computed(() => this.queueState()?.active.length ?? 0);
-  protected readonly queuedCount = computed(() => this.queueState()?.pending.length ?? 0);
-  protected readonly maxParallel = computed(() => this.queueState()?.max ?? null);
+  protected readonly queueState = signal<{
+    active: string[];
+    pending: string[];
+    max: number;
+  } | null>(null);
+  protected readonly runningCount = computed(
+    () => this.queueState()?.active.length ?? 0,
+  );
+  protected readonly queuedCount = computed(
+    () => this.queueState()?.pending.length ?? 0,
+  );
+  protected readonly maxParallel = computed(
+    () => this.queueState()?.max ?? null,
+  );
 
   // ─── Inline task expansion ────────────────────────────────────────────
   protected readonly selectedId = signal<string | null>(null);
   protected readonly selectedTask = computed<ViewTask | null>(() => {
     const id = this.selectedId();
-    return id ? this.tasks().find((t) => t.raw.id === id) ?? null : null;
+    return id ? (this.tasks().find((t) => t.raw.id === id) ?? null) : null;
   });
-  protected interjectionText = '';
+  protected interjectionText = "";
 
   // Tab within the detail card. Persisted in the URL as ?tab= so reload
   // and direct-link both keep their place.
-  protected readonly detailTabs = ['spec', 'stream', 'review', 'files'] as const;
-  protected readonly detailTab = signal<(typeof this.detailTabs)[number]>('stream');
+  protected readonly detailTabs = [
+    "spec",
+    "planner",
+    "stream",
+    "review",
+    "tokens",
+    "files",
+  ] as const;
+  protected readonly detailTab =
+    signal<(typeof this.detailTabs)[number]>("stream");
   setDetailTab(tab: (typeof this.detailTabs)[number]) {
     this.detailTab.set(tab);
     this.syncQueryParams({ tab });
   }
 
   // ─── Finalize ─────────────────────────────────────────────────────────
-  protected readonly finalizeBranch = signal('');
+  protected readonly finalizeBranch = signal("");
   protected readonly finalizing = signal(false);
   protected readonly finalizeResult = signal<string | null>(null);
   protected readonly finalizeError = signal<string | null>(null);
+
+  // Agent-compiled Conventional Commits message. Two-way bound to the
+  // finalize textarea; saved to the backend on blur. The textarea-driven
+  // value here wins when the user clicks commit.
+  protected readonly commitMessage = signal<string | null>(null);
+  protected readonly commitMsgRegenerating = signal(false);
+
+  // Tokens tab: per-step usage events for the selected task. Loaded
+  // once on selection and refreshed whenever the user opens the tab.
+  protected readonly usageEvents = signal<
+    import("../../services/tasks.service").UsageEventRow[]
+  >([]);
+  protected readonly tokensTotalIn = computed(() =>
+    this.usageEvents().reduce((acc, e) => acc + (e.input_tokens || 0), 0),
+  );
+  protected readonly tokensTotalOut = computed(() =>
+    this.usageEvents().reduce((acc, e) => acc + (e.output_tokens || 0), 0),
+  );
+  protected readonly tokensTotalCost = computed(() =>
+    this.usageEvents().reduce((acc, e) => acc + (e.cost_usd || 0), 0),
+  );
+
+  // Complexity-axis score per task id. Populated on home pipeline
+  // refresh; cards read from this map for the chip.
+  protected readonly scoringSummary = signal<
+    Record<string, Record<string, number>>
+  >({});
+  protected complexityFor(taskId: string): number | null {
+    const v = this.scoringSummary()[taskId]?.["complexity"];
+    return typeof v === "number" ? v : null;
+  }
 
   // ─── Radar-chart scoring for selected task ────────────────────────────
   // Reviewer agent posts axes; the chart shows up on Spec/Files tabs once
@@ -422,15 +550,23 @@ export class HomePage {
   /** Index of the active solution sub-tab. -1 = "Implementation" (the
    *  shipped diff's scoring); 0..N-1 = alternative at that index. */
   protected readonly altTabIndex = signal<number>(-1);
-  setAltTab(idx: number) { this.altTabIndex.set(idx); }
+  setAltTab(idx: number) {
+    this.altTabIndex.set(idx);
+  }
 
   /** Convert an alternative row into the TaskScoringRow shape so the
    *  existing scoring-radar component can render it without a refactor. */
   protected scoringForAlt(alt: TaskAlternativeRow): TaskScoringRow[] {
     let scores: Record<string, number> = {};
     let rationales: Record<string, string> = {};
-    try { scores = JSON.parse(alt.scores_json) ?? {}; } catch { scores = {}; }
-    try { rationales = alt.rationales_json ? JSON.parse(alt.rationales_json) : {}; } catch {}
+    try {
+      scores = JSON.parse(alt.scores_json) ?? {};
+    } catch {
+      scores = {};
+    }
+    try {
+      rationales = alt.rationales_json ? JSON.parse(alt.rationales_json) : {};
+    } catch {}
     return Object.entries(scores).map(([dimension, score]) => ({
       task_id: alt.task_id,
       dimension,
@@ -440,6 +576,26 @@ export class HomePage {
       updated_at: alt.created_at,
     }));
   }
+
+  // ─── Suggested next steps for selected task ──────────────────────────
+  // Generated by the orchestrator when a task transitions to Done. Three
+  // sources spec'd in docs/15; v1 ships the history-based source only.
+  // The user pins or dismisses each item — never auto-converted to a
+  // task (anti-auto-pilot principle).
+  protected readonly suggestions = signal<Suggestion[]>([]);
+  protected readonly suggestionsRefreshing = signal(false);
+
+  // ─── Linked GitHub issues per task ────────────────────────────────────
+  // The user authors links manually (Spec tab → "Linked issues" panel).
+  // Cards use linksByTaskId for the per-card #N chips. Selected-task
+  // links surface in the Spec tab and feed the suggestion generator.
+  protected readonly issueLinks = signal<TaskIssueLink[]>([]);
+  protected readonly issueLinksByTask = signal<Record<string, TaskIssueLink[]>>(
+    {},
+  );
+  protected readonly issueLinkInput = signal("");
+  protected readonly issueLinkBusy = signal(false);
+  protected readonly issueLinkError = signal<string | null>(null);
 
   // ─── Planner notes for selected task ─────────────────────────────────
   // .agent-notes/<id>.md content — written by the plan-coder agent and
@@ -457,25 +613,30 @@ export class HomePage {
    *  Returns null when absent. Tolerant — falls back gracefully on
    *  unexpected indentation. */
   protected extractMermaid(text: string): string | null {
-    const match = text.match(/^[ \t]*diagram_mermaid:[ \t]*\|[ \t]*\n([\s\S]*?)(?=\n[A-Za-z_][A-Za-z0-9_-]*:|\n*$)/m);
+    // Match without /m so `$` anchors to end-of-string. With /m the
+    // `$` alternative matched every line end and truncated the block
+    // to its first line.
+    const match = text.match(
+      /(?:^|\n)[ \t]*diagram_mermaid:[ \t]*\|[ \t]*\n([\s\S]*?)(?=\n[A-Za-z_][A-Za-z0-9_-]*:|$)/,
+    );
     if (!match) return null;
-    const block = match[1] ?? '';
+    const block = match[1] ?? "";
     // Block-scalar children share an indent level — strip the smallest
     // common leading whitespace so mermaid sees the source flush left.
-    const lines = block.split('\n').filter((l) => l.trim().length > 0);
+    const lines = block.split("\n").filter((l) => l.trim().length > 0);
     if (lines.length === 0) return null;
-    const indents = lines.map((l) => (l.match(/^[ \t]*/)?.[0].length ?? 0));
+    const indents = lines.map((l) => l.match(/^[ \t]*/)?.[0].length ?? 0);
     const minIndent = Math.min(...indents);
     return block
-      .split('\n')
+      .split("\n")
       .map((l) => l.slice(minIndent))
-      .join('\n')
+      .join("\n")
       .trim();
   }
 
   /** Mermaid source extracted from the intake phase output, or null. */
   protected readonly intakeDiagram = computed<string | null>(() => {
-    const intake = this.phaseOutputs().find((p) => p.phase_id === 'intake');
+    const intake = this.phaseOutputs().find((p) => p.phase_id === "intake");
     if (!intake) return null;
     return this.extractMermaid(intake.output_md);
   });
@@ -492,7 +653,19 @@ export class HomePage {
   // events fall off so memory stays bounded across long-running tasks.
   protected readonly streamEvents = signal<StreamEvent[]>([]);
   protected readonly streamConnected = signal(false);
-  /** Persisted-tail backfill: messages from opencode when live stream is dead. */
+  /** Conceptual stream state, separate from `streamConnected` so the UI
+   *  can distinguish "still trying to attach" from "task is paused for
+   *  user input" from "task is closed." Set by the synthetic events the
+   *  backend emits ahead of the live stream. */
+  protected readonly streamStatus = signal<
+    | { state: "connecting" }
+    | { state: "attached" }
+    | { state: "unavailable"; reason: string }
+    | { state: "disconnected" }
+  >({ state: "disconnected" });
+  /** Persisted-tail backfill: messages from the engine when the live
+   *  stream is dead OR for the conversation history of a still-running
+   *  task. Loaded eagerly on selection when the task has a session id. */
   protected readonly transcriptTail = signal<TranscriptLine[]>([]);
   protected readonly transcriptLoading = signal(false);
   /** Most recent text emitted by the assistant, by part id. opencode emits
@@ -522,17 +695,21 @@ export class HomePage {
    *  (running phases) goes to Stream so they watch it work. */
   private defaultTabForTask(t: ViewTask): (typeof this.detailTabs)[number] {
     switch (t.state) {
-      case 'spec':     return 'spec';
-      case 'finalize': return 'files';
-      case 'ready':    return 'review';
-      default:         return 'stream';
+      case "spec":
+        return "spec";
+      case "finalize":
+        return "files";
+      case "ready":
+        return "review";
+      default:
+        return "stream";
     }
   }
 
   selectTask(id: string) {
     const next = this.selectedId() === id ? null : id;
     this.selectedId.set(next);
-    this.interjectionText = '';
+    this.interjectionText = "";
     this.finalizeResult.set(null);
     this.finalizeError.set(null);
     this.openMessage.set(null);
@@ -544,22 +721,28 @@ export class HomePage {
       this.refreshAlternatives(next);
       this.refreshNotes(next);
       this.refreshPhaseOutputs(next);
+      this.refreshSuggestions(next);
+      this.refreshIssueLinks(next);
+      this.refreshCommitMessage(next);
+      this.refreshUsageEvents(next);
       this.openStream(next);
       this.altTabIndex.set(-1);
       const t = this.tasks().find((x) => x.raw.id === next);
       // Land on a state-appropriate tab when the URL hasn't pinned one.
       // If the URL has ?tab=foo, the queryParamMap subscriber already set
       // it on hydration; we don't clobber the user's choice across clicks.
-      const urlTab = this.route.snapshot.queryParamMap.get('tab');
+      const urlTab = this.route.snapshot.queryParamMap.get("tab");
       if (t && !urlTab) {
         const defaultTab = this.defaultTabForTask(t);
         this.detailTab.set(defaultTab);
         this.syncQueryParams({ tab: defaultTab });
       }
-      // If the task is closed (Ready), the SSE stream won't have anything
-      // to deliver — so backfill the persisted opencode transcript so the
-      // user sees where the conversation ended.
-      if (t && t.status === 'closed' && t.raw.last_session_id) {
+      // Always backfill the persisted transcript when a session exists.
+      // The SSE stream may be unavailable (closed / paused / awaiting
+      // feedback / queued waiting for pickup) — the transcript is the
+      // user's only window into the conversation in those states. Cheap
+      // call, runs on every selection, latest data wins.
+      if (t && t.raw.last_session_id) {
         this.refreshTranscript(next);
       } else {
         this.transcriptTail.set([]);
@@ -572,16 +755,89 @@ export class HomePage {
       this.notesContent.set(null);
       this.notesPath.set(null);
       this.phaseOutputs.set([]);
+      this.suggestions.set([]);
+      this.issueLinks.set([]);
+      this.issueLinkInput.set("");
+      this.issueLinkError.set(null);
+      this.commitMessage.set(null);
       this.transcriptTail.set([]);
       this.closeStream();
     }
   }
 
-  refreshScoring(taskId: string) {
-    this.tasksApi.getScoring(taskId).subscribe({
-      next: (r) => this.scoring.set(r.scoring),
-      error: () => this.scoring.set([]),
+  refreshCommitMessage(taskId: string) {
+    this.tasksApi.getCommitMessage(taskId).subscribe({
+      next: (r) => this.commitMessage.set(r.message),
+      error: () => this.commitMessage.set(null),
     });
+  }
+
+  refreshUsageEvents(taskId: string) {
+    this.tasksApi.getUsageEvents(taskId).subscribe({
+      next: (r) => this.usageEvents.set(r.events),
+      error: () => this.usageEvents.set([]),
+    });
+  }
+
+  refreshScoringSummary(taskIds: string[]) {
+    if (taskIds.length === 0) return;
+    this.tasksApi.scoringsSummary(taskIds).subscribe({
+      next: (r) => this.scoringSummary.set(r.scorings),
+    });
+  }
+
+  /** Save the textarea contents back to the server. Called on blur so
+   *  fast finalize clicks don't get stale data. Empty string clears the
+   *  cached message; finalize then falls back to the title. */
+  saveCommitMessage() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    const text = (this.commitMessage() ?? "").trim();
+    this.tasksApi.setCommitMessage(sel.raw.id, text || null).subscribe({
+      next: (r) => this.commitMessage.set(r.message),
+    });
+  }
+
+  /** Re-run the agent compose. Replaces whatever's in the textarea. */
+  regenerateCommitMessage() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.commitMsgRegenerating.set(true);
+    this.tasksApi.regenerateCommitMessage(sel.raw.id).subscribe({
+      next: (r) => {
+        this.commitMsgRegenerating.set(false);
+        this.commitMessage.set(r.message);
+      },
+      error: () => this.commitMsgRegenerating.set(false),
+    });
+  }
+
+  /** Pipe an HTTP observable into a signal, swallowing errors so a
+   *  failed sub-resource fetch doesn't blow up the whole detail panel.
+   *  `pluck` extracts the array from the response envelope; `onSet` is
+   *  an optional tail for one-off side effects (alt-tab snap, etc). */
+  private loadInto<R, T>(
+    obs: Observable<R>,
+    target: WritableSignal<T[]>,
+    pluck: (r: R) => T[],
+    onSet?: (list: T[]) => void,
+  ): void {
+    obs.subscribe({
+      next: (r) => {
+        const list = pluck(r);
+        target.set(list);
+        onSet?.(list);
+      },
+      error: () => target.set([]),
+    });
+  }
+
+  refreshScoring(taskId: string) {
+    this.loadInto(
+      this.tasksApi.getScoring(taskId),
+      this.scoring,
+      (r) => r.scoring,
+    );
   }
 
   /** Parse a TaskReviewRow's findings_json blob. Tolerant — unknown
@@ -597,21 +853,152 @@ export class HomePage {
   }
 
   refreshReviews(taskId: string) {
-    this.tasksApi.getReviews(taskId).subscribe({
-      next: (r) => this.reviews.set(r.reviews),
-      error: () => this.reviews.set([]),
-    });
+    this.loadInto(
+      this.tasksApi.getReviews(taskId),
+      this.reviews,
+      (r) => r.reviews,
+    );
   }
 
   refreshAlternatives(taskId: string) {
-    this.tasksApi.getAlternatives(taskId).subscribe({
-      next: (r) => {
-        this.alternatives.set(r.alternatives);
+    this.loadInto(
+      this.tasksApi.getAlternatives(taskId),
+      this.alternatives,
+      (r) => r.alternatives,
+      (list) => {
         // If the active sub-tab points past the new list, snap back to
         // Implementation. Avoids a confusing empty state on reload.
-        if (this.altTabIndex() >= r.alternatives.length) this.altTabIndex.set(-1);
+        if (this.altTabIndex() >= list.length) this.altTabIndex.set(-1);
       },
-      error: () => this.alternatives.set([]),
+    );
+  }
+
+  refreshSuggestions(taskId: string) {
+    this.loadInto(
+      this.suggestionsApi.listForTask(taskId),
+      this.suggestions,
+      (r) => r.suggestions,
+    );
+  }
+
+  refreshIssueLinks(taskId: string) {
+    this.loadInto(
+      this.issueLinksApi.list(taskId),
+      this.issueLinks,
+      (r) => r.links,
+    );
+  }
+
+  /** Batch-fetch links for every visible task so cards can show a #N
+   *  chip per linked issue. Cheap — a single round trip with N task ids. */
+  private refreshIssueLinksForVisible(): void {
+    const ids = this.tasks().map((t) => t.raw.id);
+    if (ids.length === 0) {
+      this.issueLinksByTask.set({});
+      return;
+    }
+    this.issueLinksApi.byTasks(ids).subscribe({
+      next: (r) => this.issueLinksByTask.set(r.links),
+      error: () => this.issueLinksByTask.set({}),
+    });
+  }
+
+  /** Lookup helper for the template — returns links for a card's task. */
+  protected linksFor(taskId: string): TaskIssueLink[] {
+    return this.issueLinksByTask()[taskId] ?? [];
+  }
+
+  addIssueLink() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    const ref = this.issueLinkInput().trim();
+    if (!ref) return;
+    this.issueLinkBusy.set(true);
+    this.issueLinkError.set(null);
+    this.issueLinksApi.add(sel.raw.id, ref).subscribe({
+      next: (r) => {
+        this.issueLinks.update((list) => {
+          const filtered = list.filter(
+            (x) =>
+              !(
+                x.repo === r.link.repo && x.issue_number === r.link.issue_number
+              ),
+          );
+          return [...filtered, r.link];
+        });
+        this.issueLinkInput.set("");
+        this.issueLinkBusy.set(false);
+        this.refreshIssueLinksForVisible();
+      },
+      error: (err) => {
+        this.issueLinkBusy.set(false);
+        const msg =
+          err?.error?.message ??
+          err?.error?.error ??
+          err?.message ??
+          "Could not add link.";
+        this.issueLinkError.set(String(msg));
+      },
+    });
+  }
+
+  removeIssueLink(link: TaskIssueLink) {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.issueLinksApi
+      .remove(sel.raw.id, link.repo, link.issue_number)
+      .subscribe({
+        next: () => {
+          this.issueLinks.update((list) =>
+            list.filter(
+              (x) =>
+                !(x.repo === link.repo && x.issue_number === link.issue_number),
+            ),
+          );
+          this.refreshIssueLinksForVisible();
+        },
+      });
+  }
+
+  /** Manually re-run the GitHub-issue source for the selected task.
+   *  Fires when the user clicks "refresh from GitHub" on the panel —
+   *  picks up issue close/open changes without waiting for a new
+   *  task-completion event. */
+  refreshSuggestionsFromGithub() {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.suggestionsRefreshing.set(true);
+    this.suggestionsApi.refresh(sel.raw.id).subscribe({
+      next: (r) => {
+        this.suggestions.set(r.suggestions);
+        this.suggestionsRefreshing.set(false);
+      },
+      error: () => this.suggestionsRefreshing.set(false),
+    });
+  }
+
+  pinSuggestion(s: Suggestion) {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.suggestionsApi.setStatus(sel.raw.id, s.id, "pinned").subscribe({
+      next: (r) => {
+        // Replace the row in-place so the pinned state shows immediately.
+        this.suggestions.update((list) =>
+          list.map((x) => (x.id === r.suggestion.id ? r.suggestion : x)),
+        );
+      },
+    });
+  }
+
+  dismissSuggestion(s: Suggestion) {
+    const sel = this.selectedTask();
+    if (!sel) return;
+    this.suggestionsApi.setStatus(sel.raw.id, s.id, "dismissed").subscribe({
+      next: () => {
+        // Drop dismissed rows from the visible list — backend filters them
+        // out of the next listForTask call too.
+        this.suggestions.update((list) => list.filter((x) => x.id !== s.id));
+      },
     });
   }
 
@@ -644,11 +1031,11 @@ export class HomePage {
           info?: { role?: string; time?: { created?: number } };
           parts?: Array<{ type?: string; text?: string }>;
         }>) {
-          const role = m.info?.role ?? 'unknown';
+          const role = m.info?.role ?? "unknown";
           const text = (m.parts ?? [])
-            .filter((p) => p.type === 'text' && typeof p.text === 'string')
+            .filter((p) => p.type === "text" && typeof p.text === "string")
             .map((p) => p.text!)
-            .join('')
+            .join("")
             .trim();
           if (!text) continue;
           lines.push({ role, text, ts: m.info?.time?.created ?? null });
@@ -669,27 +1056,74 @@ export class HomePage {
     this.streamEvents.set([]);
     this.partTexts.clear();
     this.streamConnected.set(false);
+    this.streamStatus.set({ state: "connecting" });
     this.streamSub = this.streamApi.open(taskId).subscribe({
       next: (ev) => {
+        // Synthetic events from the backend — they describe the
+        // conceptual state without being part of the agent transcript.
+        if (ev.type === "subscribed") {
+          // Connection accepted; the backend hasn't decided yet whether
+          // it can attach. Stay in 'connecting' until stream.attached or
+          // stream.unavailable arrives.
+          return;
+        }
+        if (ev.type === "stream.attached") {
+          this.streamConnected.set(true);
+          this.streamStatus.set({ state: "attached" });
+          return;
+        }
+        if (ev.type === "stream.unavailable") {
+          const reason = String(
+            (ev as unknown as { reason?: string }).reason ?? "not_running",
+          );
+          this.streamConnected.set(false);
+          this.streamStatus.set({ state: "unavailable", reason });
+          return;
+        }
+        // Real engine event.
         this.streamConnected.set(true);
+        if (this.streamStatus().state !== "attached") {
+          this.streamStatus.set({ state: "attached" });
+        }
         // Track per-part text for the rolling assistant transcript.
-        if (ev.type === 'message.part.updated') {
-          const part = (ev.raw as {
-            properties?: { part?: { id?: string; type?: string; text?: string } };
-          }).properties?.part;
-          if (part?.type === 'text' && typeof part.text === 'string' && part.id) {
+        if (ev.type === "message.part.updated") {
+          const part = (
+            ev.raw as {
+              properties?: {
+                part?: { id?: string; type?: string; text?: string };
+              };
+            }
+          ).properties?.part;
+          if (
+            part?.type === "text" &&
+            typeof part.text === "string" &&
+            part.id
+          ) {
             this.partTexts.set(part.id, part.text);
           }
         }
         // Append to the capped ring buffer. Use update to keep change detection cheap.
         this.streamEvents.update((arr) => {
-          const next = arr.length >= HomePage.STREAM_BUFFER_LIMIT ? arr.slice(1) : arr.slice();
+          const next =
+            arr.length >= HomePage.STREAM_BUFFER_LIMIT
+              ? arr.slice(1)
+              : arr.slice();
           next.push(ev);
           return next;
         });
       },
-      complete: () => this.streamConnected.set(false),
-      error: () => this.streamConnected.set(false),
+      complete: () => {
+        this.streamConnected.set(false);
+        if (this.streamStatus().state !== "unavailable") {
+          this.streamStatus.set({ state: "disconnected" });
+        }
+      },
+      error: () => {
+        this.streamConnected.set(false);
+        if (this.streamStatus().state !== "unavailable") {
+          this.streamStatus.set({ state: "disconnected" });
+        }
+      },
     });
   }
 
@@ -697,13 +1131,14 @@ export class HomePage {
     this.streamSub?.unsubscribe();
     this.streamSub = null;
     this.streamConnected.set(false);
+    this.streamStatus.set({ state: "disconnected" });
   }
 
   private syncQueryParams(patch: Record<string, string | null>) {
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams: patch,
-      queryParamsHandling: 'merge',
+      queryParamsHandling: "merge",
       replaceUrl: true,
     });
   }
@@ -718,7 +1153,9 @@ export class HomePage {
         this.refreshTasks();
       },
       error: (e) =>
-        this.finalizeError.set(`delete failed: ${e?.error?.message ?? e?.message ?? e}`),
+        this.finalizeError.set(
+          `delete failed: ${e?.error?.message ?? e?.message ?? e}`,
+        ),
     });
   }
 
@@ -728,7 +1165,9 @@ export class HomePage {
     this.tasksApi.forceComplete(sel.raw.id).subscribe({
       next: () => this.refreshTasks(),
       error: (e) =>
-        this.finalizeError.set(`force-complete failed: ${e?.error?.message ?? e?.message ?? e}`),
+        this.finalizeError.set(
+          `force-complete failed: ${e?.error?.message ?? e?.message ?? e}`,
+        ),
     });
   }
 
@@ -745,7 +1184,9 @@ export class HomePage {
       },
       error: (e) => {
         this.gateBusy.set(false);
-        this.finalizeError.set(`approve failed: ${e?.error?.message ?? e?.message ?? e}`);
+        this.finalizeError.set(
+          `approve failed: ${e?.error?.message ?? e?.message ?? e}`,
+        );
       },
     });
   }
@@ -756,7 +1197,9 @@ export class HomePage {
     this.tasksApi.abandon(sel.raw.id).subscribe({
       next: () => this.refreshTasks(),
       error: (e) =>
-        this.finalizeError.set(`abandon failed: ${e?.error?.message ?? e?.message ?? e}`),
+        this.finalizeError.set(
+          `abandon failed: ${e?.error?.message ?? e?.message ?? e}`,
+        ),
     });
   }
 
@@ -766,7 +1209,9 @@ export class HomePage {
     this.tasksApi.finish(sel.raw.id).subscribe({
       next: () => this.refreshTasks(),
       error: (e) =>
-        this.finalizeError.set(`finish failed: ${e?.error?.message ?? e?.message ?? e}`),
+        this.finalizeError.set(
+          `finish failed: ${e?.error?.message ?? e?.message ?? e}`,
+        ),
     });
   }
 
@@ -775,7 +1220,63 @@ export class HomePage {
    *  its detail panel and can watch the live stream immediately.
    *  The "edit spec" action on an existing task calls showEdit() on
    *  the same dialog (edit mode); on save it stays on the spec tab. */
-  protected readonly newTaskDialog = viewChild<NewTaskDialog>('newTaskDialog');
+  protected readonly newTaskDialog = viewChild<NewTaskDialog>("newTaskDialog");
+
+  /** Stream/transcript scroll container — used by the autoscroll effect.
+   *  Only one of (.shell live) / (.transcript backfill) is in the DOM at
+   *  a time, so a single ref via the same template name works. */
+  private readonly scrollContainer =
+    viewChild<ElementRef<HTMLElement>>("scrollContainer");
+  /** True when the user is "pinned" to the bottom of the stream — we
+   *  only auto-scroll in that case. Once they scroll up to read, this
+   *  flips false and stays there until they scroll back to the bottom. */
+  private autoScrollPinned = true;
+
+  protected onStreamScroll(ev: Event): void {
+    const el = ev.target as HTMLElement;
+    // 24px slack so a near-bottom position still counts as pinned —
+    // browsers report fractional scroll amounts that don't always reach 0.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    this.autoScrollPinned = distanceFromBottom < 24;
+  }
+
+  /** Friendly label for the unavailable-stream banner. Reasons come from
+   *  the backend's stream.unavailable event. */
+  protected streamReasonLabel(s: { state: string; reason?: string }): string {
+    if (s.state !== "unavailable") return "disconnected";
+    switch (s.reason) {
+      case "awaiting_gate":
+        return "paused — awaiting your gate decision";
+      case "awaiting_feedback":
+        return "paused — awaiting your feedback";
+      case "closed":
+        return "task is closed — showing transcript";
+      case "attach_timeout":
+        return "engine did not pick this up — retry the run";
+      case "not_running":
+        return "not running";
+      case "not_found":
+        return "task not found";
+      default:
+        return `unavailable (${s.reason ?? "unknown"})`;
+    }
+  }
+
+  /** Header line for the transcript backfill block. */
+  protected transcriptHeaderNote(
+    s: { state: string; reason?: string },
+    count: number,
+    sessionId: string | null | undefined,
+  ): string {
+    const sid = sessionId ? sessionId.slice(0, 12) + "…" : "none";
+    if (s.state === "unavailable") {
+      return `${this.streamReasonLabel(s)} · last ${count} message(s) for session ${sid}`;
+    }
+    if (s.state === "connecting") {
+      return `connecting… · last ${count} message(s) persisted for session ${sid}`;
+    }
+    return `last ${count} message(s) for session ${sid}`;
+  }
   openNewTaskDialog() {
     this.newTaskDialog()?.show();
   }
@@ -791,12 +1292,12 @@ export class HomePage {
   // a free-form comment. Drives metrics-by-difficulty (we can later
   // surface "models with high bad-rate at difficulty N" in the cost view).
   protected readonly ratingFormOpen = signal(false);
-  protected readonly ratingComment = signal('');
+  protected readonly ratingComment = signal("");
   protected readonly ratingSaving = signal(false);
   protected readonly ratingError = signal<string | null>(null);
   openRatingForm() {
     const sel = this.selectedTask();
-    this.ratingComment.set(sel?.raw.user_rating_comment ?? '');
+    this.ratingComment.set(sel?.raw.user_rating_comment ?? "");
     this.ratingError.set(null);
     this.ratingFormOpen.set(true);
   }
@@ -809,17 +1310,21 @@ export class HomePage {
     if (!sel) return;
     this.ratingSaving.set(true);
     this.ratingError.set(null);
-    this.tasksApi.setRating(sel.raw.id, 'bad', this.ratingComment().trim() || null).subscribe({
-      next: () => {
-        this.ratingSaving.set(false);
-        this.ratingFormOpen.set(false);
-        this.refreshTasks();
-      },
-      error: (e) => {
-        this.ratingSaving.set(false);
-        this.ratingError.set(`Save failed: ${e?.error?.message ?? e?.message ?? e}`);
-      },
-    });
+    this.tasksApi
+      .setRating(sel.raw.id, "bad", this.ratingComment().trim() || null)
+      .subscribe({
+        next: () => {
+          this.ratingSaving.set(false);
+          this.ratingFormOpen.set(false);
+          this.refreshTasks();
+        },
+        error: (e) => {
+          this.ratingSaving.set(false);
+          this.ratingError.set(
+            `Save failed: ${e?.error?.message ?? e?.message ?? e}`,
+          );
+        },
+      });
   }
   clearRating() {
     const sel = this.selectedTask();
@@ -839,8 +1344,8 @@ export class HomePage {
       this.syncQueryParams({ task: id });
       return;
     }
-    this.detailTab.set('stream');
-    this.syncQueryParams({ task: id, tab: 'stream' });
+    this.detailTab.set("stream");
+    this.syncQueryParams({ task: id, tab: "stream" });
     this.openStream(id);
   }
 
@@ -852,37 +1357,45 @@ export class HomePage {
     const text = this.interjectionText.trim();
     if (!sel || !text) return;
 
-    if (sel.status === 'open') {
+    if (sel.status === "open") {
       this.tasksApi.sendMessage(sel.raw.id, text).subscribe({
-        next: () => { this.interjectionText = ''; },
+        next: () => {
+          this.interjectionText = "";
+        },
         error: (e) => this.finalizeError.set(`send failed: ${e.message ?? e}`),
       });
     } else {
       this.tasksApi.continueWithFeedback(sel.raw.id, text).subscribe({
         next: () => {
-          this.interjectionText = '';
+          this.interjectionText = "";
           this.refreshTasks();
         },
         error: (e) =>
-          this.finalizeError.set(`send-back failed: ${e?.error?.message ?? e?.message ?? e}`),
+          this.finalizeError.set(
+            `send-back failed: ${e?.error?.message ?? e?.message ?? e}`,
+          ),
       });
     }
   }
 
   finalizeCurrent() {
-    this.runFinalize({ strategy: 'current' });
+    this.runFinalize({ strategy: "current", message: this.commitMessage() ?? undefined });
   }
 
   finalizeNew() {
     const branch = this.finalizeBranch().trim();
     if (!branch) {
-      this.finalizeError.set('Branch name required for new-branch finalize.');
+      this.finalizeError.set("Branch name required for new-branch finalize.");
       return;
     }
-    this.runFinalize({ strategy: 'new', branch });
+    this.runFinalize({ strategy: "new", branch, message: this.commitMessage() ?? undefined });
   }
 
-  private runFinalize(input: { strategy: 'current' | 'new'; branch?: string }) {
+  private runFinalize(input: {
+    strategy: "current" | "new";
+    branch?: string;
+    message?: string;
+  }) {
     const sel = this.selectedTask();
     if (!sel) return;
     this.finalizing.set(true);
@@ -892,7 +1405,7 @@ export class HomePage {
       next: (r) => {
         this.finalizing.set(false);
         if (r.ok) {
-          const shortSha = (r.commit ?? '').slice(0, 8);
+          const shortSha = (r.commit ?? "").slice(0, 8);
           this.finalizeResult.set(
             `Committed ${r.files_committed.length} file(s) on ${r.branch} (${shortSha}).`,
           );
@@ -901,7 +1414,7 @@ export class HomePage {
           // Surface the actual reason from the backend's log trail instead
           // of a generic "Nothing to commit". The last entry is the most
           // informative — fastForwardParent.message, "tree was clean", etc.
-          const reason = r.log?.[r.log.length - 1] ?? 'Working tree was clean.';
+          const reason = r.log?.[r.log.length - 1] ?? "Working tree was clean.";
           this.finalizeError.set(reason);
         }
       },
@@ -943,44 +1456,55 @@ export class HomePage {
   // tracks the rest of the page (which uses CSS @media). Apex doesn't
   // read CSS variables, so we feed it explicit colors per scheme.
   protected readonly darkMode = signal(
-    typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-color-scheme: dark)').matches === true,
+    typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)").matches === true,
   );
 
   // Selected range for the usage chart. Possible values: 'today', '7d', '30d'
-  protected readonly selectedRange = signal<'today' | '7d' | '30d'>('today');
+  protected readonly selectedRange = signal<"today" | "7d" | "30d">("today");
   private readonly rangeChanged = new Subject<void>();
   protected readonly costMeta = computed(() => {
     const r = this.selectedRange();
-    return r === 'today' ? 'today' : r === '7d' ? 'last 7 days' : 'last 30 days';
+    return r === "today"
+      ? "today"
+      : r === "7d"
+        ? "last 7 days"
+        : "last 30 days";
   });
 
   protected readonly usageOptions = computed<ApexOptions>(() => {
     const cs = this.costSummary();
     const dark = this.darkMode();
     // Palette mirrors the CSS variables in styles.scss for both schemes.
-    const ink = dark ? '#E8E6DF' : '#1A1A18';
-    const inkMuted = dark ? '#9D9A93' : '#6E6E69';
-    const inkFaint = dark ? '#5C5A55' : '#A3A19A';
-    const rule = dark ? '#2C2E33' : '#D8D6CF';
+    const ink = dark ? "#E8E6DF" : "#1A1A18";
+    const inkMuted = dark ? "#9D9A93" : "#6E6E69";
+    const inkFaint = dark ? "#5C5A55" : "#A3A19A";
+    const rule = dark ? "#2C2E33" : "#D8D6CF";
     const seriesColors = dark
-      ? ['#E8E6DF', '#9D9A93', '#E5B870', '#E69090']
-      : ['#1A1A18', '#6E6E69', '#A66A1F', '#8B1E1E'];
+      ? ["#E8E6DF", "#9D9A93", "#E5B870", "#E69090"]
+      : ["#1A1A18", "#6E6E69", "#A66A1F", "#8B1E1E"];
     const series =
       cs && cs.series.length > 0
-        ? cs.series.map((s) => ({ name: s.provider_id, data: s.data as number[][] }))
+        ? cs.series.map((s) => ({
+            name: s.provider_id,
+            data: s.data as number[][],
+          }))
         : []; // empty triggers noData
 
     // Determine x-axis min/max from server range if available, otherwise
     // derive from the selected range.
     const xaxis: any = {
-      type: 'datetime',
+      type: "datetime",
       axisBorder: { color: rule },
       axisTicks: { color: rule },
-      labels: { style: { fontSize: '10px' } },
+      labels: { style: { fontSize: "10px" } },
     };
 
-    if (cs && Number.isFinite(cs.range?.from) && Number.isFinite(cs.range?.to)) {
+    if (
+      cs &&
+      Number.isFinite(cs.range?.from) &&
+      Number.isFinite(cs.range?.to)
+    ) {
       const from = cs.range!.from!;
       const to = cs.range!.to!;
       xaxis.min = from;
@@ -988,12 +1512,12 @@ export class HomePage {
     } else {
       const now = Date.now();
       const sel = this.selectedRange();
-      if (sel === 'today') {
+      if (sel === "today") {
         const start = new Date();
         start.setUTCHours(0, 0, 0, 0);
         xaxis.min = start.getTime();
         xaxis.max = now;
-      } else if (sel === '7d') {
+      } else if (sel === "7d") {
         xaxis.min = now - 7 * 24 * 60 * 60 * 1000;
         xaxis.max = now;
       } else {
@@ -1004,25 +1528,30 @@ export class HomePage {
 
     return {
       chart: {
-        type: 'line',
+        type: "line",
         height: 200,
         toolbar: { show: false },
         zoom: { enabled: false },
         foreColor: inkMuted,
-        fontFamily: 'Inter, system-ui, sans-serif',
+        fontFamily: "Inter, system-ui, sans-serif",
         animations: { enabled: false },
-        background: 'transparent',
+        background: "transparent",
       },
       series,
       noData: {
-        text: cs && cs.series.length === 0
-          ? 'No usage recorded yet — run a task to see provider lines'
-          : 'Loading…',
-        align: 'center',
-        verticalAlign: 'middle',
-        style: { color: inkFaint, fontSize: '11px', fontFamily: 'Inter, sans-serif' },
+        text:
+          cs && cs.series.length === 0
+            ? "No usage recorded yet — run a task to see provider lines"
+            : "Loading…",
+        align: "center",
+        verticalAlign: "middle",
+        style: {
+          color: inkFaint,
+          fontSize: "11px",
+          fontFamily: "Inter, sans-serif",
+        },
       },
-      stroke: { curve: 'straight', width: 1.5 },
+      stroke: { curve: "straight", width: 1.5 },
       markers: { size: 3, strokeWidth: 0, hover: { size: 4 } },
       grid: {
         borderColor: rule,
@@ -1031,26 +1560,27 @@ export class HomePage {
       },
       xaxis,
       yaxis: {
+        min: 0,
         labels: {
           formatter: (v: number) => `$${v.toFixed(2)}`,
-          style: { fontSize: '10px' },
+          style: { fontSize: "10px" },
         },
       },
       legend: {
         show: true,
         showForSingleSeries: true, // always show, even with one provider
-        fontSize: '11px',
-        fontFamily: 'Inter, sans-serif',
-        position: 'top',
-        horizontalAlign: 'right',
+        fontSize: "11px",
+        fontFamily: "Inter, sans-serif",
+        position: "top",
+        horizontalAlign: "right",
         labels: { colors: ink },
         markers: { strokeWidth: 0, size: 8 },
         itemMargin: { horizontal: 12, vertical: 0 },
       },
       colors: seriesColors,
       tooltip: {
-        theme: dark ? 'dark' : 'light',
-        x: { format: 'MMM dd' },
+        theme: dark ? "dark" : "light",
+        x: { format: "MMM dd" },
         y: { formatter: (v: number) => `$${v.toFixed(4)}` },
       },
       dataLabels: { enabled: false },
@@ -1058,8 +1588,12 @@ export class HomePage {
   });
 
   // ─── Backlog (still placeholders until Phase 13) ──────────────────────
-  protected readonly relatedIssues = signal<{ id: string; title: string }[]>([]);
-  protected readonly refactorSuggestions = signal<{ id: string; title: string }[]>([]);
+  protected readonly relatedIssues = signal<{ id: string; title: string }[]>(
+    [],
+  );
+  protected readonly refactorSuggestions = signal<
+    { id: string; title: string }[]
+  >([]);
 
   // ─── PR poll setting (display only) ───────────────────────────────────
   protected readonly prPollMinutes = signal<number | null>(null);
@@ -1067,19 +1601,34 @@ export class HomePage {
   private destroy$ = new Subject<void>();
 
   constructor() {
-    // Hydrate filter + selection + active detail tab from the URL.
-    this.route.queryParamMap
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((p) => {
-        const closed = p.get('closed');
-        this.showClosed.set(closed === '1' || closed === 'true');
-        const task = p.get('task');
-        this.selectedId.set(task && task.length > 0 ? task : null);
-        const tab = p.get('tab');
-        if (tab === 'spec' || tab === 'stream' || tab === 'review' || tab === 'files') {
-          this.detailTab.set(tab);
-        }
+    // Autoscroll the stream/transcript container as new content arrives.
+    // Only scrolls when the user is already pinned to the bottom (24px
+    // slack) — once they scroll up to read, we leave them alone. Reads
+    // streamLines() and transcriptTail() so it fires for both modes.
+    effect(() => {
+      // Touch both signals so the effect re-runs when either changes.
+      this.streamLines();
+      this.transcriptTail();
+      if (!this.autoScrollPinned) return;
+      // Defer one frame so the DOM has the new node before we measure.
+      queueMicrotask(() => {
+        const el = this.scrollContainer()?.nativeElement;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
       });
+    });
+
+    // Hydrate filter + selection + active detail tab from the URL.
+    this.route.queryParamMap.pipe(takeUntil(this.destroy$)).subscribe((p) => {
+      const closed = p.get("closed");
+      this.showClosed.set(closed === "1" || closed === "true");
+      const task = p.get("task");
+      this.selectedId.set(task && task.length > 0 ? task : null);
+      const tab = p.get("tab");
+      if (tab && (this.detailTabs as readonly string[]).includes(tab)) {
+        this.detailTab.set(tab as (typeof this.detailTabs)[number]);
+      }
+    });
 
     // Settings — poll every 10s. We need the nudge counter to refresh as
     // tasks finish, and one-time fields (IDE commands, poll interval) just
@@ -1087,7 +1636,9 @@ export class HomePage {
     timer(0, 10_000)
       .pipe(
         takeUntil(this.destroy$),
-        switchMap(() => this.settingsApi.get().pipe(catchError(() => of(null)))),
+        switchMap(() =>
+          this.settingsApi.get().pipe(catchError(() => of(null))),
+        ),
       )
       .subscribe((s) => {
         if (!s) return;
@@ -1107,18 +1658,22 @@ export class HomePage {
     // Track OS color-scheme changes so the ApexChart palette flips with
     // the rest of the page (CSS handles itself via @media). Listener is
     // detached on destroy; older Safari uses the deprecated addListener.
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (typeof window !== "undefined" && window.matchMedia) {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const onChange = (e: MediaQueryListEvent) => this.darkMode.set(e.matches);
-      mq.addEventListener?.('change', onChange);
-      this.destroy$.subscribe(() => mq.removeEventListener?.('change', onChange));
+      mq.addEventListener?.("change", onChange);
+      this.destroy$.subscribe(() =>
+        mq.removeEventListener?.("change", onChange),
+      );
     }
 
     // Queue snapshot — every 3s while the Home is open. Cheap (in-memory).
     timer(0, 3000)
       .pipe(
         takeUntil(this.destroy$),
-        switchMap(() => this.tasksApi.queueSnapshot().pipe(catchError(() => of(null)))),
+        switchMap(() =>
+          this.tasksApi.queueSnapshot().pipe(catchError(() => of(null))),
+        ),
       )
       .subscribe((q) => this.queueState.set(q));
 
@@ -1141,6 +1696,7 @@ export class HomePage {
         this.tasks.set(r.tasks.map(toViewTask));
         this.tasksLoading.set(false);
         this.tasksError.set(null);
+        this.refreshIssueLinksForVisible();
         // Pick up new scoring rows the reviewer agent may have just POSTed,
         // any newly-persisted review verdicts, and the planner's notes
         // file once it lands. Cheap — one request each.
@@ -1159,9 +1715,9 @@ export class HomePage {
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>
-          this.costApi.summary(this.selectedRange()).pipe(
-            catchError(() => of(null)),
-          ),
+          this.costApi
+            .summary(this.selectedRange())
+            .pipe(catchError(() => of(null))),
         ),
       )
       .subscribe((cs) => {
@@ -1180,7 +1736,12 @@ export class HomePage {
           // Some backends include an empty zero point at `from` which shows
           // as an undesired marker at the left edge. Only drop it when it's
           // exactly at `from` and its value is zero.
-          if (pts.length > 1 && Number.isFinite(from) && pts[0][0] === from && pts[0][1] === 0) {
+          if (
+            pts.length > 1 &&
+            Number.isFinite(from) &&
+            pts[0][0] === from &&
+            pts[0][1] === 0
+          ) {
             pts.shift();
           }
 
@@ -1200,7 +1761,15 @@ export class HomePage {
 
   refreshTasks() {
     this.tasksApi.list().subscribe({
-      next: (r) => this.tasks.set(r.tasks.map(toViewTask)),
+      next: (r) => {
+        const views = r.tasks.map(toViewTask);
+        this.tasks.set(views);
+        // Pull latest radar scores so cards can render the complexity
+        // chip. Skip when nothing's open — saves a roundtrip on a
+        // freshly-cleared dashboard.
+        const ids = views.map((v) => v.raw.id);
+        this.refreshScoringSummary(ids);
+      },
     });
   }
 
@@ -1238,16 +1807,12 @@ export class HomePage {
   openInIde(path?: string) {
     const sel = this.selectedTask();
     const wt = sel?.raw.worktree_path;
-    const target = path
-      ? wt
-        ? `${wt}/${path}`
-        : path
-      : (wt ?? undefined);
+    const target = path ? (wt ? `${wt}/${path}` : path) : (wt ?? undefined);
     // Success is silent — the user sees the IDE/emacs frame come up.
     // Only failures get surfaced, to keep the meta row from layout-shifting
     // on every click.
     this.openMessage.set(null);
-    this.repoApi.open('ide', target).subscribe({
+    this.repoApi.open("ide", target).subscribe({
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
@@ -1256,13 +1821,9 @@ export class HomePage {
   openInEmacs(path?: string) {
     const sel = this.selectedTask();
     const wt = sel?.raw.worktree_path;
-    const target = path
-      ? wt
-        ? `${wt}/${path}`
-        : path
-      : (wt ?? undefined);
+    const target = path ? (wt ? `${wt}/${path}` : path) : (wt ?? undefined);
     this.openMessage.set(null);
-    this.repoApi.open('emacs', target).subscribe({
+    this.repoApi.open("emacs", target).subscribe({
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
@@ -1272,7 +1833,7 @@ export class HomePage {
     const sel = this.selectedTask();
     const wt = sel?.raw.worktree_path ?? undefined;
     this.openMessage.set(null);
-    this.repoApi.open('magit', wt).subscribe({
+    this.repoApi.open("magit", wt).subscribe({
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
@@ -1281,10 +1842,10 @@ export class HomePage {
   toggleClosed() {
     const next = !this.showClosed();
     this.showClosed.set(next);
-    this.syncQueryParams({ closed: next ? '1' : null });
+    this.syncQueryParams({ closed: next ? "1" : null });
   }
 
-  setRange(range: 'today' | '7d' | '30d') {
+  setRange(range: "today" | "7d" | "30d") {
     this.selectedRange.set(range);
     this.rangeChanged.next();
   }
