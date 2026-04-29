@@ -40,12 +40,6 @@ const KIND_LABEL: Record<ActivityKind, string> = {
           <p class="meta">recent activity · last {{ activities().length }} events</p>
           <h2>What's been happening</h2>
         </div>
-        <div class="legend">
-          <span class="legend-item"><span class="sq sq-spec"></span>Spec</span>
-          <span class="legend-item"><span class="sq sq-review"></span>Review</span>
-          <span class="legend-item"><span class="sq sq-agent"></span>Agent</span>
-          <span class="legend-item"><span class="sq sq-abandoned"></span>Abandoned</span>
-        </div>
       </header>
 
       <div class="activity-body">
