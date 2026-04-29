@@ -4,6 +4,13 @@ Local-first, human-first multi-agent dashboard for engineering work. Focuses on 
 switches, maximizing parallelism, bundling related tasks, and silently preparing unrelated PR
 reviews.
 
+## Screenshots
+
+|Task Dashboard|Task Item Detail|
+|-|-|
+|![Task Dashboard](.assets/home.png)|![Task Item Detail](.assets/task-detail.png)|
+
+
 ## Motivation
 
 It is based on these core observations:
@@ -19,9 +26,3 @@ leveraging git worktrees, to orchestrate everyday coding tasks.
 
 For more info check the [`MANIFESTO.md`](MANIFESTO.md) — it lays out these non-negotiable
 principles that shape every design decision in more detail.
-
-## Screenshots
-
-|Task Dashboard|Task Item Detail|
-|-|-|
-|![Task Dashboard](.assets/home.png)|![Task Item Detail](.assets/task-detail.png)|
