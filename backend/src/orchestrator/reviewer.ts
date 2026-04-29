@@ -228,19 +228,45 @@ export interface ReviewFinding {
   detail: string;
 }
 
+/** Scoring extracted from the reviewer's YAML — same shape `upsertScoring`
+ *  takes, ready to forward to the DB without further reshaping. */
+export interface ReviewScoring {
+  scores: Record<string, number>;
+  rationale?: Record<string, string | null>;
+}
+
+/** A single alternative-solution suggestion from the reviewer's YAML.
+ *  Mirrors `AlternativeInput` from db/alternatives so the orchestrator
+ *  can hand it straight to `replaceForTask`. */
+export interface ReviewAlternative {
+  label: string;
+  description: string;
+  scores: Record<string, number>;
+  rationales?: Record<string, string | null>;
+  verdict: "better" | "equal" | "worse";
+  rationale?: string | null;
+}
+
+interface ReviewDecisionExtras {
+  confidence?: Confidence;
+  findings?: ReviewFinding[];
+  /** Five-axis radar scoring. Persisted via upsertScoring when present. */
+  scoring?: ReviewScoring;
+  /** Alternative solutions. Persisted via replaceForTask when present
+   *  (including the empty-array case, which intentionally wipes stale
+   *  rows from earlier passes). */
+  alternatives?: ReviewAlternative[];
+}
+
 export type ReviewDecision =
-  | {
+  | ({
       action: typeof ReviewDecisionAction.Accept;
       notes?: string;
-      confidence?: Confidence;
-      findings?: ReviewFinding[];
-    }
-  | {
+    } & ReviewDecisionExtras)
+  | ({
       action: typeof ReviewDecisionAction.SendBack;
       feedback: string;
-      confidence?: Confidence;
-      findings?: ReviewFinding[];
-    };
+    } & ReviewDecisionExtras);
 
 const CONFIDENCE_VALUES = Object.values(Confidence) as readonly Confidence[];
 function parseConfidence(raw: unknown): Confidence | undefined {
@@ -250,6 +276,87 @@ function parseConfidence(raw: unknown): Confidence | undefined {
 }
 
 const SEVERITY_VALUES = Object.values(Severity) as readonly Severity[];
+
+/** Pull `{ value, rationale }` from one axis entry. Tolerates plain
+ *  numbers (`complexity: 4`) for prompt-misinterpretation cases. */
+function parseAxis(raw: unknown): { value: number; rationale: string | null } | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return { value: clampScore(raw), rationale: null };
+  }
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const v = o["value"];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      const rationale =
+        typeof o["rationale"] === "string" && o["rationale"].trim().length > 0
+          ? (o["rationale"] as string).trim()
+          : null;
+      return { value: clampScore(v), rationale };
+    }
+  }
+  return null;
+}
+
+function clampScore(n: number): number {
+  return Math.max(1, Math.min(10, Math.round(n)));
+}
+
+/** Parse the reviewer's `scoring:` block into the shape upsertScoring
+ *  takes. Returns undefined when the field is missing or shaped wrong;
+ *  the caller skips the upsert in that case rather than writing
+ *  garbage. */
+export function parseReviewerScoring(raw: unknown): ReviewScoring | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const scores: Record<string, number> = {};
+  const rationale: Record<string, string | null> = {};
+  for (const [dim, value] of Object.entries(raw as Record<string, unknown>)) {
+    const ax = parseAxis(value);
+    if (!ax) continue;
+    scores[dim] = ax.value;
+    rationale[dim] = ax.rationale;
+  }
+  if (Object.keys(scores).length === 0) return undefined;
+  return { scores, rationale };
+}
+
+const ALTERNATIVE_VERDICTS = new Set(["better", "equal", "worse"]);
+
+/** Parse the reviewer's `alternatives:` list. Returns [] for an
+ *  empty/missing list (the caller still calls replaceForTask, which
+ *  wipes stale rows from a prior pass). Returns undefined if the
+ *  field is shaped wrong (caller leaves prior rows alone). */
+export function parseReviewerAlternatives(raw: unknown): ReviewAlternative[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) return undefined;
+  const out: ReviewAlternative[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const label =
+      typeof o["title"] === "string"
+        ? o["title"]
+        : typeof o["label"] === "string"
+          ? o["label"]
+          : "";
+    const description = typeof o["description"] === "string" ? o["description"] : "";
+    if (!label || !description) continue;
+    const verdictRaw = String(o["verdict"] ?? "").toLowerCase().trim();
+    const verdict = (ALTERNATIVE_VERDICTS.has(verdictRaw) ? verdictRaw : "equal") as
+      | "better"
+      | "equal"
+      | "worse";
+    const scoring = parseReviewerScoring(o["scoring"]);
+    out.push({
+      label,
+      description,
+      scores: scoring?.scores ?? {},
+      rationales: scoring?.rationale,
+      verdict,
+      rationale: typeof o["rationale"] === "string" ? o["rationale"] : null,
+    });
+  }
+  return out;
+}
 
 function parseFindings(raw: unknown): ReviewFinding[] {
   if (!Array.isArray(raw)) return [];
@@ -314,21 +421,43 @@ export function parseReviewerDecision(rawText: string): ReviewDecision {
   const decision = String(obj["decision"] ?? "").toLowerCase().trim();
   const confidence = parseConfidence(obj["confidence"]);
   const findings = parseFindings(obj["findings"]);
+  const scoring = parseReviewerScoring(obj["scoring"]);
+  const alternatives = parseReviewerAlternatives(obj["alternatives"]);
 
   if (decision === ReviewDecisionAction.SendBack) {
     const feedback = typeof obj["feedback"] === "string" ? obj["feedback"].trim() : "";
     if (!feedback) {
       log.warn("orchestrator.reviewer.send_back_without_feedback");
       // Send-back without feedback is useless to the coder. Accept.
-      return { action: ReviewDecisionAction.Accept, confidence, findings };
+      return {
+        action: ReviewDecisionAction.Accept,
+        confidence,
+        findings,
+        scoring,
+        alternatives,
+      };
     }
-    return { action: ReviewDecisionAction.SendBack, feedback, confidence, findings };
+    return {
+      action: ReviewDecisionAction.SendBack,
+      feedback,
+      confidence,
+      findings,
+      scoring,
+      alternatives,
+    };
   }
 
   // Anything other than send_back → accept. Includes 'accept', misspellings,
   // missing field, etc. Capture optional notes so they can be logged.
   const notes = typeof obj["notes"] === "string" ? obj["notes"].trim() : undefined;
-  return { action: ReviewDecisionAction.Accept, notes, confidence, findings };
+  return {
+    action: ReviewDecisionAction.Accept,
+    notes,
+    confidence,
+    findings,
+    scoring,
+    alternatives,
+  };
 }
 
 /** Hard cap on how many times the reviewer can send back. After this

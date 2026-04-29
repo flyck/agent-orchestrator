@@ -57,6 +57,7 @@ import {
   openReviewerSession,
   parseReviewerDecision,
   ReviewDecisionAction,
+  type ReviewDecision,
 } from "./reviewer";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
@@ -74,6 +75,8 @@ import {
 } from "../db/phaseSessions";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { appendReview } from "../db/reviews";
+import { upsertScoring } from "../db/scorings";
+import { replaceForTask as replaceAlternatives } from "../db/alternatives";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -609,6 +612,56 @@ async function safeClose(session: EngineSession, taskId: string, why: string): P
   }
 }
 
+/** Persist the scoring + alternatives blocks that came back inside the
+ *  reviewer's YAML reply. Previously this happened via curl POSTs the
+ *  agent was supposed to make; in practice agents skipped them and the
+ *  radar stayed blank. Pulling the data out of the YAML and writing it
+ *  here removes that failure mode. Best-effort: errors are logged but
+ *  never block the accept/send-back transition. */
+function persistReviewSideEffects(
+  taskId: string,
+  decision: ReviewDecision,
+  setBy: string,
+): void {
+  if (decision.scoring) {
+    try {
+      upsertScoring(taskId, {
+        scores: decision.scoring.scores,
+        rationale: decision.scoring.rationale,
+        set_by: setBy,
+      });
+    } catch (err) {
+      log.warn("orchestrator.reviewer.scoring_persist_failed", {
+        taskId,
+        error: String(err),
+      });
+    }
+  }
+  // alternatives === undefined means the agent didn't include the field
+  // at all — leave any prior pass's rows alone. An explicit empty array
+  // wipes them, which is what the prompt now asks for.
+  if (decision.alternatives !== undefined) {
+    try {
+      replaceAlternatives(taskId, {
+        alternatives: decision.alternatives.map((a) => ({
+          label: a.label,
+          description: a.description,
+          scores: a.scores,
+          rationales: a.rationales,
+          verdict: a.verdict,
+          rationale: a.rationale,
+        })),
+        set_by: setBy,
+      });
+    } catch (err) {
+      log.warn("orchestrator.reviewer.alternatives_persist_failed", {
+        taskId,
+        error: String(err),
+      });
+    }
+  }
+}
+
 /** Stamp the task's terminal status + state, bump the nudge counter on
  *  real success, and emit the run.done log. */
 function finalizeTask(
@@ -896,6 +949,7 @@ async function runPipelineAgent(
               ? JSON.stringify(decision.findings)
               : null,
         });
+        persistReviewSideEffects(taskId, decision, agentSlug);
       }
     } catch (err) {
       log.warn("orchestrator.pipeline.review_persist_failed", {
@@ -1153,6 +1207,7 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
             ? JSON.stringify(decision.findings)
             : null,
         });
+        persistReviewSideEffects(taskId, decision, "reviewer-coder");
       } catch (err) {
         log.warn("orchestrator.reviewer.persist_failed", {
           taskId,

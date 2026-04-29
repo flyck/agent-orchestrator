@@ -70,7 +70,12 @@ that names the missed acceptance criteria. Use `confidence: high` —
 
 ## Output format
 
-Reply with **a single fenced YAML block and nothing else**. Two shapes:
+Reply with **a single fenced YAML block and nothing else**. Everything
+the orchestrator needs — decision, scoring, alternatives, findings —
+goes in this one YAML block. **Do not** make HTTP calls or use bash
+tools to deliver any of these fields; the orchestrator parses your
+YAML and writes them itself. Skipping the curl protocol is by design:
+it kept getting forgotten.
 
 Accept:
 
@@ -80,6 +85,24 @@ confidence: high | medium | low
 notes: |
   <optional: anything the user might want to know post-hoc.
    one short paragraph max. omit the field entirely if you have nothing.>
+scoring:
+  complexity:      { value: 4, rationale: "one short sentence" }
+  involved_parts:  { value: 2, rationale: "one short sentence" }
+  lines_of_code:   { value: 3, rationale: "one short sentence" }
+  user_benefit:    { value: 6, rationale: "one short sentence" }
+  maintainability: { value: 5, rationale: "one short sentence" }
+alternatives:
+  - title: <short label, e.g. "Backend filter">
+    description: |
+      <2-4 sentences describing the alternative concretely.>
+    verdict: better | equal | worse
+    rationale: <one sentence — why this verdict>
+    scoring:
+      complexity:      { value: 5, rationale: "one short sentence" }
+      involved_parts:  { value: 4, rationale: "one short sentence" }
+      lines_of_code:   { value: 4, rationale: "one short sentence" }
+      user_benefit:    { value: 7, rationale: "one short sentence" }
+      maintainability: { value: 6, rationale: "one short sentence" }
 findings:
   - severity: info | low | medium | high
     confidence: high | medium | low
@@ -100,6 +123,15 @@ feedback: |
   <one paragraph for the coder: what's wrong and how to fix it. Be
    concrete — point at file paths and line numbers from the diff.
    The coder will read this as a follow-up message and revise.>
+scoring:
+  # same shape as accept — fill in based on what's in the diff today,
+  # not what it would look like once the coder fixes the issues
+  complexity:      { value: 4, rationale: "..." }
+  involved_parts:  { value: 2, rationale: "..." }
+  lines_of_code:   { value: 3, rationale: "..." }
+  user_benefit:    { value: 6, rationale: "..." }
+  maintainability: { value: 5, rationale: "..." }
+alternatives: []         # required field — empty array if you have none
 findings:
   - severity: info | low | medium | high
     confidence: high | medium | low
@@ -113,9 +145,10 @@ findings:
 decision? `confidence` on a finding means: how sure are you this
 specific issue is real? Both are required.
 
-The orchestrator parses this exact format. If it can't parse, the task
-is treated as accepted (fail-open — the user reviews anyway). So make
-the YAML clean.
+The orchestrator parses this exact YAML and writes scoring + alternatives
++ the decision + findings to the database in one transaction. If the
+YAML can't be parsed, the task is treated as accepted (fail-open — the
+user reviews anyway), so make the YAML clean.
 
 `findings` is optional. Only include it when you have signal to report;
 an empty `findings: []` is fine but a missing key is preferred when
@@ -156,59 +189,29 @@ If you are not certain an issue is real, **do not flag it**. Set
 `confidence: low` only on findings you're surfacing for awareness;
 prefer to drop them.
 
-## Scoring (REQUIRED — must POST before your YAML)
+## Scoring — required field in your YAML
 
-You **must** POST a scoring to `{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring`
-**before** you emit your YAML decision. This is not optional. The user's
-dashboard renders a radar chart from these axes; without your POST the
-chart stays blank and the review looks half-done. Skipping this step
-counts as a failed review on your end.
+The `scoring` block is **required** in every reply, accept or
+send_back. The user's dashboard renders a radar chart from these
+axes; missing scoring = blank radar = the review looks half-done.
 
-Use your bash / curl tool to send the request. The expected shape:
+Score all five axes (complexity, involved_parts, lines_of_code,
+user_benefit, maintainability) on 1–10. Keep each rationale to one
+short sentence — the radar tooltip shows it on hover.
 
-```bash
-curl -s -X POST "{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "set_by": "reviewer-coder",
-    "scores": {
-      "complexity":     { "value": 4, "rationale": "one short sentence" },
-      "involved_parts": { "value": 2, "rationale": "one short sentence" },
-      "lines_of_code":  { "value": 3, "rationale": "one short sentence" },
-      "user_benefit":   { "value": 6, "rationale": "one short sentence" },
-      "maintainability":{ "value": 5, "rationale": "one short sentence" }
-    }
-  }'
-```
+Score what you actually see in the diff — not what the spec asked
+for, not what the coder claimed. If the diff is empty, score
+user_benefit and the size axes as 1; complexity and maintainability
+as the lowest plausible value (1–2). Score even when you `send_back`
+— the dashboard reflects the latest pass, so the radar tracks
+whatever the coder shipped this round.
 
-All five axes (complexity, involved_parts, lines_of_code, user_benefit,
-maintainability) must be present, each on 1–10 with a one-sentence
-rationale. Confirm the response is `{"scoring":[…]}` (HTTP 200) before
-you proceed; if you see a 400/500, re-read the body and try once more.
+## Alternatives — required field in your YAML
 
-Score what you actually see in the diff — not what the spec asked for,
-not what the coder claimed. If the diff is empty, score user_benefit
-and the size axes as 1; complexity and maintainability as the lowest
-plausible value (1–2). **Send the scoring even when you `send_back`** —
-the dashboard reflects the latest review pass, and skipping the POST
-because "I'm sending back anyway" is the most common way the radar ends
-up blank.
-
-**Order matters.** The expected sequence on every review pass is:
-
-1. Read the diff.
-2. Run any verifications you need.
-3. POST scoring (curl to `/scoring`).
-4. POST alternatives (curl to `/alternatives`, even if empty array).
-5. Emit your YAML decision (`accept` / `send_back`) as the final reply.
-
-If you reach step 5 without having executed step 3, stop and go back —
-the review is incomplete.
-
-## Alternatives (REQUIRED — must POST, even if empty)
-
-After scoring the implementation, think about whether there's a
-different way the spec could have been satisfied. Consider:
+The `alternatives` block is also **required** — pass an empty list
+(`alternatives: []`) when there are none rather than omitting the
+field. After scoring the implementation, think about whether there's
+a different way the spec could have been satisfied. Consider:
 
 - A different algorithm or data structure.
 - A different library / framework choice.
@@ -216,22 +219,18 @@ different way the spec could have been satisfied. Consider:
 - A different file or module to land the change in.
 
 For every viable alternative you can describe **concretely** (not
-hand-wavy "we could use a different pattern"), POST one entry to
-`/api/tasks/<id>/alternatives` with `set_by: "reviewer-coder"`. Score
-each on the same five axes as the implementation, and assign a verdict:
+hand-wavy "we could use a different pattern"), include one entry in
+the `alternatives` list. Score each on the same five axes as the
+implementation, and assign a verdict:
 
 - `better` — you'd recommend this over the shipped diff.
 - `equal` — different shape, same trade-offs in aggregate.
 - `worse` — explored but inferior; useful for the user to see why.
 
-Cap at 3 alternatives — past that you're padding. If no alternative
-clears your "concrete enough to describe" bar, post the request with
-an empty `alternatives: []` array; that wipes any stale entries from
-prior passes and tells the UI "the implementation is the only sensible
-shape here". Don't fabricate options to fill slots.
-
-The exact request format is in the common protocols section of your
-system prompt.
+Cap at 3 alternatives — past that you're padding. Don't fabricate
+options to fill slots; an empty list is a real, useful answer. The
+orchestrator wipes any prior alternatives and replaces them with
+whatever you submit on this pass.
 
 ## Anti-patterns
 
