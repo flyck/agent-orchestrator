@@ -4,6 +4,8 @@ Local-first, human-first multi-agent dashboard for engineering work. Focuses on 
 switches, maximizing parallelism, bundling related tasks, and silently preparing unrelated PR
 reviews.
 
+## Motivation
+
 It is based on these core observations:
 - Context switches need to be minimized
 - Good Reviews need sharp coding skills from agent-free coding.
