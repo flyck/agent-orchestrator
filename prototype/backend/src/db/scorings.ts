@@ -62,3 +62,25 @@ export function listScoring(taskId: string, handle: Database = db()): TaskScorin
     )
     .all(taskId);
 }
+
+/** Latest score per (task, dimension) for a list of tasks. Powers the
+ *  per-card complexity chip on the home pipeline — cheap one-shot vs.
+ *  fanning out N getScoring calls from the frontend. */
+export function listScoringSummary(
+  taskIds: string[],
+  handle: Database = db(),
+): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  if (taskIds.length === 0) return out;
+  const placeholders = taskIds.map(() => "?").join(",");
+  const rows = handle
+    .query<{ task_id: string; dimension: string; score: number }, never[]>(
+      `SELECT task_id, dimension, score FROM task_scorings WHERE task_id IN (${placeholders})`,
+    )
+    .all(...(taskIds as never[]));
+  for (const r of rows) {
+    if (!out[r.task_id]) out[r.task_id] = {};
+    out[r.task_id]![r.dimension] = r.score;
+  }
+  return out;
+}

@@ -10,26 +10,31 @@ import {
   listTasks,
   markAbandoned,
   setNeedsFeedback,
+  setProposedCommitMessage,
   setTaskDifficulty,
   setTaskProgress,
   setUserRating,
   TaskStatus,
+  TERMINAL_STATUSES,
   updateTaskSpec,
   updateTaskStatus,
   type TaskWorkspace,
 } from "../db/tasks";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
-import { listScoring, upsertScoring } from "../db/scorings";
+import { listScoring, listScoringSummary, upsertScoring } from "../db/scorings";
 import { listReviewsForTask } from "../db/reviews";
 import { listForTask as listAlternativesForTask, replaceForTask as replaceAlternatives } from "../db/alternatives";
 import { listPhaseOutputs } from "../db/phaseOutputs";
+import { listEventsForTask } from "../db/usageEvents";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
-import { addListener, forceComplete, sendUserMessage, startRun, cancelRun } from "../orchestrator";
+import { addListener, forceComplete, sendUserMessage, startRun, cancelRun, tryAddListener } from "../orchestrator";
+import { requireTask, type TaskVar } from "./middleware/requireTask";
 import { snapshot as queueSnapshot, purge as queuePurge } from "../queue";
 import { finalizeTask } from "../orchestrator/finalize";
 import { scoreTask } from "../orchestrator/scoring";
+import { composeCommitMessage } from "../orchestrator/commitMessage";
 import { log } from "../log";
 
 const createSchema = z.object({
@@ -49,6 +54,14 @@ const finalizeSchema = z.object({
   strategy: z.enum(["current", "new"]),
   branch: z.string().min(1).max(80).optional(),
   message: z.string().min(1).max(2000).optional(),
+});
+
+const commitMessageSchema = z.object({
+  /** When omitted, persists null (clears the cached message). */
+  message: z.string().max(2000).nullable().optional(),
+  /** When true, fires composeCommitMessage(force=true). `message` is
+   *  ignored on regenerate. */
+  regenerate: z.boolean().optional(),
 });
 
 const progressSchema = z.object({
@@ -110,7 +123,7 @@ const alternativesSchema = z.object({
   set_by: z.string().min(1).max(80),
 });
 
-export const tasks = new Hono();
+export const tasks = new Hono<{ Variables: TaskVar }>();
 
 tasks.get("/", (c) => {
   const workspace = c.req.query("workspace") as TaskWorkspace | undefined;
@@ -121,11 +134,23 @@ tasks.get("/", (c) => {
 /** Live queue snapshot — drives a "running 2/3 · 1 queued" pipeline meter. */
 tasks.get("/queue/snapshot", (c) => c.json(queueSnapshot()));
 
-tasks.get("/:id", (c) => {
-  const t = getTask(c.req.param("id"));
-  if (!t) return c.json({ error: "not_found" }, 404);
-  return c.json(t);
+/** Latest scoring axes per task for a batch of task ids. Powers the
+ *  per-card complexity chip on the home pipeline. Body is
+ *  {task_ids: string[]} (POST so url length doesn't blow up). */
+tasks.post("/scorings/summary", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const ids = Array.isArray(body?.task_ids)
+    ? body.task_ids.filter((x: unknown): x is string => typeof x === "string")
+    : [];
+  return c.json({ scorings: listScoringSummary(ids) });
 });
+
+// All per-task routes go through requireTask. Routes that need the row
+// read from c.var.task; the explicit getTask() boilerplate is gone.
+tasks.use("/:id", requireTask);
+tasks.use("/:id/*", requireTask);
+
+tasks.get("/:id", (c) => c.json(c.var.task));
 
 tasks.post("/", async (c) => {
   const body = await c.req.json().catch(() => null);
@@ -145,9 +170,7 @@ tasks.post("/", async (c) => {
 });
 
 tasks.post("/:id/run", async (c) => {
-  const id = c.req.param("id");
-  const t = getTask(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
   log.info("api.tasks.run", { id });
   try {
     const r = await startRun(id);
@@ -167,9 +190,8 @@ tasks.post("/:id/run", async (c) => {
 });
 
 tasks.delete("/:id", async (c) => {
-  const id = c.req.param("id");
-  const t = getTask(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
+  const t = c.var.task;
   // If active, abort first so the engine session releases cleanly.
   try {
     await cancelRun(id);
@@ -214,7 +236,6 @@ tasks.delete("/:id", async (c) => {
  */
 tasks.post("/:id/progress", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = progressSchema.safeParse(body);
   if (!parsed.success) {
@@ -235,9 +256,7 @@ tasks.post("/:id/progress", async (c) => {
  * orchestrator run that prepends the previous spec + the user's message.
  */
 tasks.post("/:id/continue", async (c) => {
-  const id = c.req.param("id");
-  const task = getTask(id);
-  if (!task) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
   const body = await c.req.json().catch(() => null);
   const parsed = continueSchema.safeParse(body);
   if (!parsed.success) {
@@ -262,7 +281,6 @@ tasks.post("/:id/continue", async (c) => {
 /** Agent signals it cannot proceed without user input. */
 tasks.post("/:id/needs-feedback", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = needsFeedbackSchema.safeParse(body);
   if (!parsed.success) {
@@ -279,7 +297,6 @@ tasks.post("/:id/needs-feedback", async (c) => {
  */
 tasks.post("/:id/difficulty", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = difficultySchema.safeParse(body);
   if (!parsed.success) {
@@ -299,7 +316,6 @@ tasks.post("/:id/difficulty", async (c) => {
  *  or when the user has edited calibration and wants a fresh score. */
 tasks.post("/:id/rescore", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   log.info("api.tasks.rescore_requested", { id });
   // Fire-and-forget so the request returns fast.
   scoreTask(id).catch((err) =>
@@ -311,7 +327,6 @@ tasks.post("/:id/rescore", async (c) => {
 /** User dismissed the feedback request without giving feedback. */
 tasks.post("/:id/clear-feedback", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json(clearNeedsFeedback(id));
 });
 
@@ -325,7 +340,6 @@ tasks.post("/:id/clear-feedback", async (c) => {
  */
 tasks.put("/:id/spec", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = specSchema.safeParse(body);
   if (!parsed.success) {
@@ -339,7 +353,6 @@ tasks.put("/:id/spec", async (c) => {
 /** Newest-first list of past spec revisions for this task. */
 tasks.get("/:id/revisions", (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ revisions: listSpecRevisions(id) });
 });
 
@@ -350,9 +363,8 @@ tasks.get("/:id/revisions", (c) => {
  * treats absence as "no notes".
  */
 tasks.get("/:id/notes", async (c) => {
-  const id = c.req.param("id");
-  const t = getTask(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
+  const t = c.var.task;
   if (!t.worktree_path) return c.json({ exists: false, content: null });
   const { existsSync, readFileSync } = await import("node:fs");
   const { join } = await import("node:path");
@@ -374,7 +386,6 @@ tasks.get("/:id/notes", async (c) => {
  */
 tasks.get("/:id/alternatives", (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ alternatives: listAlternativesForTask(id) });
 });
 
@@ -389,7 +400,6 @@ tasks.get("/:id/alternatives", (c) => {
  */
 tasks.post("/:id/alternatives", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = alternativesSchema.safeParse(body);
   if (!parsed.success) {
@@ -411,8 +421,30 @@ tasks.post("/:id/alternatives", async (c) => {
  */
 tasks.get("/:id/phase-outputs", (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ phase_outputs: listPhaseOutputs(id) });
+});
+
+/**
+ * Per-task token + cost timeline. One row per assistant-turn (one
+ * usage_event each). Drives the Tokens tab — the user sees per-step
+ * input/output and a context-growth curve.
+ */
+tasks.get("/:id/usage-events", (c) => {
+  const id = c.req.param("id");
+  const events = listEventsForTask(id);
+  // Convert micros → USD here so the frontend never deals with the
+  // integer encoding.
+  const out = events.map((e) => ({
+    id: e.id,
+    ts: e.ts,
+    session_id: e.session_id,
+    provider_id: e.provider_id,
+    model_id: e.model_id,
+    input_tokens: e.input_tokens,
+    output_tokens: e.output_tokens,
+    cost_usd: e.cost_usd_micros / 1_000_000,
+  }));
+  return c.json({ events: out });
 });
 
 /**
@@ -422,7 +454,6 @@ tasks.get("/:id/phase-outputs", (c) => {
  */
 tasks.get("/:id/reviews", (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ reviews: listReviewsForTask(id) });
 });
 
@@ -433,7 +464,6 @@ tasks.get("/:id/reviews", (c) => {
  */
 tasks.get("/:id/scoring", (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   return c.json({ scoring: listScoring(id) });
 });
 
@@ -447,7 +477,6 @@ tasks.get("/:id/scoring", (c) => {
  */
 tasks.post("/:id/scoring", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = scoringSchema.safeParse(body);
   if (!parsed.success) {
@@ -469,7 +498,6 @@ tasks.post("/:id/scoring", async (c) => {
  */
 tasks.post("/:id/rating", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = ratingSchema.safeParse(body);
   if (!parsed.success) {
@@ -486,9 +514,8 @@ tasks.post("/:id/rating", async (c) => {
  * were wired). Diff is base-scoped: working tree vs the captured base SHA.
  */
 tasks.get("/:id/diff", (c) => {
-  const id = c.req.param("id");
-  const task = getTask(id);
-  if (!task) return c.json({ error: "not_found" }, 404);
+  const task = c.var.task;
+  const id = task.id;
 
   const cwd = task.worktree_path;
   if (!cwd) {
@@ -562,15 +589,14 @@ tasks.get("/:id/diff", (c) => {
  * for the last session attached to this task.
  */
 tasks.get("/:id/transcript", async (c) => {
-  const id = c.req.param("id");
-  const task = getTask(id);
-  if (!task) return c.json({ error: "not_found" }, 404);
+  const task = c.var.task;
+  const id = task.id;
   if (!task.last_session_id) {
     return c.json({ session_id: null, messages: [] });
   }
   try {
     const engine = await getEngine();
-    const messages = await engine.getSessionMessages(task.last_session_id, 50);
+    const messages = await engine.getTranscript(task.last_session_id, 50);
     return c.json({ session_id: task.last_session_id, messages });
   } catch (err) {
     log.warn("api.tasks.transcript.failed", { id, error: String(err) });
@@ -580,7 +606,6 @@ tasks.get("/:id/transcript", async (c) => {
 
 tasks.post("/:id/force-complete", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   log.info("api.tasks.force_complete", { id });
   await forceComplete(id);
   return c.json({ ok: true });
@@ -588,7 +613,6 @@ tasks.post("/:id/force-complete", async (c) => {
 
 tasks.post("/:id/cancel", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   await cancelRun(id);
   return c.json({ ok: true });
 });
@@ -599,9 +623,8 @@ tasks.post("/:id/cancel", async (c) => {
  * after the gate. Used by the "approve direction" button in the UI.
  */
 tasks.post("/:id/gate/approve", async (c) => {
-  const id = c.req.param("id");
-  const t = getTask(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
+  const t = c.var.task;
   if (!t.awaiting_gate_id) {
     return c.json({ error: "not_at_gate", message: "Task is not paused at a gate." }, 400);
   }
@@ -626,9 +649,7 @@ tasks.post("/:id/gate/approve", async (c) => {
  * move it forward" button.
  */
 tasks.post("/:id/finish", async (c) => {
-  const id = c.req.param("id");
-  const t = getTask(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
   try {
     await cancelRun(id);
   } catch {
@@ -652,9 +673,8 @@ tasks.post("/:id/finish", async (c) => {
  * user verdict that survives reboots and gets surfaced in the metrics.
  */
 tasks.post("/:id/abandon", async (c) => {
-  const id = c.req.param("id");
-  const t = getTask(id);
-  if (!t) return c.json({ error: "not_found" }, 404);
+  const id = c.var.task.id;
+  const t = c.var.task;
   // Cancel any active run first; ignore errors — the run may already
   // be finished or never started.
   try {
@@ -668,9 +688,41 @@ tasks.post("/:id/abandon", async (c) => {
   return c.json(updated);
 });
 
+/**
+ * Read the agent-compiled (or user-edited) Conventional Commits message
+ * the task will use at finalize time. null body when the compiler hasn't
+ * run yet — finalize falls back to the task title in that case.
+ */
+tasks.get("/:id/commit-message", (c) => {
+  const id = c.req.param("id");
+  const t = getTask(id);
+  if (!t) return c.json({ error: "not_found" }, 404);
+  return c.json({ message: t.proposed_commit_message });
+});
+
+/**
+ * Persist a user-edited commit message, OR force a regeneration. The
+ * UI calls this on textarea blur (with `message`) and on the
+ * "regenerate" button (no body, triggers compose).
+ */
+tasks.post("/:id/commit-message", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = commitMessageSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_commit_message", issues: parsed.error.issues }, 400);
+  }
+  if (parsed.data.regenerate) {
+    const fresh = await composeCommitMessage(id, { force: true });
+    return c.json({ message: fresh });
+  }
+  const updated = setProposedCommitMessage(id, parsed.data.message ?? null);
+  if (!updated) return c.json({ error: "not_found" }, 404);
+  return c.json({ message: updated.proposed_commit_message });
+});
+
 tasks.post("/:id/finalize", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = finalizeSchema.safeParse(body);
   if (!parsed.success) {
@@ -690,7 +742,6 @@ tasks.post("/:id/finalize", async (c) => {
 
 tasks.post("/:id/messages", async (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
   const body = await c.req.json().catch(() => null);
   const parsed = messageSchema.safeParse(body);
   if (!parsed.success) {
@@ -705,37 +756,106 @@ tasks.post("/:id/messages", async (c) => {
 });
 
 /**
- * SSE event stream for an active task. Subscribes to the orchestrator's
- * per-task listener bus. Closes when the task terminates (the bus stops
- * pushing).
+ * SSE event stream for a task. Conceptual states the handler covers:
+ *
+ *   - queued (status=queued, not in active yet) — poll briefly for the
+ *     orchestrator to pick it up; emit `stream.attached` once we hook in.
+ *   - running (in active map) — attach immediately and forward events.
+ *   - paused (awaiting_gate_id set, or needs_feedback=1) — emit
+ *     `stream.unavailable` with a reason so the frontend knows to show
+ *     the persisted transcript instead of a "connecting…" spinner.
+ *   - closed (status in TERMINAL_STATUSES) — same: unavailable + close.
+ *
+ * Without this state-awareness, a click on a non-running task killed the
+ * SSE connection (addListener threw), the EventSource auto-reconnected,
+ * and the user thought "refresh" was needed. Now the stream always opens
+ * cleanly and explicitly tells the client what to expect.
  */
+const ATTACH_POLL_MS = 250;
+const ATTACH_MAX_MS = 5_000;
+
+function isPausedTask(t: ReturnType<typeof getTask>): boolean {
+  if (!t) return false;
+  if (t.awaiting_gate_id) return true;
+  if (t.needs_feedback === 1) return true;
+  return false;
+}
+
+function pausedReason(t: ReturnType<typeof getTask>): string {
+  if (!t) return "not_found";
+  if (TERMINAL_STATUSES.has(t.status)) return "closed";
+  if (t.awaiting_gate_id) return "awaiting_gate";
+  if (t.needs_feedback === 1) return "awaiting_feedback";
+  return "not_running";
+}
+
 tasks.get("/:id/events", (c) => {
   const id = c.req.param("id");
-  if (!getTask(id)) return c.json({ error: "not_found" }, 404);
 
   return stream(c, async (s) => {
     s.onAbort(() => {
       log.info("api.tasks.events.client_aborted", { id });
     });
 
+    // Always send `subscribed` first so the EventSource opens and the
+    // browser doesn't treat the response as failed.
+    await s.write(`data: ${JSON.stringify({ type: "subscribed", task_id: id })}\n\n`);
+
     let unsub: (() => void) | null = null;
-    try {
-      unsub = addListener(id, (ev) => {
-        const payload = `data: ${JSON.stringify({
+    const writeEvent = (payload: object): void => {
+      s.write(`data: ${JSON.stringify(payload)}\n\n`).catch(() => {
+        /* client gone */
+      });
+    };
+
+    // Phase 1: try to attach. If task isn't active yet (queued window),
+    // poll briefly. If it's paused or terminal, emit unavailable + end.
+    const attachStart = Date.now();
+    while (!s.aborted && !unsub) {
+      const fresh = getTask(id);
+      if (!fresh) {
+        writeEvent({ type: "stream.unavailable", reason: "not_found", task_id: id });
+        return;
+      }
+      if (TERMINAL_STATUSES.has(fresh.status) || isPausedTask(fresh)) {
+        writeEvent({
+          type: "stream.unavailable",
+          reason: pausedReason(fresh),
+          task_id: id,
+          status: fresh.status,
+        });
+        log.info("api.tasks.events.unavailable", {
+          id,
+          reason: pausedReason(fresh),
+        });
+        return;
+      }
+      const u = tryAddListener(id, (ev) => {
+        writeEvent({
           type: ev.type,
           ts: ev.ts,
           sessionId: ev.sessionId,
           raw: ev.raw,
-        })}\n\n`;
-        s.write(payload).catch(() => {
-          /* client gone */
         });
       });
-      log.info("api.tasks.events.subscribed", { id });
-      // Tell the client we're up.
-      await s.write(`data: ${JSON.stringify({ type: "subscribed", task_id: id })}\n\n`);
-      // Keep the stream open until the run terminates.
-      // Heartbeat every 15s so intermediaries don't kill the connection.
+      if (u) {
+        unsub = u;
+        await s.write(`data: ${JSON.stringify({ type: "stream.attached", task_id: id })}\n\n`);
+        log.info("api.tasks.events.subscribed", { id });
+        break;
+      }
+      if (Date.now() - attachStart > ATTACH_MAX_MS) {
+        writeEvent({ type: "stream.unavailable", reason: "attach_timeout", task_id: id });
+        log.info("api.tasks.events.attach_timeout", { id });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, ATTACH_POLL_MS));
+    }
+
+    // Phase 2: heartbeat until the client disconnects or the orchestrator
+    // tears down the active record. Heartbeat every 15s so intermediaries
+    // don't kill the connection.
+    try {
       while (!s.aborted) {
         await new Promise((resolve) => setTimeout(resolve, 15_000));
         if (s.aborted) break;

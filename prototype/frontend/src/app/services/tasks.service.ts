@@ -141,6 +141,9 @@ export interface Task {
   /** Timestamp the user clicked "Abandon" on this task. null = active or
    *  completed normally. Distinct from delete — the row stays. */
   abandoned_at: number | null;
+  /** Agent-compiled Conventional Commits message generated when the task
+   *  reaches Ready. null until generation completes. */
+  proposed_commit_message: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -283,6 +286,29 @@ export class TasksService {
     return this.http.post<FinalizeResult>(`/api/tasks/${id}/finalize`, input);
   }
 
+  /** Read the agent-compiled (or user-edited) Conventional Commits
+   *  message. null when the compiler hasn't run yet — finalize will
+   *  fall back to the title. */
+  getCommitMessage(id: string): Observable<{ message: string | null }> {
+    return this.http.get<{ message: string | null }>(`/api/tasks/${id}/commit-message`);
+  }
+
+  /** Persist a user-edited message (or clear with null). */
+  setCommitMessage(id: string, message: string | null): Observable<{ message: string | null }> {
+    return this.http.post<{ message: string | null }>(
+      `/api/tasks/${id}/commit-message`,
+      { message },
+    );
+  }
+
+  /** Force a fresh agent compose, replacing whatever's stored. */
+  regenerateCommitMessage(id: string): Observable<{ message: string | null }> {
+    return this.http.post<{ message: string | null }>(
+      `/api/tasks/${id}/commit-message`,
+      { regenerate: true },
+    );
+  }
+
   /** Replace the task's spec markdown. Backend appends a new
    *  spec_revisions row; the agent does NOT auto-pick this up. */
   updateSpec(id: string, spec: string): Observable<Task> {
@@ -320,6 +346,23 @@ export class TasksService {
     );
   }
 
+  /** Per-task token + cost timeline for the Tokens tab. One row per
+   *  assistant-turn — input/output tokens and cost per "step". */
+  getUsageEvents(id: string): Observable<{ events: UsageEventRow[] }> {
+    return this.http.get<{ events: UsageEventRow[] }>(`/api/tasks/${id}/usage-events`);
+  }
+
+  /** Latest scoring axes for many tasks at once. Used by the home
+   *  pipeline to render a complexity chip on each card. */
+  scoringsSummary(taskIds: string[]): Observable<{
+    scorings: Record<string, Record<string, number>>;
+  }> {
+    return this.http.post<{ scorings: Record<string, Record<string, number>> }>(
+      `/api/tasks/scorings/summary`,
+      { task_ids: taskIds },
+    );
+  }
+
   /** Read the task's radar-chart scoring (per-axis rows). */
   getScoring(id: string): Observable<{ scoring: TaskScoringRow[] }> {
     return this.http.get<{ scoring: TaskScoringRow[] }>(`/api/tasks/${id}/scoring`);
@@ -347,6 +390,19 @@ export interface TaskPhaseOutputRow {
   agent_slug: string;
   output_md: string;
   created_at: number;
+}
+
+/** One usage_event row, surfaced to the Tokens tab. cost_usd is the
+ *  decoded JS number (backend stores micros). */
+export interface UsageEventRow {
+  id: number;
+  ts: number;
+  session_id: string | null;
+  provider_id: string;
+  model_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
 }
 
 export interface TaskScoringRow {
