@@ -1298,6 +1298,21 @@ export async function cancelRun(taskId: string): Promise<void> {
 const WATCHDOG_STALE_MS = 30_000;
 const WATCHDOG_INTERVAL_MS = 15_000;
 
+/** Anthropic stop_reason values that actually mean the assistant turn
+ *  ended. `tool_use` is NOT in this set — it means the LLM produced a
+ *  tool_use block as its last action and is waiting for the tool result.
+ *  A long-running tool call (a file scan, a multi-step edit) can easily
+ *  exceed the 30s silence threshold; treating tool_use as terminal would
+ *  force-complete a task that's actually mid-edit and leave the worktree
+ *  empty (observed: tsk_TF5ye38m_TDRUDpa, 2026-04-29 — empty diff +
+ *  empty_diff commit because watchdog killed both code-phase attempts). */
+const TERMINAL_FINISH_REASONS = new Set([
+  "end_turn",
+  "stop",
+  "stop_sequence",
+  "max_tokens",
+]);
+
 async function watchdogTick(): Promise<void> {
   const now = Date.now();
   for (const a of [...active.values()]) {
@@ -1314,7 +1329,11 @@ async function watchdogTick(): Promise<void> {
       }>;
       const last = messages.at(-1);
       const lastInfo = last?.info;
-      if (lastInfo?.role === "assistant" && (lastInfo.finish || lastInfo.error)) {
+      const isTerminalFinish =
+        !!lastInfo?.error ||
+        (typeof lastInfo?.finish === "string" &&
+          TERMINAL_FINISH_REASONS.has(lastInfo.finish));
+      if (lastInfo?.role === "assistant" && isTerminalFinish) {
         log.warn("orchestrator.watchdog.recovered", {
           taskId: a.taskId,
           phase: a.phase,
@@ -1327,7 +1346,11 @@ async function watchdogTick(): Promise<void> {
         a.watchdogRecovered = true;
         await forceComplete(a.taskId);
       } else {
-        log.info("orchestrator.watchdog.still_working", { taskId: a.taskId });
+        log.info("orchestrator.watchdog.still_working", {
+          taskId: a.taskId,
+          finish: lastInfo?.finish ?? null,
+          hadError: !!lastInfo?.error,
+        });
       }
     } catch (err) {
       log.warn("orchestrator.watchdog.poll_failed", {
