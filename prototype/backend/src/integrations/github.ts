@@ -298,3 +298,69 @@ export async function fetchPullDiff(
   }
   return res.text();
 }
+
+export interface GithubIssue {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  state_reason: string | null;
+  html_url: string;
+  body: string | null;
+  // GitHub returns issues AND PRs from the issues endpoint; this field is
+  // present (and truthy) when the record is actually a PR. Callers that
+  // only want true issues should check this.
+  pull_request?: { url: string } | undefined;
+}
+
+/**
+ * Fetch a single issue (or PR — they share the issues endpoint). The
+ * caller decides whether to filter PR-shaped issues out via
+ * `pull_request`. Used by the suggestion generator to check whether a
+ * task-linked issue is still open at completion time.
+ */
+export async function fetchIssue(
+  token: string,
+  repoFullName: string,
+  issueNumber: number,
+): Promise<GithubIssue> {
+  return ghJson<GithubIssue>(`/repos/${repoFullName}/issues/${issueNumber}`, token);
+}
+
+/**
+ * Parse a user-supplied issue reference into `{repo?, number}`. Accepts:
+ *   - "#142"                                  → {number: 142}
+ *   - "142"                                   → {number: 142}
+ *   - "owner/name#142"                        → {repo: "owner/name", number: 142}
+ *   - "https://github.com/owner/name/issues/142"
+ *   - "https://github.com/owner/name/pull/142"  (PR also a valid issue id)
+ *
+ * Returns null when the input doesn't look like an issue reference.
+ */
+export function parseIssueRef(
+  input: string,
+): { repo: string | null; number: number } | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  // URL form
+  const urlMatch = trimmed.match(
+    /^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/(?:issues|pull)\/(\d+)\b/,
+  );
+  if (urlMatch && urlMatch[1] && urlMatch[2]) {
+    return { repo: urlMatch[1], number: Number.parseInt(urlMatch[2], 10) };
+  }
+
+  // owner/name#N
+  const repoRefMatch = trimmed.match(/^([^/\s]+\/[^/\s#]+)#(\d+)$/);
+  if (repoRefMatch && repoRefMatch[1] && repoRefMatch[2]) {
+    return { repo: repoRefMatch[1], number: Number.parseInt(repoRefMatch[2], 10) };
+  }
+
+  // bare #N or N
+  const bareMatch = trimmed.match(/^#?(\d+)$/);
+  if (bareMatch && bareMatch[1]) {
+    return { repo: null, number: Number.parseInt(bareMatch[1], 10) };
+  }
+
+  return null;
+}

@@ -22,6 +22,7 @@ const patchSchema = z.object({
   emacs_open_command: z.string().optional(),
   magit_open_command: z.string().optional(),
   pr_review_poll_interval_minutes: z.number().int().min(0).max(1440).optional(),
+  suggestions_enabled: z.boolean().optional(),
 });
 
 export const settings = new Hono();

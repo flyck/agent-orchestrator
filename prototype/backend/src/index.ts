@@ -4,6 +4,7 @@ import { syncAgentsFromDisk } from "./agents/sync";
 import { installCrashHandlers, log } from "./log";
 import { bootScan as queueBootScan } from "./queue";
 import { resumeQueuedTasks, startWatchdog } from "./orchestrator";
+import { startGithubPoller } from "./orchestrator/githubPoller";
 
 installCrashHandlers();
 
@@ -12,6 +13,7 @@ db();
 
 queueBootScan();
 startWatchdog();
+startGithubPoller();
 
 const sync = syncAgentsFromDisk();
 log.info("agents.sync", {

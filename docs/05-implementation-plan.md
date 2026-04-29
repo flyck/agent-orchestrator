@@ -231,6 +231,21 @@ caps at 3 parallel sessions due to upstream
 ([anthropics/claude-code#28829](https://github.com/anthropics/claude-code/issues/28829))
 file-corruption bugs.
 
+## Phase 18 — Suggested next steps (history source)
+
+Spec'd in [`15-integrations-and-suggested-next.md`](15-integrations-and-suggested-next.md). v1 of v1 ships only the **history** source — the GitHub-integration and BACKLOG-scan sources land later.
+
+When a task transitions to Done, the orchestrator scans recent (≤30d) completed tasks in the same `repo_path` for spec lines that look like deferred work — `TODO`, `FIXME`, `out of scope`, `deferred`, `next iteration`, `vN`. Up to 5 surface as suggestions on the Review tab. The user pins (sends to a future "Up next" feed) or dismisses; suggestions are never auto-converted to tasks.
+
+Files:
+- `db/suggestions.ts` — repo (create / list-for-task / list-pinned / set-status / dedupe).
+- `orchestrator/suggestions.ts` — pattern-based extractor + generator. Hooks into `finalizeTask` on Done.
+- `api/suggestions.ts` — `GET /api/tasks/:id/suggestions`, `PUT /api/tasks/:id/suggestions/:sid`, `GET /api/suggestions/pinned`.
+- Frontend: `services/suggestions.service.ts`, panel on the Review tab when a task is Done/Ready/Finalize.
+- Setting: `suggestions_enabled` (default true) — generator no-ops when off.
+
+Out of scope for this phase: the dashboard "Up next" feed (the `/pinned` endpoint exists but no UI yet); GitHub-integration source; BACKLOG-file scan source; cross-repo bleed.
+
 ## Out of scope for v1 (explicit)
 
 - GitHub/GitLab PR ingestion or comment posting.

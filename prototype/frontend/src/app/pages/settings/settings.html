@@ -67,6 +67,13 @@
                [ngModel]="s.pr_review_poll_interval_minutes"
                (ngModelChange)="setDraft('pr_review_poll_interval_minutes', $event)" />
       </label>
+
+      <label class="check">
+        <input type="checkbox"
+               [ngModel]="s.suggestions_enabled"
+               (ngModelChange)="setDraft('suggestions_enabled', $event)" />
+        <span>Surface suggested next steps when a task completes</span>
+      </label>
     </div>
   </section>
 

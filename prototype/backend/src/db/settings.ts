@@ -21,6 +21,7 @@ export interface Settings {
   emacs_open_command: string;
   magit_open_command: string;
   pr_review_poll_interval_minutes: number;
+  suggestions_enabled: boolean;
 }
 
 const NUMBER_KEYS = new Set<keyof Settings>([
@@ -41,7 +42,10 @@ const NULLABLE_NUMBER_KEYS = new Set<keyof Settings>([
   "background_token_budget_usd_per_day",
 ]);
 
-const BOOLEAN_KEYS = new Set<keyof Settings>(["repo_context_enabled"]);
+const BOOLEAN_KEYS = new Set<keyof Settings>([
+  "repo_context_enabled",
+  "suggestions_enabled",
+]);
 
 function parseValue<K extends keyof Settings>(key: K, raw: string): Settings[K] {
   if (NUMBER_KEYS.has(key)) return Number(raw) as Settings[K];

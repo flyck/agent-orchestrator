@@ -22,6 +22,7 @@ export interface Settings {
   emacs_open_command: string;
   magit_open_command: string;
   pr_review_poll_interval_minutes: number;
+  suggestions_enabled: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
