@@ -177,15 +177,25 @@ export async function openReviewerSession(
 }
 
 /** Build the system prompt the reviewer session uses. Combines the
- *  shared protocols (passed in as a renderer) with the reviewer body. */
+ *  shared protocols (passed in as a renderer) with the reviewer body.
+ *  The reviewer body has `{{TASK_ID}}` / `{{BASE_URL}}` placeholders for
+ *  its scoring + alternatives curl examples — substitute them here, or
+ *  the agent sees the literal braces and the curl request 404s, which
+ *  silently breaks the radar chart and alternatives list. */
 export function buildReviewerSystemPrompt(
   baseSharedPrompt: string,
+  taskId: string,
+  baseUrl: string,
 ): string {
+  const reviewerBody = REVIEWER_PROMPT.replaceAll("{{TASK_ID}}", taskId).replaceAll(
+    "{{BASE_URL}}",
+    baseUrl,
+  );
   return `${baseSharedPrompt}
 
 ---
 
-${REVIEWER_PROMPT}`;
+${reviewerBody}`;
 }
 
 export const Confidence = {

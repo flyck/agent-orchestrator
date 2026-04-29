@@ -161,18 +161,38 @@ prefer to drop them.
 You **must** POST a scoring to `{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring`
 **before** you emit your YAML decision. This is not optional. The user's
 dashboard renders a radar chart from these axes; without your POST the
-chart stays blank and the review looks half-done.
+chart stays blank and the review looks half-done. Skipping this step
+counts as a failed review on your end.
 
-Use `set_by: "reviewer-coder"`. Score all five axes (complexity,
-involved_parts, lines_of_code, user_benefit, maintainability) on 1–10.
-Keep each rationale to one short sentence. The exact request format is in
-the common protocols section of your system prompt.
+Use your bash / curl tool to send the request. The expected shape:
+
+```bash
+curl -s -X POST "{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "set_by": "reviewer-coder",
+    "scores": {
+      "complexity":     { "value": 4, "rationale": "one short sentence" },
+      "involved_parts": { "value": 2, "rationale": "one short sentence" },
+      "lines_of_code":  { "value": 3, "rationale": "one short sentence" },
+      "user_benefit":   { "value": 6, "rationale": "one short sentence" },
+      "maintainability":{ "value": 5, "rationale": "one short sentence" }
+    }
+  }'
+```
+
+All five axes (complexity, involved_parts, lines_of_code, user_benefit,
+maintainability) must be present, each on 1–10 with a one-sentence
+rationale. Confirm the response is `{"scoring":[…]}` (HTTP 200) before
+you proceed; if you see a 400/500, re-read the body and try once more.
 
 Score what you actually see in the diff — not what the spec asked for,
-not what the coder claimed. If the diff is empty, score user_benefit and
-the size axes as 1; complexity and maintainability as the lowest
-plausible value (1–2). Send the scoring even when you `send_back`; it
-gets refreshed on the next review pass.
+not what the coder claimed. If the diff is empty, score user_benefit
+and the size axes as 1; complexity and maintainability as the lowest
+plausible value (1–2). **Send the scoring even when you `send_back`** —
+the dashboard reflects the latest review pass, and skipping the POST
+because "I'm sending back anyway" is the most common way the radar ends
+up blank.
 
 **Order matters.** The expected sequence on every review pass is:
 

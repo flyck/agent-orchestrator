@@ -62,6 +62,7 @@ import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
 import {
   ambientContext,
+  backendUrl,
   buildInitialMessage,
   buildSystemPrompt,
   renderSharedPrompt,
@@ -1228,6 +1229,8 @@ async function switchToReviewer(a: ActiveTask, task: TaskRow): Promise<void> {
   });
   const systemPrompt = buildReviewerSystemPrompt(
     renderSharedPrompt(taskId, cwd) + ambientContext(cwd),
+    taskId,
+    backendUrl(),
   );
   await session.send(message, { system: systemPrompt });
   log.info("orchestrator.reviewer.message_sent", {

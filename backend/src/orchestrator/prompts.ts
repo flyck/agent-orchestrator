@@ -14,7 +14,10 @@ import { listSkills, renderSkillsSection } from "./skills";
 import { renderRepoContext } from "./repoContext";
 import type { TaskRow } from "../db/tasks";
 
-function backendUrl(): string {
+/** The local backend URL agents curl into for /scoring, /alternatives,
+ *  /progress, etc. Exported so non-shared prompts (e.g. reviewer body)
+ *  can substitute {{BASE_URL}} the same way the shared template does. */
+export function backendUrl(): string {
   const port = Number(process.env.PORT ?? 3000);
   return `http://localhost:${port}`;
 }
