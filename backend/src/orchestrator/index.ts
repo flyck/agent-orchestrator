@@ -68,6 +68,10 @@ import {
   renderSharedPrompt,
 } from "./prompts";
 import { recordUsageEvent } from "../db/usageEvents";
+import {
+  recordPhaseSessionClose,
+  recordPhaseSessionOpen,
+} from "../db/phaseSessions";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { appendReview } from "../db/reviews";
 import { log } from "../log";
@@ -326,6 +330,15 @@ async function startRunInternal(
       });
     }
     setLastSessionId(taskId, session.id);
+    // Record the (task, phase, agent) → session mapping that drives the
+    // per-agent detail tabs. Pipeline runs replace this placeholder with
+    // their own per-phase session, so we only record here for the
+    // legacy plan/code paths. The placeholder gets a phase row anyway
+    // so the UI doesn't render an unlabelled session.
+    if (!usePipeline) {
+      const initialAgent = startInPlan ? "plan-coder" : "coder";
+      recordPhaseSessionOpen(taskId, initialPhase, initialAgent, session.id);
+    }
     log.info("orchestrator.run.session_opened", {
       taskId,
       sessionId: session.id,
@@ -584,8 +597,11 @@ async function pumpUntilTerminal(a: ActiveTask): Promise<PumpResult> {
 }
 
 /** Best-effort session close. Errors are swallowed (logged) so they
- *  can't poison the lifecycle controller's branch decisions. */
+ *  can't poison the lifecycle controller's branch decisions. Also
+ *  stamps ended_at on the task_phase_sessions row so the detail-tab UI
+ *  knows this cycle is done. */
 async function safeClose(session: EngineSession, taskId: string, why: string): Promise<void> {
+  recordPhaseSessionClose(session.id, why);
   try {
     await session.close();
   } catch (e) {
@@ -822,6 +838,7 @@ async function runPipelineAgent(
     cwd: task.worktree_path ?? undefined,
   });
   setLastSessionId(taskId, session.id);
+  recordPhaseSessionOpen(taskId, phase.id, agentSlug, session.id);
   a.session = session;
   a.lastEventTs = Date.now();
   setTaskProgress(taskId, { step: null, total: null, label: null });
@@ -1216,6 +1233,7 @@ async function switchToReviewer(a: ActiveTask, task: TaskRow): Promise<void> {
   const taskId = task.id;
   const session = await openReviewerSession(task, taskId, buildSystemPrompt);
   setLastSessionId(taskId, session.id);
+  recordPhaseSessionOpen(taskId, "review", "reviewer-coder", session.id);
   a.session = session;
   a.phase = "review";
   a.lastEventTs = Date.now();
@@ -1256,6 +1274,7 @@ async function switchToCoder(a: ActiveTask, task: TaskRow, feedback?: string): P
     cwd: task.worktree_path ?? undefined,
   });
   setLastSessionId(taskId, session.id);
+  recordPhaseSessionOpen(taskId, "code", "coder", session.id);
   a.session = session;
   a.phase = "code";
   a.lastEventTs = Date.now();

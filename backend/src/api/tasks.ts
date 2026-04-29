@@ -26,6 +26,7 @@ import { listScoring, listScoringSummary, upsertScoring } from "../db/scorings";
 import { listReviewsForTask } from "../db/reviews";
 import { listForTask as listAlternativesForTask, replaceForTask as replaceAlternatives } from "../db/alternatives";
 import { listPhaseOutputs } from "../db/phaseOutputs";
+import { getPhaseSession, listPhaseSessions } from "../db/phaseSessions";
 import { listEventsForTask } from "../db/usageEvents";
 import { getEngine } from "../engine/singleton";
 import { spawnSync } from "node:child_process";
@@ -429,23 +430,46 @@ tasks.get("/:id/phase-outputs", (c) => {
  * Per-task token + cost timeline. One row per assistant-turn (one
  * usage_event each). Drives the Tokens tab — the user sees per-step
  * input/output and a context-growth curve.
+ *
+ * Each row is annotated with the agent_slug + phase_id of its session
+ * (joined via task_phase_sessions) so the Tokens tab can show "which
+ * agent burned this much" without the frontend needing a second fetch.
  */
 tasks.get("/:id/usage-events", (c) => {
   const id = c.req.param("id");
   const events = listEventsForTask(id);
-  // Convert micros → USD here so the frontend never deals with the
-  // integer encoding.
-  const out = events.map((e) => ({
-    id: e.id,
-    ts: e.ts,
-    session_id: e.session_id,
-    provider_id: e.provider_id,
-    model_id: e.model_id,
-    input_tokens: e.input_tokens,
-    output_tokens: e.output_tokens,
-    cost_usd: e.cost_usd_micros / 1_000_000,
-  }));
+  // Build a session_id → phase_session lookup once. listPhaseSessions
+  // is bounded by the per-task session count, which is small.
+  const sessionLookup = new Map<string, { phase_id: string; agent_slug: string }>();
+  for (const s of listPhaseSessions(id)) {
+    sessionLookup.set(s.session_id, { phase_id: s.phase_id, agent_slug: s.agent_slug });
+  }
+  const out = events.map((e) => {
+    const sess = e.session_id ? sessionLookup.get(e.session_id) ?? null : null;
+    return {
+      id: e.id,
+      ts: e.ts,
+      session_id: e.session_id,
+      provider_id: e.provider_id,
+      model_id: e.model_id,
+      input_tokens: e.input_tokens,
+      output_tokens: e.output_tokens,
+      cost_usd: e.cost_usd_micros / 1_000_000,
+      phase_id: sess?.phase_id ?? null,
+      agent_slug: sess?.agent_slug ?? null,
+    };
+  });
   return c.json({ events: out });
+});
+
+/**
+ * Per-task list of agent sessions, in chronological order. Drives the
+ * dynamic Planner / Coder / Reviewer / repeated-cycle detail tabs and
+ * the agent-name lookup the Tokens tab uses.
+ */
+tasks.get("/:id/phase-sessions", (c) => {
+  const id = c.req.param("id");
+  return c.json({ phase_sessions: listPhaseSessions(id) });
 });
 
 /**
@@ -592,16 +616,30 @@ tasks.get("/:id/diff", (c) => {
 tasks.get("/:id/transcript", async (c) => {
   const task = c.var.task;
   const id = task.id;
-  if (!task.last_session_id) {
+  // Optional ?session_id= scopes the fetch to a specific phase session
+  // (drives the per-agent detail tabs). Without it, we fall back to
+  // last_session_id for the legacy "show me whatever was last" caller.
+  const requested = c.req.query("session_id");
+  let sessionId: string | null = null;
+  if (requested) {
+    const sess = getPhaseSession(requested);
+    if (!sess || sess.task_id !== id) {
+      return c.json({ error: "session_not_for_task" }, 404);
+    }
+    sessionId = sess.session_id;
+  } else {
+    sessionId = task.last_session_id ?? null;
+  }
+  if (!sessionId) {
     return c.json({ session_id: null, messages: [] });
   }
   try {
     const engine = await getEngine();
-    const messages = await engine.getTranscript(task.last_session_id, 50);
-    return c.json({ session_id: task.last_session_id, messages });
+    const messages = await engine.getTranscript(sessionId, 200);
+    return c.json({ session_id: sessionId, messages });
   } catch (err) {
     log.warn("api.tasks.transcript.failed", { id, error: String(err) });
-    return c.json({ session_id: task.last_session_id, messages: [], error: String(err) }, 200);
+    return c.json({ session_id: sessionId, messages: [], error: String(err) }, 200);
   }
 });
 

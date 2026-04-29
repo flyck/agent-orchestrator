@@ -352,3 +352,21 @@ CREATE TABLE IF NOT EXISTS task_issue_links (
 
 CREATE INDEX IF NOT EXISTS idx_task_issue_links_task  ON task_issue_links(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_issue_links_issue ON task_issue_links(repo, issue_number);
+
+-- One row per engine session opened by the orchestrator on behalf of a
+-- task. Drives the per-agent detail tabs (Planner / Coder / Reviewer
+-- + repeated #2/#3 cycles) and the Tokens tab's agent column. The
+-- previously-declared sessions / agent_runs tables stayed unwritten;
+-- this table is what's actually populated. Kept narrow on purpose —
+-- transcripts live on the engine side, fetched on demand by session id.
+CREATE TABLE IF NOT EXISTS task_phase_sessions (
+  session_id   TEXT PRIMARY KEY,
+  task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  phase_id     TEXT NOT NULL,         -- plan | code | review | <pipeline phase>
+  agent_slug   TEXT NOT NULL,         -- plan-coder | coder | reviewer-coder | …
+  started_at   INTEGER NOT NULL,
+  ended_at     INTEGER,
+  ended_reason TEXT                   -- idle | error | force_completed | canceled
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_phase_sessions_task ON task_phase_sessions(task_id, started_at);

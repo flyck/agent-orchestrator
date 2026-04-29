@@ -352,70 +352,33 @@
     </div>
 
     <!-- ─── In-card tab nav ────────────────────────────────────────── -->
+    <!-- Tabs are now driven by detailTabs() — Spec, then one tab per
+         agent session (Planner / Coder / Reviewer / repeated cycles
+         like "Coder #2"), then Live + Review + Tokens + Files. -->
     <nav class="detail-tabs">
-      <button type="button"
-              class="detail-tab"
-              [class.active]="detailTab() === 'spec'"
-              (click)="setDetailTab('spec')">
-        Spec
-      </button>
-      <!-- Planner tab: visible only after the planner has written
-           .agent-notes/<id>.md. Hidden on tasks that haven't reached
-           the planner yet (and on PR-review tasks, where the pipeline
-           runner doesn't write this notes file). -->
-      @if (notesContent()) {
+      @for (tab of detailTabs(); track tab.id) {
         <button type="button"
                 class="detail-tab"
-                [class.active]="detailTab() === 'planner'"
-                (click)="setDetailTab('planner')">
-          Planner
+                [class.active]="detailTab() === tab.id"
+                (click)="setDetailTab(tab.id)">
+          {{ tab.label }}
+          @if (tab.id === 'live' && streamConnected()) {
+            <span class="dot running"></span>
+          }
+          @if (tab.id === 'review' && reviews().length > 0) {
+            <span class="meta">{{ reviews().length }}</span>
+          }
+          @if (tab.id === 'tokens' && usageEvents().length > 0) {
+            <span class="meta">{{ usageEvents().length }}</span>
+          }
+          @if (tab.id === 'files' && diff() && diff()!.files.length > 0) {
+            <span class="meta">{{ diff()!.files.length }}</span>
+          }
+          @if (tab.badge) {
+            <span class="meta">{{ tab.badge }}</span>
+          }
         </button>
       }
-      <!-- Coder tab: visible once the coder has produced a reply for this
-           task's most recent code phase. Mirrors the Planner tab — hidden
-           until there's something to show. -->
-      @if (coderOutput()) {
-        <button type="button"
-                class="detail-tab"
-                [class.active]="detailTab() === 'coder'"
-                (click)="setDetailTab('coder')">
-          Coder
-        </button>
-      }
-      <button type="button"
-              class="detail-tab"
-              [class.active]="detailTab() === 'stream'"
-              (click)="setDetailTab('stream')">
-        Stream
-        @if (streamConnected()) { <span class="dot running"></span> }
-      </button>
-      <button type="button"
-              class="detail-tab"
-              [class.active]="detailTab() === 'review'"
-              (click)="setDetailTab('review')">
-        Review
-        @if (reviews().length > 0) {
-          <span class="meta">{{ reviews().length }}</span>
-        }
-      </button>
-      <button type="button"
-              class="detail-tab"
-              [class.active]="detailTab() === 'tokens'"
-              (click)="setDetailTab('tokens'); refreshUsageEvents(sel.raw.id)">
-        Tokens
-        @if (usageEvents().length > 0) {
-          <span class="meta">{{ usageEvents().length }}</span>
-        }
-      </button>
-      <button type="button"
-              class="detail-tab"
-              [class.active]="detailTab() === 'files'"
-              (click)="setDetailTab('files')">
-        Files
-        @if (diff() && diff()!.files.length > 0) {
-          <span class="meta">{{ diff()!.files.length }}</span>
-        }
-      </button>
     </nav>
 
     <!-- ═══ Spec tab ═══════════════════════════════════════════════ -->
@@ -521,64 +484,62 @@
 
     }
 
-    <!-- ═══ Planner tab ═══════════════════════════════════════════ -->
-    <!-- The planner agent writes .agent-notes/<id>.md, which the coder
-         reads on its first turn before doing its own discovery. The
-         notes file IS the planner→coder handoff — surfacing it here
-         lets the user see exactly what context the coder picked up.
-         Tab is hidden when this file doesn't exist (see the tab nav). -->
-    @if (detailTab() === 'planner') {
-      @if (notesContent()) {
-        <section class="notes-section">
-          <header class="notes-head">
-            <p class="meta">execution context · written by the planner</p>
-            @if (notesPath()) {
-              <span class="meta mono notes-path">{{ notesPath() }}</span>
+    <!-- ═══ Per-agent session tab ════════════════════════════════ -->
+    <!-- One of these renders for every task_phase_sessions row — the
+         tab id is `session:<session_id>`. Shows the persisted
+         transcript for that one agent run, with a header describing
+         which agent / when / how it ended. -->
+    @let sess = selectedPhaseSession();
+    @if (sess) {
+      <section class="notes-section">
+        <header class="notes-head">
+          <p class="meta">
+            {{ sess.agent_slug }} · started {{ relativeTs(sess.started_at) }}
+            @if (sess.ended_at) {
+              · ended {{ relativeTs(sess.ended_at) }}
+              @if (sess.ended_reason) { ({{ sess.ended_reason }}) }
+            } @else {
+              · still running
             }
-            <button type="button"
-                    class="meta-action"
-                    (click)="refreshNotes(sel.raw.id)"
-                    title="Re-read the file from disk">
-              refresh
-            </button>
-          </header>
-          <p class="muted small notes-handoff">
-            The coder reads this file before its own discovery — it's the bridge between plan
-            and edit. Updates here after each planner pass.
           </p>
-          <pre class="notes-body mono">{{ notesContent() }}</pre>
-        </section>
-      } @else {
-        <p class="muted small">The planner hasn't written its notes for this task yet.</p>
-      }
+          <span class="meta mono notes-path">{{ sess.session_id }}</span>
+        </header>
+        <p class="muted small notes-handoff">
+          Persisted transcript for this agent's run. Live tab mirrors the currently active
+          phase; this view keeps every cycle browsable after the fact.
+        </p>
+        @if (sessionTranscriptLoading().has(sess.session_id) &&
+             !sessionTranscripts().has(sess.session_id)) {
+          <p class="muted small">Loading transcript…</p>
+        } @else {
+          @let lines = sessionTranscripts().get(sess.session_id) ?? [];
+          @if (lines.length === 0) {
+            <p class="muted small">
+              No transcript available — the engine may have reaped this session, or it
+              produced no assistant text.
+            </p>
+          } @else {
+            <div class="transcript">
+              @for (line of lines; track $index) {
+                <article class="transcript-line" [attr.data-role]="line.role">
+                  <header class="transcript-head meta">
+                    {{ line.role }}
+                    @if (line.ts) { · {{ relativeTs(line.ts) }} · {{ clockTs(line.ts) }} }
+                  </header>
+                  <pre class="transcript-text">{{ line.text }}</pre>
+                </article>
+              }
+            </div>
+          }
+        }
+      </section>
     }
 
-    <!-- ═══ Coder tab ═════════════════════════════════════════════ -->
-    <!-- The coder agent's final reply for the most recent code phase —
-         the reasoning summary it left behind before handing off to the
-         reviewer. Persisted to task_phase_outputs so it stays visible
-         after the reviewer or finalizer takes over the active session. -->
-    @if (detailTab() === 'coder') {
-      @let co = coderOutput();
-      @if (co) {
-        <section class="notes-section">
-          <header class="notes-head">
-            <p class="meta">coder reply · {{ relativeTs(co.created_at) }}</p>
-          </header>
-          <p class="muted small notes-handoff">
-            What the coder wrote at the end of the code phase. The Stream tab shows the live
-            transcript while the coder is running; this tab keeps the final reply available
-            after the reviewer takes over.
-          </p>
-          <pre class="notes-body mono">{{ co.output_md }}</pre>
-        </section>
-      } @else {
-        <p class="muted small">The coder hasn't produced a reply for this task yet.</p>
-      }
-    }
-
-    <!-- ═══ Stream tab ═════════════════════════════════════════════ -->
-    @if (detailTab() === 'stream') {
+    <!-- ═══ Live tab ═══════════════════════════════════════════════ -->
+    <!-- Mirrors the currently-active session (whichever phase the
+         orchestrator is on right now). Per-cycle history lives in the
+         dynamic agent tabs above. -->
+    @if (detailTab() === 'live') {
       <section class="stream-section">
         <header class="stream-head">
           <h3>Live stream</h3>
@@ -803,6 +764,7 @@
               <tr>
                 <th>#</th>
                 <th>when</th>
+                <th>agent</th>
                 <th>model</th>
                 <th class="num">in</th>
                 <th class="num">out</th>
@@ -814,6 +776,7 @@
                 <tr>
                   <td class="num mono">{{ i + 1 }}</td>
                   <td class="meta">{{ relativeTs(e.ts) }}</td>
+                  <td class="small">{{ e.agent_slug ?? '—' }}</td>
                   <td class="mono small">{{ e.model_id }}</td>
                   <td class="num mono">{{ e.input_tokens }}</td>
                   <td class="num mono">{{ e.output_tokens }}</td>
@@ -823,7 +786,7 @@
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="3" class="meta">total</td>
+                <td colspan="4" class="meta">total</td>
                 <td class="num mono">{{ tokensTotalIn() }}</td>
                 <td class="num mono">{{ tokensTotalOut() }}</td>
                 <td class="num mono">${{ tokensTotalCost().toFixed(4) }}</td>

@@ -29,6 +29,7 @@ import {
   type Task,
   type TaskAlternativeRow,
   type TaskPhaseOutputRow,
+  type TaskPhaseSessionRow,
   type TaskReviewRow,
   type TaskScoringRow,
   type TaskState,
@@ -482,22 +483,81 @@ export class HomePage {
   });
   protected interjectionText = "";
 
-  // Tab within the detail card. Persisted in the URL as ?tab= so reload
-  // and direct-link both keep their place.
-  protected readonly detailTabs = [
-    "spec",
-    "planner",
-    "coder",
-    "stream",
-    "review",
-    "tokens",
-    "files",
-  ] as const;
-  protected readonly detailTab =
-    signal<(typeof this.detailTabs)[number]>("stream");
-  setDetailTab(tab: (typeof this.detailTabs)[number]) {
+  // Detail-card tab model. Tabs are now a mix of:
+  //   - static tabs: spec | live | review | tokens | files
+  //   - dynamic phase-session tabs: id="session:<session_id>", one per
+  //     row in task_phase_sessions (Planner / Coder / Reviewer / repeated
+  //     cycles like "Coder #2"). Latest session wins as default.
+  // The signal stores the current tab id; `detailTabs()` exposes the
+  // ordered list with labels for the nav.
+  protected readonly phaseSessions = signal<TaskPhaseSessionRow[]>([]);
+  protected readonly detailTab = signal<string>("live");
+
+  /** Human label for an agent slug. Falls back to the slug itself for
+   *  unknown agents. Cycle suffix (#2, #3, …) is appended by callers. */
+  private readonly agentLabel: Record<string, string> = {
+    "plan-coder": "Planner",
+    coder: "Coder",
+    "reviewer-coder": "Reviewer",
+    "review-planner": "Review Planner",
+    "pr-spec-intake": "PR Intake",
+    "solution-explorer": "Explorer",
+    "review-security": "Security",
+    "review-performance": "Performance",
+    "review-architecture": "Architecture",
+    "review-synthesizer": "Synthesizer",
+    "pr-triage": "Triage",
+  };
+
+  /** Ordered list of tabs for the detail card. Spec first, then one tab
+   *  per phase-session (chronological), then Live, Review, Tokens,
+   *  Files. Sessions of the same agent get #N suffixes. */
+  protected readonly detailTabs = computed<
+    Array<{ id: string; label: string; badge?: string }>
+  >(() => {
+    const sessions = this.phaseSessions();
+    // Per-agent counters so repeated cycles get #2, #3, …
+    const counts = new Map<string, number>();
+    const total = new Map<string, number>();
+    for (const s of sessions) total.set(s.agent_slug, (total.get(s.agent_slug) ?? 0) + 1);
+    const tabs: Array<{ id: string; label: string; badge?: string }> = [
+      { id: "spec", label: "Spec" },
+    ];
+    for (const s of sessions) {
+      const n = (counts.get(s.agent_slug) ?? 0) + 1;
+      counts.set(s.agent_slug, n);
+      const baseLabel = this.agentLabel[s.agent_slug] ?? s.agent_slug;
+      const label = (total.get(s.agent_slug) ?? 1) > 1 ? `${baseLabel} #${n}` : baseLabel;
+      tabs.push({
+        id: `session:${s.session_id}`,
+        label,
+        badge: s.ended_at === null ? "live" : undefined,
+      });
+    }
+    tabs.push({ id: "live", label: "Live" });
+    tabs.push({ id: "review", label: "Review" });
+    tabs.push({ id: "tokens", label: "Tokens" });
+    tabs.push({ id: "files", label: "Files" });
+    return tabs;
+  });
+
+  /** Currently-selected phase-session row, or null if the active tab is
+   *  a static one (Spec / Live / Review / Tokens / Files). */
+  protected readonly selectedPhaseSession = computed<TaskPhaseSessionRow | null>(() => {
+    const id = this.detailTab();
+    if (!id.startsWith("session:")) return null;
+    const sid = id.slice("session:".length);
+    return this.phaseSessions().find((s) => s.session_id === sid) ?? null;
+  });
+
+  setDetailTab(tab: string) {
     this.detailTab.set(tab);
     this.syncQueryParams({ tab });
+    // For phase-session tabs, lazy-load the transcript on click so we
+    // don't pay for sessions the user never looks at.
+    if (tab.startsWith("session:")) {
+      this.loadSessionTranscript(tab.slice("session:".length));
+    }
   }
 
   // ─── Finalize ─────────────────────────────────────────────────────────
@@ -713,8 +773,8 @@ export class HomePage {
    *  Spec for spec — show what the user authored. Files for finalize —
    *  the user is about to commit. Review for ready — the bot just gave
    *  its verdict, that's what they want to see. Everything else
-   *  (running phases) goes to Stream so they watch it work. */
-  private defaultTabForTask(t: ViewTask): (typeof this.detailTabs)[number] {
+   *  (running phases) goes to Live so they watch the active stream. */
+  private defaultTabForTask(t: ViewTask): string {
     switch (t.state) {
       case "spec":
         return "spec";
@@ -723,7 +783,7 @@ export class HomePage {
       case "ready":
         return "review";
       default:
-        return "stream";
+        return "live";
     }
   }
 
@@ -742,6 +802,10 @@ export class HomePage {
       this.refreshAlternatives(next);
       this.refreshNotes(next);
       this.refreshPhaseOutputs(next);
+      this.refreshPhaseSessions(next);
+      // Reset per-session transcript cache for the new task.
+      this.sessionTranscripts.set(new Map());
+      this.sessionTranscriptLoading.set(new Set());
       this.refreshSuggestions(next);
       this.refreshIssueLinks(next);
       this.refreshCommitMessage(next);
@@ -1040,6 +1104,63 @@ export class HomePage {
     this.tasksApi.getPhaseOutputs(taskId).subscribe({
       next: (r) => this.phaseOutputs.set(r.phase_outputs),
       error: () => this.phaseOutputs.set([]),
+    });
+  }
+
+  refreshPhaseSessions(taskId: string) {
+    this.tasksApi.getPhaseSessions(taskId).subscribe({
+      next: (r) => this.phaseSessions.set(r.phase_sessions),
+      error: () => this.phaseSessions.set([]),
+    });
+  }
+
+  /** Per-session transcript cache. Lazy-loaded when the user clicks a
+   *  phase-session tab. Map identity is replaced on each set so signal
+   *  consumers re-evaluate. */
+  protected readonly sessionTranscripts = signal<Map<string, TranscriptLine[]>>(new Map());
+  protected readonly sessionTranscriptLoading = signal<Set<string>>(new Set());
+
+  loadSessionTranscript(sessionId: string) {
+    const taskId = this.selectedId();
+    if (!taskId) return;
+    // Don't refetch if we already have it. Sessions are immutable once
+    // ended; for live sessions the user can still see the same tail
+    // (live SSE is on a separate Live tab anyway).
+    if (this.sessionTranscripts().has(sessionId)) return;
+    const loading = new Set(this.sessionTranscriptLoading());
+    loading.add(sessionId);
+    this.sessionTranscriptLoading.set(loading);
+    this.tasksApi.transcript(taskId, sessionId).subscribe({
+      next: (r) => {
+        const lines: TranscriptLine[] = [];
+        for (const m of (r.messages ?? []) as Array<{
+          info?: { role?: string; time?: { created?: number } };
+          parts?: Array<{ type?: string; text?: string }>;
+        }>) {
+          const role = m.info?.role ?? "unknown";
+          const text = (m.parts ?? [])
+            .filter((p) => p.type === "text" && typeof p.text === "string")
+            .map((p) => p.text!)
+            .join("")
+            .trim();
+          if (!text) continue;
+          lines.push({ role, text, ts: m.info?.time?.created ?? null });
+        }
+        const next = new Map(this.sessionTranscripts());
+        next.set(sessionId, lines);
+        this.sessionTranscripts.set(next);
+        const stillLoading = new Set(this.sessionTranscriptLoading());
+        stillLoading.delete(sessionId);
+        this.sessionTranscriptLoading.set(stillLoading);
+      },
+      error: () => {
+        const next = new Map(this.sessionTranscripts());
+        next.set(sessionId, []);
+        this.sessionTranscripts.set(next);
+        const stillLoading = new Set(this.sessionTranscriptLoading());
+        stillLoading.delete(sessionId);
+        this.sessionTranscriptLoading.set(stillLoading);
+      },
     });
   }
 
@@ -1365,8 +1486,8 @@ export class HomePage {
       this.syncQueryParams({ task: id });
       return;
     }
-    this.detailTab.set("stream");
-    this.syncQueryParams({ task: id, tab: "stream" });
+    this.detailTab.set("live");
+    this.syncQueryParams({ task: id, tab: "live" });
     this.openStream(id);
   }
 
@@ -1649,8 +1770,12 @@ export class HomePage {
       const task = p.get("task");
       this.selectedId.set(task && task.length > 0 ? task : null);
       const tab = p.get("tab");
-      if (tab && (this.detailTabs as readonly string[]).includes(tab)) {
-        this.detailTab.set(tab as (typeof this.detailTabs)[number]);
+      if (tab) {
+        // Migrate the old "stream" tab id to its new name. detailTab is a
+        // free-form string now (session tabs use `session:<id>`), so the
+        // URL is trusted as-is for anything else — bad values just render
+        // nothing in the content area until the user clicks a real tab.
+        this.detailTab.set(tab === "stream" ? "live" : tab);
       }
     });
 

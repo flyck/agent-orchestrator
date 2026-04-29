@@ -241,9 +241,18 @@ export class TasksService {
     return this.http.post<Task>(`/api/tasks/${id}/clear-feedback`, {});
   }
 
-  transcript(id: string): Observable<{ session_id: string | null; messages: unknown[] }> {
-    return this.http.get<{ session_id: string | null; messages: unknown[] }>(
-      `/api/tasks/${id}/transcript`,
+  /** Persisted transcript for one session. With no `sessionId`, falls back
+   *  to the task's last_session_id (legacy callers). With a sessionId,
+   *  scopes to that specific phase session — drives the per-agent tabs. */
+  transcript(
+    id: string,
+    sessionId?: string,
+  ): Observable<{ session_id: string | null; messages: unknown[]; error?: string }> {
+    const url = sessionId
+      ? `/api/tasks/${id}/transcript?session_id=${encodeURIComponent(sessionId)}`
+      : `/api/tasks/${id}/transcript`;
+    return this.http.get<{ session_id: string | null; messages: unknown[]; error?: string }>(
+      url,
     );
   }
 
@@ -353,6 +362,14 @@ export class TasksService {
     return this.http.get<{ events: UsageEventRow[] }>(`/api/tasks/${id}/usage-events`);
   }
 
+  /** All agent sessions opened by the orchestrator for this task, in
+   *  chronological order. Drives the dynamic per-agent detail tabs. */
+  getPhaseSessions(id: string): Observable<{ phase_sessions: TaskPhaseSessionRow[] }> {
+    return this.http.get<{ phase_sessions: TaskPhaseSessionRow[] }>(
+      `/api/tasks/${id}/phase-sessions`,
+    );
+  }
+
   /** Latest scoring axes for many tasks at once. Used by the home
    *  pipeline to render a complexity chip on each card. */
   scoringsSummary(taskIds: string[]): Observable<{
@@ -394,7 +411,8 @@ export interface TaskPhaseOutputRow {
 }
 
 /** One usage_event row, surfaced to the Tokens tab. cost_usd is the
- *  decoded JS number (backend stores micros). */
+ *  decoded JS number (backend stores micros). phase_id / agent_slug
+ *  are joined in by the backend so the row carries its agent label. */
 export interface UsageEventRow {
   id: number;
   ts: number;
@@ -404,6 +422,20 @@ export interface UsageEventRow {
   input_tokens: number;
   output_tokens: number;
   cost_usd: number;
+  phase_id: string | null;
+  agent_slug: string | null;
+}
+
+/** One row from task_phase_sessions — a single agent session for the
+ *  task. ended_at is null while the session is still live. */
+export interface TaskPhaseSessionRow {
+  session_id: string;
+  task_id: string;
+  phase_id: string;
+  agent_slug: string;
+  started_at: number;
+  ended_at: number | null;
+  ended_reason: string | null;
 }
 
 export interface TaskScoringRow {
