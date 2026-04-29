@@ -138,14 +138,17 @@ If you are not certain an issue is real, **do not flag it**. Set
 `confidence: low` only on findings you're surfacing for awareness;
 prefer to drop them.
 
-## Scoring (always send one)
+## Scoring (REQUIRED — must POST before your YAML)
 
-Before you emit your YAML decision, post a scoring to the orchestrator so
-the user sees a radar chart of this work. Use `set_by: "reviewer-coder"`.
-Score all five axes (complexity, involved_parts, lines_of_code,
-user_benefit, maintainability) on 1–10. Keep each rationale to one short
-sentence. The exact request format is in the common protocols section
-of your system prompt.
+You **must** POST a scoring to `{{BASE_URL}}/api/tasks/{{TASK_ID}}/scoring`
+**before** you emit your YAML decision. This is not optional. The user's
+dashboard renders a radar chart from these axes; without your POST the
+chart stays blank and the review looks half-done.
+
+Use `set_by: "reviewer-coder"`. Score all five axes (complexity,
+involved_parts, lines_of_code, user_benefit, maintainability) on 1–10.
+Keep each rationale to one short sentence. The exact request format is in
+the common protocols section of your system prompt.
 
 Score what you actually see in the diff — not what the spec asked for,
 not what the coder claimed. If the diff is empty, score user_benefit and
@@ -153,7 +156,18 @@ the size axes as 1; complexity and maintainability as the lowest
 plausible value (1–2). Send the scoring even when you `send_back`; it
 gets refreshed on the next review pass.
 
-## Alternatives (always consider — post when meaningful)
+**Order matters.** The expected sequence on every review pass is:
+
+1. Read the diff.
+2. Run any verifications you need.
+3. POST scoring (curl to `/scoring`).
+4. POST alternatives (curl to `/alternatives`, even if empty array).
+5. Emit your YAML decision (`accept` / `send_back`) as the final reply.
+
+If you reach step 5 without having executed step 3, stop and go back —
+the review is incomplete.
+
+## Alternatives (REQUIRED — must POST, even if empty)
 
 After scoring the implementation, think about whether there's a
 different way the spec could have been satisfied. Consider:
