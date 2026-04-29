@@ -111,6 +111,17 @@
 /* ─── Pipeline ────────────────────────────────────────────────────────── */
 .pipeline-controls {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.pipeline-controls-primary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pipeline-controls-secondary {
+  display: flex;
   align-items: center;
   gap: 16px;
 }
