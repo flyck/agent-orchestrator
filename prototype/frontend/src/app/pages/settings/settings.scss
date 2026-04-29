@@ -83,6 +83,12 @@ label.cmd-row {
   font-size: 13px;
 }
 
+.hint {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 input[type="text"], input[type="number"] {
   width: 100%;
 }

@@ -202,13 +202,41 @@ Phase 15 shipped the foundations Phase 16 builds on (Plan +
 watchdog→next-phase + alternatives + reviewer findings). Phase 16
 lands the runner + the new agents.
 
+## Phase 17 — Claude Code engine adapter
+
+Spec'd in [`18-claude-code-engine.md`](18-claude-code-engine.md). Adds
+Claude Code (the CLI, in `--print` stream-json mode) as a second
+selectable engine. Motivation: drive runs through the user's Pro
+subscription instead of provider API keys.
+
+1. **17a — Boundary tightening.** `getEngine()` returns `EngineAdapter`,
+   `getTranscript()` lifted onto the interface, optional
+   `respondToPermission?` on `EngineSession` replaces the
+   `instanceof OpenCodeSession` check, `ModelRef` documented per-engine.
+2. **17b — `ClaudeCodeAdapter`.** Per-session subprocess
+   (`claude -p --input-format=stream-json --output-format=stream-json`)
+   with NDJSON over stdio. Event normalizer maps stream-json events to
+   the OpenCode-shaped events the orchestrator already consumes.
+   Transcript backfill reads `~/.claude/projects/<slug>/<uuid>.jsonl`.
+   Subscription auth via local Claude install
+   (`CLAUDE_CODE_OAUTH_TOKEN` for daemon mode).
+3. **17c — Settings toggle.** Existing `settings.engine` flips between
+   `"opencode"` and `"claude"`; the singleton respawns on change.
+   Settings UI exposes a dropdown. Per-task engine selection is
+   deferred — global toggle is enough for the prototype.
+
+Capability gaps documented in `18-claude-code-engine.md`. Notable:
+Claude has no graceful in-flight abort (cancel = SIGKILL); concurrency
+caps at 3 parallel sessions due to upstream
+([anthropics/claude-code#28829](https://github.com/anthropics/claude-code/issues/28829))
+file-corruption bugs.
+
 ## Out of scope for v1 (explicit)
 
 - GitHub/GitLab PR ingestion or comment posting.
 - Architecture diagram rendering (we render the analyst's markdown).
 - Counter-architecture side-by-side compare UI.
 - Multi-user, auth, RBAC.
-- A second engine adapter (interface exists; only OpenCode is wired).
 - Test-quality / maintainability / usability reviewers.
 - Packaging as desktop app (Tauri/Electron).
 

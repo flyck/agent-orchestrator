@@ -54,7 +54,11 @@
 
       <label>
         <span class="label">Engine</span>
-        <input type="text" [value]="s.engine" disabled />
+        <select [ngModel]="s.engine" (ngModelChange)="setDraft('engine', $event)">
+          <option value="opencode">opencode</option>
+          <option value="claude">claude (subscription)</option>
+        </select>
+        <span class="hint">Switching takes effect on the next task. Claude uses your local Pro subscription auth — runs cap at 3 concurrent sessions due to upstream concurrency bugs.</span>
       </label>
 
       <label>
