@@ -132,6 +132,38 @@
 .toggle:hover { background: var(--paper-soft); }
 .toggle input { margin: 0; }
 
+/* Voice dictation toggle. Mirrors the .toggle pill so it sits naturally
+   in pipeline-controls; flips to ink-red while recording to make the
+   on-mic state unmistakable without a pulsing animation (manifesto #6
+   rejects motion theater). Hidden entirely when the browser doesn't
+   support SpeechRecognition. */
+.mic-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+}
+.mic-btn:hover { background: var(--paper-soft); color: var(--ink); }
+.mic-btn.listening {
+  color: var(--ink-red);
+  border-color: var(--ink-red);
+  background: var(--ink-red-bg);
+}
+.mic-btn.errored {
+  color: var(--ink-amber);
+  border-color: var(--ink-amber);
+  background: var(--ink-amber-bg);
+}
+.mic-label { letter-spacing: 0.02em; }
+
 .columns {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

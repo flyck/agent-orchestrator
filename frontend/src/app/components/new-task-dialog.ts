@@ -339,11 +339,14 @@ export class NewTaskDialog {
    *  page can use this to refresh / select the task. */
   @Output() created = new EventEmitter<string>();
 
-  show() {
+  /** Open the dialog. With no args, blank create form. With initial
+   *  values (used by the voice-input flow), title and/or spec are
+   *  pre-filled and the user reviews/edits before clicking Create. */
+  show(initial?: { title?: string; spec?: string }) {
     this.editingId.set(null);
-    this.title.set('');
+    this.title.set(initial?.title ?? '');
     this.kind.set('feature');
-    this.spec.set(TEMPLATES.feature);
+    this.spec.set(initial?.spec ?? TEMPLATES.feature);
     this.status.set(null);
     this.error.set(false);
     this.open.set(true);

@@ -40,6 +40,7 @@ import {
   TaskStreamService,
   type StreamEvent,
 } from "../../services/task-stream.service";
+import { VoiceInputService } from "../../services/voice-input.service";
 import { NewTaskDialog } from "../../components/new-task-dialog";
 import { ScoringRadar } from "../../components/scoring-radar";
 import { ActivityPanel } from "../../components/activity-panel";
@@ -341,6 +342,7 @@ export class HomePage {
   private streamApi = inject(TaskStreamService);
   private suggestionsApi = inject(SuggestionsService);
   private issueLinksApi = inject(IssueLinksService);
+  protected voice = inject(VoiceInputService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
@@ -1427,6 +1429,46 @@ export class HomePage {
     const sel = this.selectedTask();
     if (!sel) return;
     this.newTaskDialog()?.showEdit(sel.raw.id, sel.raw.input_payload);
+  }
+
+  /** Toggle voice dictation. First click starts listening; second click
+   *  (or the browser's silence auto-stop) opens the new-task dialog
+   *  pre-filled with the transcript so the user reviews + edits before
+   *  submitting. We never auto-submit a dictation — the spec is the
+   *  user's responsibility (manifesto #1). */
+  toggleVoiceDictation() {
+    const state = this.voice.state();
+    if (state === 'listening') {
+      this.voice.stop();
+      this.consumeVoiceTranscript();
+      return;
+    }
+    this.voice.start();
+    // The browser auto-stops on a silence window — poll the state
+    // signal cheaply so we can pop the dialog at that moment too.
+    // effect() would be cleaner but needs an injection context; this
+    // setTimeout chain is bounded by the recognizer lifetime.
+    const watch = setInterval(() => {
+      if (this.voice.state() !== 'listening') {
+        clearInterval(watch);
+        this.consumeVoiceTranscript();
+      }
+    }, 300);
+  }
+
+  private consumeVoiceTranscript() {
+    const text = this.voice.finalText().trim();
+    if (!text) {
+      this.voice.reset();
+      return;
+    }
+    // Title = first sentence (clipped to 120 chars) so it stays
+    // dashboard-readable; spec carries the full thing for the agent.
+    const firstSentence = text.match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? text;
+    const title = firstSentence.slice(0, 120).trim();
+    const spec = `## Goal\n\n${text}\n\n## Acceptance criteria\n\n- <fill in: when X happens, Y>\n\n## Open questions\n\n- <known unknowns>\n`;
+    this.voice.reset();
+    this.newTaskDialog()?.show({ title, spec });
   }
 
   // ─── Bad-experience rating ────────────────────────────────────────────

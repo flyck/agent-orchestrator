@@ -64,6 +64,38 @@
         <input type="checkbox" [checked]="showClosed()" (change)="toggleClosed()" />
         <span>show closed</span>
       </label>
+      @if (voice.supported()) {
+        <button type="button"
+                class="mic-btn"
+                [class.listening]="voice.state() === 'listening'"
+                [class.errored]="voice.state() === 'error'"
+                [attr.aria-pressed]="voice.state() === 'listening'"
+                [title]="voice.state() === 'listening'
+                  ? 'Stop dictation — opens new-task dialog with transcript'
+                  : 'Dictate a new task — speak after clicking'"
+                (click)="toggleVoiceDictation()">
+          <!-- Microphone glyph: capsule + stand. Solid fill flips to ink-red
+               while listening to make recording state unmistakable without
+               an animated dot (manifesto #6). -->
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="3" width="6" height="11" rx="3"/>
+            <path d="M5 11a7 7 0 0 0 14 0"/>
+            <path d="M12 18v3"/>
+            <path d="M9 21h6"/>
+          </svg>
+          <span class="mic-label">
+            @if (voice.state() === 'listening') {
+              listening…
+            } @else if (voice.state() === 'error') {
+              mic error
+            } @else {
+              dictate
+            }
+          </span>
+        </button>
+      }
       <button class="primary" type="button" (click)="openNewTaskDialog()">+ new task</button>
     </div>
   </header>
