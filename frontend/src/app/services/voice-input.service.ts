@@ -76,6 +76,13 @@ export class VoiceInputService {
   readonly errorMessage = signal<string | null>(null);
 
   private rec: SpeechRecognitionInstance | null = null;
+  /** True only between an explicit stop() and the next start(). The
+   *  Chrome SpeechRecognition auto-stops on the first ~1s of silence
+   *  even with continuous=true, so we transparently restart on `onend`
+   *  unless this flag says the user actually clicked stop. Without
+   *  this, a single thinking pause mid-dictation truncated the take
+   *  to whatever had been finalized so far. */
+  private userStop = false;
 
   /** True when the browser has the Web Speech API. Hide the mic button
    *  entirely when this is false — there's no graceful fallback for
@@ -89,6 +96,24 @@ export class VoiceInputService {
    *  choice persists per origin. */
   start(): void {
     if (this.state() === 'listening') return;
+    if (!getCtor()) {
+      this.state.set('error');
+      this.errorMessage.set('SpeechRecognition not available in this browser.');
+      return;
+    }
+    this.finalText.set('');
+    this.interimText.set('');
+    this.errorMessage.set(null);
+    this.userStop = false;
+    this.state.set('listening');
+    this.beginRecognizer();
+  }
+
+  /** (Re)open the underlying recognizer without touching finalText.
+   *  Called from `start` (fresh session) and from `onend` (auto-restart
+   *  across silence). Each call wires a new instance because Chrome
+   *  refuses to call `start()` twice on the same one. */
+  private beginRecognizer(): void {
     const Ctor = getCtor();
     if (!Ctor) {
       this.state.set('error');
@@ -117,29 +142,31 @@ export class VoiceInputService {
     };
 
     rec.onerror = (ev: SpeechRecognitionErrorEvent) => {
+      // 'no-speech' fires after the silence timeout, 'aborted' fires
+      // when we stop ourselves — both are normal lifecycle events,
+      // not failures. Let onend handle the next move.
+      if (ev.error === 'no-speech' || ev.error === 'aborted') return;
       this.state.set('error');
-      // 'no-speech' fires after the silence timeout — treat it as a
-      // soft stop, not a hard failure, since the user just paused.
-      if (ev.error === 'no-speech' || ev.error === 'aborted') {
-        this.errorMessage.set(null);
-        this.state.set('idle');
-        return;
-      }
       this.errorMessage.set(ev.message || ev.error || 'recognition failed');
     };
 
     rec.onend = () => {
-      // Browser auto-stops after a silence window. Surface as idle so
-      // the mic button can offer to start again.
-      if (this.state() === 'listening') this.state.set('idle');
       this.interimText.set('');
+      if (this.userStop || this.state() === 'error') {
+        this.state.set(this.state() === 'error' ? 'error' : 'idle');
+        return;
+      }
+      // Browser auto-stopped on silence but the user is still
+      // dictating — open a fresh instance and keep going.
+      try {
+        this.beginRecognizer();
+      } catch (err) {
+        this.state.set('error');
+        this.errorMessage.set(String(err));
+      }
     };
 
     this.rec = rec;
-    this.finalText.set('');
-    this.interimText.set('');
-    this.errorMessage.set(null);
-    this.state.set('listening');
     try {
       rec.start();
     } catch (err) {
@@ -150,7 +177,11 @@ export class VoiceInputService {
 
   /** Stop the current session. Safe to call from the idle state. */
   stop(): void {
-    if (!this.rec) return;
+    this.userStop = true;
+    if (!this.rec) {
+      this.state.set('idle');
+      return;
+    }
     try {
       this.rec.stop();
     } catch {
