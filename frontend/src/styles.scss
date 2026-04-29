@@ -6,13 +6,16 @@
  * ───────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Light (default) — paper aesthetic */
-  --paper:        #FAFAF7;
-  --paper-soft:   #F0EEE8;
+  /* Light (default) — paper aesthetic.
+     3-tier surface elevation: page sits between cards (raised) and sunken
+     insets, so cards visibly rise from the page without needing shadows. */
+  --surface-page: #F2EFE7;   /* page bg — darker than cards */
+  --paper:        #FAFAF7;   /* cards / raised */
+  --paper-soft:   #ECE9DF;   /* sunken / hover — darker than page */
   --ink:          #1A1A18;
   --ink-muted:    #6E6E69;
   --ink-faint:    #A3A19A;
-  --rule:         #D8D6CF;
+  --rule:         #D0CEC4;
   --rule-strong:  #BAB7AE;
   --ink-red:      #8B1E1E;
   --ink-red-bg:   #F5E9E7;
@@ -41,13 +44,17 @@
    the same way (sand/sage/slate/tan, just darker). */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper:        #16171A;
-    --paper-soft:   #1F2125;
+    /* Dark mode follows Material/Stitch tonal elevation: brighter = raised.
+       Page is the darkest tone; cards sit a step brighter; sunken inserts
+       step brighter still so they read as defined regions inside cards. */
+    --surface-page: #131311;   /* page bg — darkest, near Stitch #131313 */
+    --paper:        #1F1E1C;   /* cards / raised — clearly above page */
+    --paper-soft:   #2A2826;   /* sunken / hover — a step brighter than cards */
     --ink:          #E8E6DF;
     --ink-muted:    #9D9A93;
     --ink-faint:    #5C5A55;
-    --rule:         #2C2E33;
-    --rule-strong:  #44474D;
+    --rule:         #36342F;
+    --rule-strong:  #4A4842;
     --ink-red:      #E69090;
     --ink-red-bg:   #3A1F1F;
     --ink-amber:    #E5B870;
@@ -70,7 +77,7 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--paper);
+  background: var(--surface-page);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 15px;
