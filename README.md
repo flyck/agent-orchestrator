@@ -1,18 +1,41 @@
 # Agent Orchestrator
 
-Local-first, review-first multi-agent dashboard for engineering work.
+Local-first, human-first multi-agent dashboard for engineering work. Focuses on minimizing context
+switches, maximizing parallelism, bundling related tasks, and silently preparing unrelated PR
+reviews.
 
-**Read [`MANIFESTO.md`](MANIFESTO.md) first** — the non-negotiable principles that shape every design decision in this repo.
+It is based on these core observations:
+- Context switches need to be minimized
+- Good Reviews need sharp coding skills from agent-free coding.
+- Staring at a CLI all day is not rewarding and not efficient.
+- Models keep outperforming each other and need to be switchable at all times.
+- Visualizations help
+- Interrupting the agent and jumping in with the IDE at any time is vital.
 
-## Repo layout
+Following these observations, this project uses mainly opencode as its server cli engine,
+leveraging git worktrees, to orchestrate everyday coding tasks.
 
-```
-.
-├── docs/         design notes, research, decisions, implementation plan
-└── prototype/    the v1 prototype workspace (Bun backend + Angular frontend)
-```
 
-Start with [`docs/README.md`](docs/README.md) for the index.
+## Design Principles
+
+1. **Spec-driven first.** The human authors the spec with the architecture agent; implementation,
+   review, and findings flow from there. Passive use is the failure mode.
+2. **Minimize context switches. Low cortisol.** Related tasks share one frame. Reviews and other
+   long-running output prepare in the background and surface at natural breaks, not the instant
+   they land. One UI, utilizing different engines (either OpenCode, or a custom Claude Code
+   engine), to hide the model tooling differences so the user never switches tools to switch
+   models. The minimal visual design serves the same goal.
+3. **Clear states, no friction.** Every agent's state is visible at a glance. No artificial gates
+   or forced approvals — the user can interject, redirect, or stop at any moment.
+4. **Keep coding manually.** The product nudges the user to work without agents on a regular
+   cadence. Skills don't survive being outsourced.
+5. **Agent work is bounded.** Configurable caps on parallel tasks and agents-per-task; a
+   conservative queue for background agents. Findings, not patches.
+6. **Content over hype.** Paper aesthetic, near-monochrome, hairlines over shadows. Built for
+   someone who trusts their own judgment over the polish of the tool.
+
+For more info check the [`MANIFESTO.md`](MANIFESTO.md) — it lays out these non-negotiable
+principles that shape every design decision in more detail.
 
 ## TL;DR
 
