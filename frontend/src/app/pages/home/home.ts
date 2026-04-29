@@ -477,6 +477,7 @@ export class HomePage {
   protected readonly detailTabs = [
     "spec",
     "planner",
+    "coder",
     "stream",
     "review",
     "tokens",
@@ -639,6 +640,16 @@ export class HomePage {
     const intake = this.phaseOutputs().find((p) => p.phase_id === "intake");
     if (!intake) return null;
     return this.extractMermaid(intake.output_md);
+  });
+
+  /** Coder agent's final reply for the most recent code phase, or null when
+   *  the coder hasn't produced one yet. Drives the Coder detail tab. */
+  protected readonly coderOutput = computed<TaskPhaseOutputRow | null>(() => {
+    const rows = this.phaseOutputs().filter(
+      (p) => p.phase_id === "code" && p.agent_slug === "coder",
+    );
+    if (rows.length === 0) return null;
+    return rows[rows.length - 1] ?? null;
   });
 
   // ─── Working-tree changes for selected task ───────────────────────────
@@ -1349,15 +1360,18 @@ export class HomePage {
     this.openStream(id);
   }
 
-  /** While task is open: forward the comment as a live in-session message.
-   *  When the task is closed (Ready): re-run the orchestrator with the comment
-   *  as feedback — the task transitions back to Build with a fresh session. */
+  /** Forward the comment to whichever path actually accepts it now:
+   *   - actively running (status=open AND state≠ready) → live in-session message
+   *   - ready or otherwise terminal → /continue, which re-runs the orchestrator
+   *     with the comment as feedback. Ready is status=open in the view model
+   *     (still actionable) but has no live session — sendMessage would 400. */
   sendInterjection() {
     const sel = this.selectedTask();
     const text = this.interjectionText.trim();
     if (!sel || !text) return;
 
-    if (sel.status === "open") {
+    const isLive = sel.status === "open" && sel.state !== "ready";
+    if (isLive) {
       this.tasksApi.sendMessage(sel.raw.id, text).subscribe({
         next: () => {
           this.interjectionText = "";

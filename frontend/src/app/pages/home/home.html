@@ -366,6 +366,17 @@
           Planner
         </button>
       }
+      <!-- Coder tab: visible once the coder has produced a reply for this
+           task's most recent code phase. Mirrors the Planner tab — hidden
+           until there's something to show. -->
+      @if (coderOutput()) {
+        <button type="button"
+                class="detail-tab"
+                [class.active]="detailTab() === 'coder'"
+                (click)="setDetailTab('coder')">
+          Coder
+        </button>
+      }
       <button type="button"
               class="detail-tab"
               [class.active]="detailTab() === 'stream'"
@@ -537,6 +548,30 @@
       }
     }
 
+    <!-- ═══ Coder tab ═════════════════════════════════════════════ -->
+    <!-- The coder agent's final reply for the most recent code phase —
+         the reasoning summary it left behind before handing off to the
+         reviewer. Persisted to task_phase_outputs so it stays visible
+         after the reviewer or finalizer takes over the active session. -->
+    @if (detailTab() === 'coder') {
+      @let co = coderOutput();
+      @if (co) {
+        <section class="notes-section">
+          <header class="notes-head">
+            <p class="meta">coder reply · {{ relativeTs(co.created_at) }}</p>
+          </header>
+          <p class="muted small notes-handoff">
+            What the coder wrote at the end of the code phase. The Stream tab shows the live
+            transcript while the coder is running; this tab keeps the final reply available
+            after the reviewer takes over.
+          </p>
+          <pre class="notes-body mono">{{ co.output_md }}</pre>
+        </section>
+      } @else {
+        <p class="muted small">The coder hasn't produced a reply for this task yet.</p>
+      }
+    }
+
     <!-- ═══ Stream tab ═════════════════════════════════════════════ -->
     @if (detailTab() === 'stream') {
       <section class="stream-section">
@@ -606,17 +641,6 @@
         }
       </section>
 
-      <div class="interject">
-        <input type="text"
-               [(ngModel)]="interjectionText"
-               [placeholder]="sel.status === 'open'
-                 ? 'Type a comment to interject — Enter to send'
-                 : 'Send back with feedback — moves the task back to Build'"
-               (keydown.enter)="sendInterjection()" />
-        <button type="button" class="primary" (click)="sendInterjection()">
-          {{ sel.status === 'open' ? 'Send' : 'Send back' }}
-        </button>
-      </div>
     }
 
     <!-- ═══ Review tab ═════════════════════════════════════════════ -->
@@ -1012,6 +1036,22 @@
         </div>
       }
     }
+
+    <!-- Always-visible interjection bar. Lives outside the tab gates so the
+         user can send a comment (live) or send the task back (ready /
+         terminal) from any tab — was previously hidden when the user was on
+         Tokens / Files / Review. -->
+    <div class="interject">
+      <input type="text"
+             [(ngModel)]="interjectionText"
+             [placeholder]="(sel.status === 'open' && sel.state !== 'ready')
+               ? 'Type a comment to interject — Enter to send'
+               : 'Send back with feedback — moves the task back to Build'"
+             (keydown.enter)="sendInterjection()" />
+      <button type="button" class="primary" (click)="sendInterjection()">
+        {{ (sel.status === 'open' && sel.state !== 'ready') ? 'Send' : 'Send back' }}
+      </button>
+    </div>
   </section>
 }
 

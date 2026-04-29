@@ -1090,6 +1090,14 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
       }
       if (a.phase === "code") {
         await safeClose(a.session, taskId, "code_done");
+        // Persist the coder's reply so the Coder tab can show it after
+        // the reviewer takes over the active session. Pipeline runs
+        // already do this in the per-phase loop; legacy plan→code→review
+        // tasks need an explicit call here.
+        const coderReply = (r.assistantText ?? "").trim();
+        if (coderReply.length > 0) {
+          recordPhaseOutput(taskId, "code", "coder", coderReply);
+        }
         // Try to switch to reviewer. On any failure, accept the coder's
         // work and finalize done.
         try {
