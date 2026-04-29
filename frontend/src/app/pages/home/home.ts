@@ -184,6 +184,8 @@ interface ViewTask {
 // have to cross-import a sibling page module.
 import { clockTs, formatTs, relativeTs } from "../../util/time";
 
+export type PipelineRange = "today" | "yesterday" | "week";
+
 interface StreamLine {
   ts: number;
   tag: string;
@@ -420,6 +422,13 @@ export class HomePage {
   protected readonly tasksLoading = signal(true);
   protected readonly tasksError = signal<string | null>(null);
   protected readonly showClosed = signal(false);
+  protected readonly pipelineRange = signal<PipelineRange>("today");
+  private readonly pipelineRangeChanged = new Subject<void>();
+
+  setPipelineRange(r: PipelineRange) {
+    this.pipelineRange.set(r);
+    this.pipelineRangeChanged.next();
+  }
 
   protected readonly visibleTasks = computed(() => {
     const t = this.tasks();
@@ -1692,14 +1701,12 @@ export class HomePage {
       )
       .subscribe((q) => this.queueState.set(q));
 
-    // Tasks — refresh every 2s. Short enough that the context-tokens chip
-    // on running cards stays close to live; long enough that idle tabs
-    // don't burn CPU. The query is a single SQL select + JSON serialize.
-    timer(0, 2000)
+    // Tasks — refresh every 2s, and immediately on range change.
+    merge(timer(0, 2000), this.pipelineRangeChanged.asObservable())
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>
-          this.tasksApi.list().pipe(
+          this.tasksApi.list({ range: this.pipelineRange() }).pipe(
             catchError((e) => {
               this.tasksError.set(e?.message ?? String(e));
               return of({ tasks: [] as Task[] });
@@ -1771,11 +1778,12 @@ export class HomePage {
     this.destroy$.next();
     this.destroy$.complete();
     this.rangeChanged.complete();
+    this.pipelineRangeChanged.complete();
     this.closeStream();
   }
 
   refreshTasks() {
-    this.tasksApi.list().subscribe({
+    this.tasksApi.list({ range: this.pipelineRange() }).subscribe({
       next: (r) => {
         const views = r.tasks.map(toViewTask);
         this.tasks.set(views);

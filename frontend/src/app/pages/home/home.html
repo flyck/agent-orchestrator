@@ -55,6 +55,11 @@
       @if (tasksError()) {
         <span class="meta error">backend error: {{ tasksError() }}</span>
       }
+      <div class="range-buttons">
+        <button type="button" [class.selected]="pipelineRange() === 'today'" (click)="setPipelineRange('today')">Today</button>
+        <button type="button" [class.selected]="pipelineRange() === 'yesterday'" (click)="setPipelineRange('yesterday')">Yesterday</button>
+        <button type="button" [class.selected]="pipelineRange() === 'week'" (click)="setPipelineRange('week')">This week</button>
+      </div>
       <label class="toggle">
         <input type="checkbox" [checked]="showClosed()" (change)="toggleClosed()" />
         <span>show closed</span>

@@ -280,8 +280,22 @@ export function getTask(id: string, handle: Database = db()): TaskRow | null {
   return handle.query<TaskRow, [string]>("SELECT * FROM tasks WHERE id = ?").get(id);
 }
 
+function startOfDayTs(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfWeekTs(now: number): number {
+  const d = new Date(now);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 export function listTasks(
-  opts: { workspace?: TaskWorkspace; status?: TaskStatus; limit?: number } = {},
+  opts: { workspace?: TaskWorkspace; status?: TaskStatus; limit?: number; range?: "today" | "yesterday" | "week" } = {},
   handle: Database = db(),
 ): TaskRow[] {
   const where: string[] = [];
@@ -293,6 +307,22 @@ export function listTasks(
   if (opts.status) {
     where.push("status = ?");
     params.push(opts.status);
+  }
+  if (opts.range) {
+    const now = Date.now();
+    const todayStart = startOfDayTs(now);
+    if (opts.range === "today") {
+      where.push("created_at >= ?");
+      params.push(todayStart);
+    } else if (opts.range === "yesterday") {
+      where.push("created_at >= ?");
+      params.push(todayStart - 86_400_000);
+      where.push("created_at < ?");
+      params.push(todayStart);
+    } else if (opts.range === "week") {
+      where.push("created_at >= ?");
+      params.push(startOfWeekTs(now));
+    }
   }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const limit = opts.limit ?? 200;

@@ -175,10 +175,11 @@ export interface FinalizeResult {
 export class TasksService {
   private http = inject(HttpClient);
 
-  list(filters: { workspace?: TaskWorkspace; status?: TaskStatus } = {}): Observable<{ tasks: Task[] }> {
+  list(filters: { workspace?: TaskWorkspace; status?: TaskStatus; range?: 'today' | 'yesterday' | 'week' } = {}): Observable<{ tasks: Task[] }> {
     const params: Record<string, string> = {};
     if (filters.workspace) params['workspace'] = filters.workspace;
     if (filters.status) params['status'] = filters.status;
+    if (filters.range) params['range'] = filters.range;
     return this.http.get<{ tasks: Task[] }>('/api/tasks', { params });
   }
 

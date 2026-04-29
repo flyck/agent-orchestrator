@@ -128,7 +128,8 @@ export const tasks = new Hono<{ Variables: TaskVar }>();
 tasks.get("/", (c) => {
   const workspace = c.req.query("workspace") as TaskWorkspace | undefined;
   const status = c.req.query("status") as TaskStatus | undefined;
-  return c.json({ tasks: listTasks({ workspace, status }) });
+  const range = c.req.query("range") as "today" | "yesterday" | "week" | undefined;
+  return c.json({ tasks: listTasks({ workspace, status, range }) });
 });
 
 /** Live queue snapshot — drives a "running 2/3 · 1 queued" pipeline meter. */
