@@ -42,8 +42,12 @@ The coder will read this file before writing code, so:
 
 ### Required sections
 
+The top-level header **must** be exactly `# Planner agent notes` —
+the coder is told to look for that header and use the block under it
+as its discovery, so don't rename it.
+
 ```markdown
-# Task <TASK_ID>
+# Planner agent notes — <TASK_ID>
 
 ## Context
 (One paragraph. What is the task about, in your own words. Plain English.)
@@ -76,8 +80,10 @@ iterations append here so re-plans are visible.)
 ```
 
 If `.agent-notes/<TASK_ID>.md` already exists, **merge** rather than
-overwrite. Keep the user's send-back feedback (if any) intact in
-`Changelog`.
+overwrite — keep the `# Planner agent notes` block at the top of the
+file, refresh its sub-sections in place, and append a Changelog line.
+Other agents (coder, reviewer) may have appended their own
+sections below; leave those alone.
 
 ## Output to the user
 

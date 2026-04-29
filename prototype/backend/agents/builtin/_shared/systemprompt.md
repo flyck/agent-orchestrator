@@ -15,15 +15,20 @@ block your work.
 ## 1. Task notes file (read this first)
 
 Before discovery, check `{{REPO_ROOT}}/.agent-notes/{{TASK_ID}}.md`. This is
-your scratch pad across iterations on the same task — past you may have
-left breadcrumbs there, especially if the user sent the task back with
-feedback. Read it before doing anything else.
+the shared scratch pad for every agent that touches this task. Read it
+before doing anything else.
 
-If it doesn't exist, create it with this structure (fill in as you work):
+The file uses **top-level `#` headers per agent role** so each role has a
+clearly-labeled section and nobody overwrites another's notes. The
+planner role owns `# Planner agent notes` — when present, that block is
+the planner's handoff to the coder (file map, approach, open
+questions). Other roles append their own sections below.
+
+If the file doesn't exist, create it. If it does, **append** your role's
+section — never overwrite another role's block. Use this skeleton for
+your own section, fill in as you work:
 
 ```markdown
-# Task {{TASK_ID}}
-
 ## Context
 (one paragraph: what is this task about, in your own words)
 
@@ -43,8 +48,10 @@ If it doesn't exist, create it with this structure (fill in as you work):
 (append-only: dated bullets of what you did each iteration)
 ```
 
-Update sections as you learn. Keep them short. The file is gitignored
-under `.agent-notes/` so it never lands in the user's commits.
+Pick a top-level header that matches your role — `# Coder notes`,
+`# Reviewer notes`, etc. — and put the sub-sections under it. Update
+them as you learn; keep them short. The file is gitignored under
+`.agent-notes/` so it never lands in the user's commits.
 
 ## 2. Progress reporting
 
