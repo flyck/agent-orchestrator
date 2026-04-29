@@ -19,3 +19,9 @@ leveraging git worktrees, to orchestrate everyday coding tasks.
 
 For more info check the [`MANIFESTO.md`](MANIFESTO.md) — it lays out these non-negotiable
 principles that shape every design decision in more detail.
+
+## Screenshots
+
+|Task Dashboard|Task Item Detail|
+|-|-|
+|![Task Dashboard](.assets/home.png)|![Task Item Detail](.assets/task-detail.png)|
