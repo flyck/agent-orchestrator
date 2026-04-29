@@ -9,7 +9,7 @@ import {
   type PrFilter,
 } from '../../services/integrations.service';
 import { TasksService, type Task } from '../../services/tasks.service';
-import { formatTs, relativeTs } from '../home/home';
+import { formatTs, relativeTs } from '../../util/time';
 
 /**
  * PR-review pipeline phases (Design A). Mirrors the order in
