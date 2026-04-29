@@ -1,0 +1,128 @@
+<header class="page-head">
+  <p class="meta">workspace</p>
+  <h1>Cost</h1>
+  <p class="meta">tokens + spend recorded by the engine adapter</p>
+</header>
+
+<nav class="range-pills" aria-label="Range">
+  <button type="button" class="pill" [class.active]="range() === 'today'" (click)="setRange('today')">today</button>
+  <button type="button" class="pill" [class.active]="range() === '7d'"    (click)="setRange('7d')">7 days</button>
+  <button type="button" class="pill" [class.active]="range() === '30d'"   (click)="setRange('30d')">30 days</button>
+  <span class="meta range-label">· {{ rangeLabel() }}</span>
+</nav>
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
+<section class="totals">
+  <div class="total">
+    <p class="meta">spend</p>
+    <p class="total-value">{{ formatUsd(summary()?.total_cost_usd ?? 0) }}</p>
+  </div>
+  <div class="total">
+    <p class="meta">input tokens</p>
+    <p class="total-value">{{ formatTokens(summary()?.total_input_tokens ?? 0) }}</p>
+  </div>
+  <div class="total">
+    <p class="meta">output tokens</p>
+    <p class="total-value">{{ formatTokens(summary()?.total_output_tokens ?? 0) }}</p>
+  </div>
+  <div class="total">
+    <p class="meta">providers</p>
+    <p class="total-value">{{ summary()?.by_provider?.length ?? 0 }}</p>
+  </div>
+</section>
+
+<section class="chart-section">
+  <header class="section-head">
+    <h2>Daily spend</h2>
+    <p class="meta">stacked by provider · {{ rangeLabel() }}</p>
+  </header>
+  <apx-chart
+    [chart]="chartOptions().chart!"
+    [series]="chartOptions().series!"
+    [xaxis]="chartOptions().xaxis!"
+    [yaxis]="chartOptions().yaxis!"
+    [colors]="chartOptions().colors!"
+    [stroke]="chartOptions().stroke!"
+    [fill]="chartOptions().fill!"
+    [dataLabels]="chartOptions().dataLabels!"
+    [grid]="chartOptions().grid!"
+    [legend]="chartOptions().legend!"
+    [tooltip]="chartOptions().tooltip!"
+    [noData]="chartOptions().noData!" />
+</section>
+
+<section class="table-section">
+  <header class="section-head">
+    <h2>By provider · model</h2>
+    <p class="meta">all (provider, model) pairs over {{ rangeLabel() }}</p>
+  </header>
+  @if (byModel().length === 0) {
+    <p class="meta empty">no events</p>
+  } @else {
+    <table class="cost-table">
+      <thead>
+        <tr>
+          <th>provider</th>
+          <th>model</th>
+          <th class="num">events</th>
+          <th class="num">in</th>
+          <th class="num">out</th>
+          <th class="num">cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (m of byModel(); track m.provider_id + ':' + m.model_id) {
+          <tr>
+            <td class="mono">{{ m.provider_id }}</td>
+            <td class="mono">{{ m.model_id }}</td>
+            <td class="num mono">{{ m.events }}</td>
+            <td class="num mono">{{ formatTokens(m.input_tokens) }}</td>
+            <td class="num mono">{{ formatTokens(m.output_tokens) }}</td>
+            <td class="num mono">{{ formatUsd(m.cost_usd) }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</section>
+
+<section class="table-section">
+  <header class="section-head">
+    <h2>Top tasks</h2>
+    <p class="meta">most expensive runs over {{ rangeLabel() }} · click to open</p>
+  </header>
+  @if (topTasks().length === 0) {
+    <p class="meta empty">no tasks with usage events in this range</p>
+  } @else {
+    <table class="cost-table">
+      <thead>
+        <tr>
+          <th>task</th>
+          <th>status</th>
+          <th class="num">events</th>
+          <th class="num">in</th>
+          <th class="num">out</th>
+          <th class="num">cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (t of topTasks(); track t.task_id) {
+          <tr class="task-row" (click)="openTask(t.task_id)">
+            <td class="task-cell">
+              <span class="task-title">{{ t.task_title ?? '(untitled)' }}</span>
+              <span class="task-id meta mono">{{ t.task_id.slice(0, 8) }}</span>
+            </td>
+            <td class="meta mono">{{ t.task_status ?? '—' }}</td>
+            <td class="num mono">{{ t.events }}</td>
+            <td class="num mono">{{ formatTokens(t.input_tokens) }}</td>
+            <td class="num mono">{{ formatTokens(t.output_tokens) }}</td>
+            <td class="num mono">{{ formatUsd(t.cost_usd) }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</section>

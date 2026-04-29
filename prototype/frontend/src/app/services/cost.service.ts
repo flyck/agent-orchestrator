@@ -24,11 +24,43 @@ export interface CostSummary {
   by_provider: ProviderTotal[];
 }
 
+export type CostRange = 'today' | '7d' | '30d';
+
+export interface ModelCostRow {
+  provider_id: string;
+  model_id: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  events: number;
+}
+
+export interface TaskCostRow {
+  task_id: string;
+  task_title: string | null;
+  task_status: string | null;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  events: number;
+  last_event_ts: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class CostService {
   private http = inject(HttpClient);
 
-  summary(range: 'today' | '7d' | '30d' = '7d'): Observable<CostSummary> {
+  summary(range: CostRange = '7d'): Observable<CostSummary> {
     return this.http.get<CostSummary>(`/api/cost/summary?range=${range}`);
+  }
+
+  byModel(range: CostRange = '7d'): Observable<{ by_model: ModelCostRow[] }> {
+    return this.http.get<{ by_model: ModelCostRow[] }>(`/api/cost/by-model?range=${range}`);
+  }
+
+  topTasks(range: CostRange = '7d', limit = 10): Observable<{ tasks: TaskCostRow[] }> {
+    return this.http.get<{ tasks: TaskCostRow[] }>(
+      `/api/cost/top-tasks?range=${range}&limit=${limit}`,
+    );
   }
 }

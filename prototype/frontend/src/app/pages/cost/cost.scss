@@ -1,0 +1,135 @@
+:host { display: block; max-width: 1100px; }
+
+.page-head {
+  margin-bottom: 16px;
+  h1 { margin: 4px 0 0; }
+}
+
+.error {
+  color: var(--ink-red);
+  border: 1px solid var(--ink-red);
+  background: var(--ink-red-bg);
+  padding: 10px 12px;
+  border-radius: 2px;
+  margin: 0 0 16px;
+}
+
+.range-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 24px;
+}
+.range-label {
+  margin-left: 6px;
+}
+.pill {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  padding: 4px 12px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-radius: 999px;
+}
+.pill:hover { color: var(--ink); }
+.pill.active {
+  color: var(--ink);
+  border-color: var(--ink);
+  background: var(--paper-soft);
+}
+
+.totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px 24px;
+  margin-bottom: 28px;
+}
+.total {
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  p { margin: 0; }
+}
+.total-value {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+  h2 { margin: 0; font-size: 16px; font-weight: 500; }
+}
+
+.chart-section {
+  margin-bottom: 32px;
+  border-top: 1px solid var(--rule);
+  padding-top: 20px;
+}
+
+.table-section {
+  margin-bottom: 32px;
+  border-top: 1px solid var(--rule);
+  padding-top: 20px;
+}
+.empty {
+  margin: 0;
+  padding: 12px 0;
+}
+
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cost-table th,
+.cost-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+}
+.cost-table th {
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+.cost-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cost-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.task-row {
+  cursor: pointer;
+}
+.task-row:hover {
+  background: var(--paper-soft);
+}
+.task-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.task-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}
+.task-id {
+  font-size: 11px;
+}
