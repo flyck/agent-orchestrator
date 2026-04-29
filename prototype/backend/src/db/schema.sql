@@ -330,3 +330,25 @@ CREATE TABLE IF NOT EXISTS usage_events (
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts          ON usage_events(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_events_provider_ts ON usage_events(provider_id, ts);
+
+-- Many-to-many link from local tasks to GitHub issues. The user
+-- authors the relationship — the orchestrator never invents one. When
+-- a task with linked issues completes, the suggestion engine surfaces
+-- any issue still 'open' on GitHub as a "this issue is still open —
+-- close it or keep going" reminder.
+--
+-- title_snapshot / url_snapshot are taken at link time so we can render
+-- the link even if GitHub is unreachable. The current open/closed state
+-- is fetched live by the suggestion generator.
+CREATE TABLE IF NOT EXISTS task_issue_links (
+  task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  repo           TEXT NOT NULL,    -- "owner/name"
+  issue_number   INTEGER NOT NULL,
+  title_snapshot TEXT,
+  url_snapshot   TEXT,
+  linked_at      INTEGER NOT NULL,
+  PRIMARY KEY (task_id, repo, issue_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_issue_links_task  ON task_issue_links(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_issue_links_issue ON task_issue_links(repo, issue_number);

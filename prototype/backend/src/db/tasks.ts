@@ -157,6 +157,10 @@ export interface TaskRow {
    *  html_url}); other task types may use it later. Parse with
    *  `parseTaskMetadata`. */
   metadata_json: string | null;
+  /** Agent-compiled Conventional Commits message, generated when the
+   *  task transitions to Ready. The user can edit before finalize.
+   *  null until generation succeeds; finalize falls back to the title. */
+  proposed_commit_message: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -430,6 +434,19 @@ export function markAbandoned(id: string, handle: Database = db()): TaskRow | nu
   handle
     .prepare("UPDATE tasks SET abandoned_at = ?, updated_at = ? WHERE id = ?")
     .run(now, now, id);
+  return getTask(id, handle);
+}
+
+/** Persist (or clear) the agent-compiled commit message. The user may
+ *  later edit this through the finalize UI; that path uses the same setter. */
+export function setProposedCommitMessage(
+  id: string,
+  message: string | null,
+  handle: Database = db(),
+): TaskRow | null {
+  handle
+    .prepare("UPDATE tasks SET proposed_commit_message = ?, updated_at = ? WHERE id = ?")
+    .run(message, Date.now(), id);
   return getTask(id, handle);
 }
 

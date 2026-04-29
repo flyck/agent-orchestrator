@@ -101,6 +101,9 @@ function applyMigrations(db: Database) {
   // Per-alternative concept diagram (Mermaid source). null when the
   // explorer didn't or couldn't draw one.
   ensureColumn("task_alternatives", "diagram_mermaid", "TEXT");
+  // Agent-compiled Conventional Commits message generated when the task
+  // reaches Ready. The user can edit it before clicking finalize.
+  ensureColumn("tasks", "proposed_commit_message", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {
@@ -139,6 +142,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // Wired in Phase 13 when the GitHub provider lands; setting is here so
   // the UI can show it from day one.
   pr_review_poll_interval_minutes: "5",
+  // Suggested-next-steps generator. When false, finalizeTask skips the
+  // history scan and the per-task panel stays empty. Spec:
+  // docs/15-integrations-and-suggested-next.md.
+  suggestions_enabled: "true",
 };
 
 function seedDefaultSettings(db: Database) {

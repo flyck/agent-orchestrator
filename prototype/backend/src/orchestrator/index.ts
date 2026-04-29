@@ -16,7 +16,6 @@
  */
 
 import type { EngineEvent, EngineSession } from "../engine/types";
-import { OpenCodeSession } from "../engine/opencode";
 import { getEngine } from "../engine/singleton";
 import {
   clearNeedsFeedback,
@@ -36,8 +35,8 @@ import {
   type TaskRow,
 } from "../db/tasks";
 import { incrementCompletedSinceNudge, readAllSettings } from "../db/settings";
-import { listSkills, renderSkillsSection } from "./skills";
-import { renderRepoContext } from "./repoContext";
+import { generateGithubIssueSuggestions, generateHistorySuggestions } from "./suggestions";
+import { composeCommitMessage } from "./commitMessage";
 import {
   buildPlannerMessage,
   buildPlannerSystemPrompt,
@@ -61,15 +60,20 @@ import {
 } from "./reviewer";
 import { createWorktree, findRepoRoot as findRoot } from "./worktree";
 import * as queue from "../queue";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import {
+  ambientContext,
+  buildInitialMessage,
+  buildSystemPrompt,
+  renderSharedPrompt,
+} from "./prompts";
 import { recordUsageEvent } from "../db/usageEvents";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { appendReview } from "../db/reviews";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function findRepoRoot(start: string): string | null {
   let cur = resolve(start);
@@ -147,71 +151,6 @@ interface PumpResult {
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 
-function backendUrl(): string {
-  const port = Number(process.env.PORT ?? 3000);
-  return `http://localhost:${port}`;
-}
-
-const SHARED_PROMPT_PATH = fileURLToPath(
-  new URL("../../agents/builtin/_shared/systemprompt.md", import.meta.url),
-);
-
-/** Read once at startup; cheap, ~3KB, no file watching needed. */
-const SHARED_PROMPT_TEMPLATE = (() => {
-  try {
-    return readFileSync(SHARED_PROMPT_PATH, "utf8");
-  } catch (e) {
-    log.error("orchestrator.shared_prompt.read_failed", {
-      error: String(e),
-      path: SHARED_PROMPT_PATH,
-    });
-    return "";
-  }
-})();
-
-function renderSharedPrompt(taskId: string, cwd: string): string {
-  return SHARED_PROMPT_TEMPLATE.replaceAll("{{TASK_ID}}", taskId)
-    .replaceAll("{{BASE_URL}}", backendUrl())
-    .replaceAll("{{REPO_ROOT}}", cwd);
-}
-
-/**
- * Skills + repo-context blocks concatenated. Used by every agent's
- * system prompt — coder, reviewer, planner — so they all see the same
- * ambient project background. Cheap to compute (one stat + a few file
- * reads) so we recompute per-run rather than caching.
- */
-function ambientContext(cwd: string): string {
-  const settings = readAllSettings();
-  const skillsSection = renderSkillsSection(listSkills(settings.skills_directory));
-  const repoContextSection = settings.repo_context_enabled
-    ? renderRepoContext({
-        cwd,
-        readmeTokenBudget: settings.readme_token_budget,
-        backlogTokenBudget: settings.backlog_token_budget,
-      })
-    : "";
-  return `${skillsSection}${repoContextSection}`;
-}
-
-function buildSystemPrompt(taskId: string, cwd: string): string {
-  return `${renderSharedPrompt(taskId, cwd)}
-
----
-
-# Role
-
-You are an autonomous coding agent. Your working directory is \`${cwd}\`. Treat that path as the root of the project — read the files there to understand what kind of codebase it is (language, framework, conventions), then make the change the user is asking for.
-
-Use the file-editing tools available to you. Keep the change scoped — touch only what the task asks for. Prefer surgical edits over rewrites.
-
-# Do NOT run git
-
-Do not run \`git add\`, \`git commit\`, \`git push\`, \`git checkout\`, \`git branch\`, or any other git command. Even if your bash tool would let you. The orchestrator owns this worktree's branch and will commit your edits when the user clicks Finalize. If you commit yourself you'll create messages the user didn't write and confuse the finalize step. Just edit the files; leave them uncommitted.
-
-When you are done, summarize what you changed in 2-3 sentences. The user reviews via Finalize → Commit to current branch / new branch.${ambientContext(cwd)}`;
-}
-
 const active = new Map<string, ActiveTask>();
 
 export function getActive(taskId: string): ActiveTask | undefined {
@@ -221,6 +160,20 @@ export function getActive(taskId: string): ActiveTask | undefined {
 export function addListener(taskId: string, fn: (e: EngineEvent) => void): () => void {
   const a = active.get(taskId);
   if (!a) throw new Error(`task not running: ${taskId}`);
+  a.listeners.add(fn);
+  return () => a.listeners.delete(fn);
+}
+
+/** Non-throwing variant. Returns null when the task isn't currently in
+ *  the active map (queued / paused / closed). The SSE handler uses this
+ *  to attach without crashing the stream during the queued→running race
+ *  or when subscribing to a task that's awaiting user input. */
+export function tryAddListener(
+  taskId: string,
+  fn: (e: EngineEvent) => void,
+): (() => void) | null {
+  const a = active.get(taskId);
+  if (!a) return null;
   a.listeners.add(fn);
   return () => a.listeners.delete(fn);
 }
@@ -483,8 +436,11 @@ async function pumpUntilTerminal(a: ActiveTask): Promise<PumpResult> {
         type: ev.type,
       });
 
-      // Auto-grant permissions — same as before.
-      if (ev.type === "permission.asked" && session instanceof OpenCodeSession) {
+      // Auto-grant permissions when the engine surfaces them. Engines
+      // that don't negotiate per-tool gates (Claude — runs with
+      // bypassPermissions) leave session.respondToPermission undefined,
+      // and this branch is a no-op.
+      if (ev.type === "permission.asked" && session.respondToPermission) {
         const reqId = (ev.raw as { properties?: { id?: string } }).properties?.id;
         if (reqId) {
           log.info("orchestrator.run.permission_auto_grant", { taskId, reqId });
@@ -655,6 +611,37 @@ function finalizeTask(
       log.info("orchestrator.run.nudge_counter_bumped", { taskId, completed: n });
     } catch (err) {
       log.warn("orchestrator.run.nudge_counter_failed", { taskId, error: String(err) });
+    }
+    // "Suggested next" generation. Re-fetch the row so we see the
+    // just-updated status — the generator filters on it. History source
+    // runs synchronously; the GitHub source involves network I/O so we
+    // fire-and-forget on a microtask.
+    try {
+      const fresh = getTask(taskId);
+      if (fresh) {
+        generateHistorySuggestions(fresh);
+        void generateGithubIssueSuggestions(fresh).catch((err) =>
+          log.warn("orchestrator.run.github_suggestions_failed", {
+            taskId,
+            error: String(err),
+          }),
+        );
+      }
+    } catch (err) {
+      log.warn("orchestrator.run.suggestions_failed", { taskId, error: String(err) });
+    }
+    // Compose the Conventional Commits message in the background. The
+    // user's first action in the Ready state is reading the diff and
+    // clicking finalize — by then the message should be ready and
+    // surface as an editable textarea. Best-effort; no error blocks the
+    // ready transition.
+    if (finalState === "ready") {
+      void composeCommitMessage(taskId).catch((err) =>
+        log.warn("orchestrator.run.commit_message_failed", {
+          taskId,
+          error: String(err),
+        }),
+      );
     }
   }
   const lastErrorStr = lastError
@@ -1284,26 +1271,6 @@ async function switchToCoder(a: ActiveTask, task: TaskRow, feedback?: string): P
   );
 }
 
-function buildInitialMessage(task: TaskRow, followUp?: string): string {
-  const head = `# Task: ${task.title}
-
-${task.input_payload}`;
-  if (!followUp) return `${head}
-
-Begin.`;
-  return `${head}
-
----
-
-# Follow-up from the user
-
-You finished a previous round and the user reviewed the result. They have new feedback, listed below. Read it carefully and revise the change. Discovery (re-reading any files you may have changed) is step 0; pick a fresh step plan and report progress as before.
-
-${followUp}
-
-Begin the revision.`;
-}
-
 export async function cancelRun(taskId: string): Promise<void> {
   const a = active.get(taskId);
   if (!a) {
@@ -1342,7 +1309,7 @@ async function watchdogTick(): Promise<void> {
     });
     try {
       const engine = await getEngine();
-      const messages = (await engine.getSessionMessages(a.session.id, 5)) as Array<{
+      const messages = (await engine.getTranscript(a.session.id, 5)) as Array<{
         info?: { role?: string; finish?: string; error?: unknown; cost?: number };
       }>;
       const last = messages.at(-1);

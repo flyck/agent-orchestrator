@@ -78,7 +78,13 @@ export async function finalizeTask(
   // already committed (against orders — but the build agent's bash tool
   // sometimes does this), commitInWorktree detects HEAD past base and
   // succeeds with the existing SHA.
-  const commitMsg = input.message ?? `${task.title}\n\n(via agent-orchestrator task ${task.id})`;
+  // Message precedence: user's textarea (input.message) → agent-compiled
+  // proposed_commit_message (Conventional Commits) → title-based fallback
+  // (legacy behaviour for tasks created before the compiler existed).
+  const commitMsg =
+    input.message?.trim() ||
+    task.proposed_commit_message ||
+    `${task.title}\n\n(via agent-orchestrator task ${task.id})`;
   const commit = commitInWorktree({
     worktreePath: task.worktree_path,
     message: commitMsg,
@@ -274,7 +280,21 @@ async function legacyInPlaceFinalize(
   const add = await run("git", ["add", "-A"]);
   sayRun("git add -A", add);
 
-  const msg = input.message ?? `${title}\n\n(via agent-orchestrator task ${taskId})`;
+  // Same message precedence as the worktree path — user input wins, then
+  // proposed_commit_message, then title fallback. We fetch the task here
+  // to avoid threading proposed_commit_message through the legacy fn
+  // signature.
+  const proposed = (() => {
+    try {
+      return getTask(taskId)?.proposed_commit_message ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const msg =
+    input.message?.trim() ||
+    proposed ||
+    `${title}\n\n(via agent-orchestrator task ${taskId})`;
   const commit = await run("git", ["commit", "-m", msg]);
   sayRun("git commit", commit);
   if (commit.code !== 0) throw new Error(`git commit failed`);
