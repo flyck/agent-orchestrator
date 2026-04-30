@@ -88,15 +88,6 @@
         @if (tasksError()) {
           <span class="meta error">backend error: {{ tasksError() }}</span>
         }
-        <div class="range-buttons">
-          <button type="button" [class.selected]="pipelineRange() === 'today'" (click)="setPipelineRange('today')">Today</button>
-          <button type="button" [class.selected]="pipelineRange() === 'yesterday'" (click)="setPipelineRange('yesterday')">Yesterday</button>
-          <button type="button" [class.selected]="pipelineRange() === 'week'" (click)="setPipelineRange('week')">This week</button>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" [checked]="showClosed()" (change)="toggleClosed()" />
-          <span>show closed</span>
-        </label>
       </div>
     </div>
   </header>
@@ -245,7 +236,13 @@
   </div>
 </section>
 
-<!-- ─── Inline task detail (expands on card click) ──────────────────────── -->
+<!-- ─── Task detail template ────────────────────────────────────────────
+     The same detail surface renders in two places: directly below the
+     pipeline kanban for in-flight selections, and inline (expanded
+     under a Done row) for finalized selections. Wrapping it in an
+     `<ng-template>` lets us reuse the markup via *ngTemplateOutlet
+     without duplication. -->
+<ng-template #taskDetailTpl>
 @let sel = selectedTask();
 @if (sel) {
   <section class="block detail" [class.attention]="sel.needsAttention">
@@ -1058,32 +1055,69 @@
     </div>
   </section>
 }
+</ng-template>
+
+<!-- ─── Detail mount: in-flight tasks render here, directly below the
+     kanban. Finalized tasks render expanded under their Done row
+     instead — see the @if check on state. The fallback `!visibleInDone`
+     covers a finalized selection that's outside the active Done range
+     (otherwise the user would see no detail at all). -->
+@let detailSel = selectedTask();
+@if (detailSel) {
+  @let visibleInDone = doneTasks().some((t) => t.raw.id === detailSel!.raw.id);
+  @if (detailSel.state !== 'finalize' || !visibleInDone) {
+    <ng-container *ngTemplateOutlet="taskDetailTpl"></ng-container>
+  }
+}
 
 <!-- ─── Done ────────────────────────────────────────────────────────────── -->
-<!-- Finalized tasks live here, not in the kanban. Click an item to open it
-     in the detail card above (same selectTask flow as a kanban card). -->
+<!-- Finalized tasks live here, not in the kanban. Click a row to expand
+     the full detail in place (same surface as the upper detail card);
+     click again to collapse. The range buttons scope the list to today
+     / yesterday / this week. -->
 <section class="block done">
   <header class="block-head">
     <div>
-      <p class="meta">finalized · click to inspect</p>
+      <p class="meta">finalized · click to expand</p>
       <h2>Done</h2>
     </div>
-    <span class="meta">{{ doneTasks().length }} task(s)</span>
+    <div class="usage-controls">
+      <div class="range-buttons">
+        <button type="button"
+                [class.selected]="doneRange() === 'today'"
+                (click)="setDoneRange('today')">Today</button>
+        <button type="button"
+                [class.selected]="doneRange() === 'yesterday'"
+                (click)="setDoneRange('yesterday')">Yesterday</button>
+        <button type="button"
+                [class.selected]="doneRange() === 'week'"
+                (click)="setDoneRange('week')">This week</button>
+      </div>
+      <span class="meta">{{ doneTasks().length }} task(s)</span>
+    </div>
   </header>
   @if (doneTasks().length === 0) {
-    <p class="muted small">No finalized tasks yet.</p>
+    <p class="muted small">No finalized tasks in this range.</p>
   } @else {
     <ul class="done-list">
       @for (vt of doneTasks(); track vt.raw.id) {
-        <li>
+        <li class="done-row" [class.expanded]="selectedId() === vt.raw.id">
           <button type="button"
                   class="done-item"
                   [class.selected]="selectedId() === vt.raw.id"
                   (click)="selectTask(vt.raw.id)">
+            <span class="done-chevron" aria-hidden="true">
+              {{ selectedId() === vt.raw.id ? '▾' : '▸' }}
+            </span>
             <span class="kind">{{ kindLabels[vt.kind] }}</span>
             <span class="done-title">{{ vt.raw.title }}</span>
             <span class="done-meta meta">{{ relativeTs(vt.raw.updated_at) }}</span>
           </button>
+          @if (selectedId() === vt.raw.id) {
+            <div class="done-detail">
+              <ng-container *ngTemplateOutlet="taskDetailTpl"></ng-container>
+            </div>
+          }
         </li>
       }
     </ul>

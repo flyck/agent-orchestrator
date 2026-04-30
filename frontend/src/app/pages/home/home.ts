@@ -9,6 +9,7 @@ import {
   signal,
   viewChild,
 } from "@angular/core";
+import { NgTemplateOutlet } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { ActivatedRoute, Router } from "@angular/router";
 import { NgApexchartsModule, type ApexOptions } from "ng-apexcharts";
@@ -330,6 +331,7 @@ function toViewTask(t: Task): ViewTask {
   standalone: true,
   imports: [
     NgApexchartsModule,
+    NgTemplateOutlet,
     FormsModule,
     NewTaskDialog,
     ScoringRadar,
@@ -429,19 +431,21 @@ export class HomePage {
   protected readonly tasks = signal<ViewTask[]>([]);
   protected readonly tasksLoading = signal(true);
   protected readonly tasksError = signal<string | null>(null);
-  protected readonly showClosed = signal(false);
-  protected readonly pipelineRange = signal<PipelineRange>("today");
-  private readonly pipelineRangeChanged = new Subject<void>();
+  /** Time-window filter for the Done list (today / yesterday / week).
+   *  Client-side only — the kanban always shows in-flight regardless of
+   *  age, so the backend list call is no longer range-scoped. */
+  protected readonly doneRange = signal<PipelineRange>("today");
 
-  setPipelineRange(r: PipelineRange) {
-    this.pipelineRange.set(r);
-    this.pipelineRangeChanged.next();
+  setDoneRange(r: PipelineRange) {
+    this.doneRange.set(r);
   }
 
-  protected readonly visibleTasks = computed(() => {
-    const t = this.tasks();
-    return this.showClosed() ? t : t.filter((x) => x.status === "open");
-  });
+  /** Kanban view: always in-flight only. The Done list below the detail
+   *  card holds finalized work, so the kanban no longer needs a "show
+   *  closed" toggle to surface them. */
+  protected readonly visibleTasks = computed(() =>
+    this.tasks().filter((x) => x.status === "open"),
+  );
 
   protected readonly tasksByState = computed(() => {
     const groups: Record<PipelineState, ViewTask[]> = {
@@ -462,14 +466,36 @@ export class HomePage {
   });
 
   /** Finalized tasks for the Done list under the detail card. Pulled
-   *  from the unfiltered task feed so the list is always populated
-   *  regardless of the kanban's "show closed" toggle — Done is *the*
-   *  view of closed-and-committed work, no need to also gate it. */
-  protected readonly doneTasks = computed(() =>
-    this.tasks()
-      .filter((t) => t.state === "finalize")
-      .sort((a, b) => b.raw.updated_at - a.raw.updated_at),
-  );
+   *  from the unfiltered task feed and bucketed by `doneRange` (today
+   *  / yesterday / week) on `created_at`. The range buttons in the
+   *  Done section header drive this. */
+  protected readonly doneTasks = computed(() => {
+    const range = this.doneRange();
+    const now = Date.now();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    let lo = 0;
+    let hi = Number.POSITIVE_INFINITY;
+    if (range === "today") {
+      lo = startOfToday.getTime();
+    } else if (range === "yesterday") {
+      hi = startOfToday.getTime();
+      lo = hi - 86_400_000;
+    } else if (range === "week") {
+      const day = startOfToday.getDay(); // Sunday = 0
+      // Treat Monday as the start of the week; shift back accordingly.
+      const offset = (day + 6) % 7;
+      lo = startOfToday.getTime() - offset * 86_400_000;
+    }
+    return this.tasks()
+      .filter(
+        (t) =>
+          t.state === "finalize" &&
+          t.raw.created_at >= lo &&
+          t.raw.created_at < hi,
+      )
+      .sort((a, b) => b.raw.updated_at - a.raw.updated_at);
+  });
 
   protected readonly openCount = computed(
     () => this.tasks().filter((t) => t.status === "open").length,
@@ -1820,10 +1846,8 @@ export class HomePage {
       });
     });
 
-    // Hydrate filter + selection + active detail tab from the URL.
+    // Hydrate selection + active detail tab from the URL.
     this.route.queryParamMap.pipe(takeUntil(this.destroy$)).subscribe((p) => {
-      const closed = p.get("closed");
-      this.showClosed.set(closed === "1" || closed === "true");
       const task = p.get("task");
       this.selectedId.set(task && task.length > 0 ? task : null);
       const tab = p.get("tab");
@@ -1883,12 +1907,14 @@ export class HomePage {
       )
       .subscribe((q) => this.queueState.set(q));
 
-    // Tasks — refresh every 2s, and immediately on range change.
-    merge(timer(0, 2000), this.pipelineRangeChanged.asObservable())
+    // Tasks — refresh every 2s. The Done list's range filter is now
+    // client-side, so the fetch isn't range-scoped anymore — the kanban
+    // always shows in-flight, and Done filters from the same payload.
+    timer(0, 2000)
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>
-          this.tasksApi.list({ range: this.pipelineRange() }).pipe(
+          this.tasksApi.list().pipe(
             catchError((e) => {
               this.tasksError.set(e?.message ?? String(e));
               return of({ tasks: [] as Task[] });
@@ -1960,12 +1986,11 @@ export class HomePage {
     this.destroy$.next();
     this.destroy$.complete();
     this.rangeChanged.complete();
-    this.pipelineRangeChanged.complete();
     this.closeStream();
   }
 
   refreshTasks() {
-    this.tasksApi.list({ range: this.pipelineRange() }).subscribe({
+    this.tasksApi.list().subscribe({
       next: (r) => {
         const views = r.tasks.map(toViewTask);
         this.tasks.set(views);
@@ -2042,12 +2067,6 @@ export class HomePage {
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
-  }
-
-  toggleClosed() {
-    const next = !this.showClosed();
-    this.showClosed.set(next);
-    this.syncQueryParams({ closed: next ? "1" : null });
   }
 
   setRange(range: "today" | "7d" | "30d") {
