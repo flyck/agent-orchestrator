@@ -1059,6 +1059,37 @@
   </section>
 }
 
+<!-- ─── Done ────────────────────────────────────────────────────────────── -->
+<!-- Finalized tasks live here, not in the kanban. Click an item to open it
+     in the detail card above (same selectTask flow as a kanban card). -->
+<section class="block done">
+  <header class="block-head">
+    <div>
+      <p class="meta">finalized · click to inspect</p>
+      <h2>Done</h2>
+    </div>
+    <span class="meta">{{ doneTasks().length }} task(s)</span>
+  </header>
+  @if (doneTasks().length === 0) {
+    <p class="muted small">No finalized tasks yet.</p>
+  } @else {
+    <ul class="done-list">
+      @for (vt of doneTasks(); track vt.raw.id) {
+        <li>
+          <button type="button"
+                  class="done-item"
+                  [class.selected]="selectedId() === vt.raw.id"
+                  (click)="selectTask(vt.raw.id)">
+            <span class="kind">{{ kindLabels[vt.kind] }}</span>
+            <span class="done-title">{{ vt.raw.title }}</span>
+            <span class="done-meta meta">{{ relativeTs(vt.raw.updated_at) }}</span>
+          </button>
+        </li>
+      }
+    </ul>
+  }
+</section>
+
 <!-- ─── Backlog ─────────────────────────────────────────────────────────── -->
 <section class="block backlog">
   <header class="block-head">

@@ -143,6 +143,57 @@
 .toggle:hover { background: var(--paper-soft); }
 .toggle input { margin: 0; }
 
+/* ─── Done list ───────────────────────────────────────────────────────── */
+/* Compact list of finalized tasks. Lives below the detail card so the
+   user can scan completed work without it cluttering the in-flight
+   kanban above. Each row clicks through to the same detail surface. */
+.done-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.done-item {
+  width: 100%;
+  text-align: left;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+.done-item:hover { background: var(--paper-soft); }
+.done-item.selected {
+  border-color: var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+.done-item .kind {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.done-item .done-title {
+  font-size: 14px;
+  line-height: 1.35;
+  font-family: var(--font-serif);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.done-item .done-meta {
+  white-space: nowrap;
+}
+
 /* Voice dictation toggle. Mirrors the .toggle pill so it sits naturally
    in pipeline-controls; flips to ink-red while recording to make the
    on-mic state unmistakable without a pulsing animation (manifesto #6

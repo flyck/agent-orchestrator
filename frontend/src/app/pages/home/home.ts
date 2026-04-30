@@ -72,6 +72,11 @@ export const PIPELINE_STATES = [
 ] as const;
 export type PipelineState = (typeof PIPELINE_STATES)[number];
 
+/** Subset of PIPELINE_STATES rendered as kanban columns. `finalize` is
+ *  excluded — finalized tasks live in the standalone Done list below
+ *  the detail card so the kanban stays focused on in-flight work. */
+export const KANBAN_STATES = ["spec", "plan", "code", "review", "ready"] as const;
+
 /** Who drives this state — used by the state strip to render a robot
  *  (agent) or engineer (human) icon over each node. */
 export const STATE_ROLE: Record<PipelineState, "human" | "agent"> = {
@@ -346,7 +351,7 @@ export class HomePage {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
-  protected readonly states = PIPELINE_STATES;
+  protected readonly states = KANBAN_STATES;
   protected readonly stateLabels = STATE_LABELS;
   protected readonly stateRole = STATE_ROLE;
   protected readonly kindLabels = KIND_LABELS;
@@ -455,6 +460,16 @@ export class HomePage {
     groups.ready.sort((a, b) => b.raw.updated_at - a.raw.updated_at);
     return groups;
   });
+
+  /** Finalized tasks for the Done list under the detail card. Pulled
+   *  from the unfiltered task feed so the list is always populated
+   *  regardless of the kanban's "show closed" toggle — Done is *the*
+   *  view of closed-and-committed work, no need to also gate it. */
+  protected readonly doneTasks = computed(() =>
+    this.tasks()
+      .filter((t) => t.state === "finalize")
+      .sort((a, b) => b.raw.updated_at - a.raw.updated_at),
+  );
 
   protected readonly openCount = computed(
     () => this.tasks().filter((t) => t.status === "open").length,
