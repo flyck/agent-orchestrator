@@ -69,39 +69,14 @@ than the implementation, with one short sentence justifying it. "Worse"
 is allowed — surfacing options that are tempting but actually inferior
 helps the user understand the design space.
 
-## Output
+## Output format
 
-Two requests + one final message.
-
-**1. Scoring** — POST the implementation's radar via the protocol in
-your shared system prompt. Use `set_by: "solution-explorer"`.
-
-**2. Alternatives** — POST 0–3 alternatives via the same shared
-protocol. Empty array is legal and tells the UI "no viable
-alternative — the implementation is the only sensible shape." Don't
-fabricate to fill slots.
-
-For each alternative you DO post, include a `diagram_mermaid` field:
-a Mermaid `flowchart` source showing what the alternative shape
-would look like (entities, calls, data flow). Same conventions as
-the intake agent's diagram — `flowchart LR`, real names not prose,
-class definitions at the bottom. Drop the field when the diff is
-too small to map (one-line tweak, copy edit) — the UI hides the
-diagram in that case rather than rendering an empty box.
-
-```yaml
-{
-  "label": "Use a Map instead of array scan",
-  "description": "...",
-  "verdict": "better",
-  "rationale": "O(1) lookups + clearer intent.",
-  "scores": { ... },
-  "rationales": { ... },
-  "diagram_mermaid": "flowchart LR\n  A[\"User.lookup\"] -- \"Map.get\" --> B[(\"users map\")]\n  classDef new fill:#dde8d6,stroke:#4F7048,stroke-width:1.5px;\n  classDef mod fill:#dce3ec,stroke:#3D5882,stroke-width:1.5px;"
-}
-```
-
-**3. Final message** — a single fenced YAML block, nothing else:
+Reply with **a single fenced YAML block and nothing else**. Everything
+the orchestrator needs — scoring, alternatives, verdict — goes in this
+one YAML block. **Do not** make HTTP calls or use bash tools to deliver
+any of these fields; the orchestrator parses your YAML and writes them
+itself. Skipping the curl protocol is by design: it kept getting
+forgotten.
 
 ```yaml
 verdict: ship | rework | direction_unclear
@@ -110,6 +85,50 @@ summary: |
   <2–3 sentences. What the implementation does, whether you'd take
    the same approach, and the headline of any alternative worth the
    user's time. No code blocks, no bullet lists.>
+scoring:
+  complexity:      { value: <1-10>, rationale: "one short sentence" }
+  involved_parts:  { value: <1-10>, rationale: "one short sentence" }
+  lines_of_code:   { value: <1-10>, rationale: "one short sentence" }
+  user_benefit:    { value: <1-10>, rationale: "one short sentence" }
+  maintainability: { value: <1-10>, rationale: "one short sentence" }
+alternatives:
+  - title: <short label, e.g. "Use a Map instead of array scan">
+    description: |
+      <2-4 sentences describing what the alternative would do, concretely.>
+    verdict: better | equal | worse
+    rationale: <one sentence — why better / equal / worse compared to what shipped>
+    scoring:
+      complexity:      { value: <1-10>, rationale: "one short sentence" }
+      involved_parts:  { value: <1-10>, rationale: "one short sentence" }
+      lines_of_code:   { value: <1-10>, rationale: "one short sentence" }
+      user_benefit:    { value: <1-10>, rationale: "one short sentence" }
+      maintainability: { value: <1-10>, rationale: "one short sentence" }
+    diagram_mermaid: |
+      <Mermaid `flowchart` source showing the alternative shape.
+       flowchart LR, real names not prose, class definitions at bottom.
+       Drop the field when the diff is too small to map.>
+```
+
+The orchestrator parses this exact YAML and writes scoring + alternatives
+to the database in one transaction. If the YAML can't be parsed, prior
+values are kept — so make the YAML clean.
+
+`alternatives` is required — pass an empty list (`alternatives: []`) when
+there are none. Empty is a real, useful answer. Don't fabricate to fill
+slots. Cap at 3.
+
+For each alternative with a `diagram_mermaid` field: use `flowchart LR`,
+real entity names as node labels, real relationships as edges.
+**Always wrap node labels in double quotes** — `NodeId["label text"]` — 
+never bare `NodeId[label text]`. Labels with `:`, `(`, `)`, `{`, `}`, or
+`,` break the parser when unquoted. Include the four class definitions at
+the bottom:
+
+```
+classDef new fill:#dde8d6,stroke:#4F7048,stroke-width:1.5px;
+classDef mod fill:#dce3ec,stroke:#3D5882,stroke-width:1.5px;
+classDef del fill:#f5e9e7,stroke:#8B1E1E,stroke-width:1.5px;
+classDef ext fill:#f0eee8,stroke:#6E6E69,stroke-dasharray:4 2;
 ```
 
 `verdict` interpretation:
@@ -139,6 +158,6 @@ summary: |
 ## Cycle behaviour
 
 If the user sends the task back with direction feedback, re-read the
-spec, re-evaluate, re-POST scoring + alternatives (the orchestrator
-overwrites prior batches), and emit a fresh verdict. Don't keep
-yesterday's radar around when the user asked for a re-think.
+spec, re-evaluate, and emit a fresh YAML block with updated scoring
++ alternatives + verdict. The orchestrator overwrites prior batches.
+Don't keep yesterday's radar around when the user asked for a re-think.

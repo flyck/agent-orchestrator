@@ -114,9 +114,22 @@ export class MermaidDiagram {
 
   private host = inject(ElementRef<HTMLElement>);
 
+  /**
+   * Agents sometimes forget to quote node labels containing special
+   * characters (e.g. `API[API: POST /foo]`). Mermaid interprets `:`
+   * as a token delimiter and fails. Wrap bare labels that contain
+   * `:`, `(`, `)`, `{`, or `}` in double quotes.
+   */
+  private sanitizeNodeLabels(src: string): string {
+    return src.replace(
+      /(\w+(?:\.\w+)*)\[([^"\]]*[:(){}][^\]]*)\]/g,
+      (_, id: string, label: string) => `${id}["${label}"]`,
+    );
+  }
+
   constructor() {
     effect(() => {
-      const text = (this.source() ?? '').trim();
+      const text = this.sanitizeNodeLabels((this.source() ?? '').trim());
       const dark = this.darkMode();
       if (!text) {
         this.svg.set('');

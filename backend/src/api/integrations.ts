@@ -17,7 +17,6 @@ import {
 import {
   fetchPullDiff,
   fetchPullRequest,
-  isRequestedReviewer,
   listPullRequests,
   listRepos,
   postIssueComment,
@@ -215,26 +214,6 @@ integrations.post("/github/prs/:owner/:repo/:number/review", async (c) => {
   }
   if (!cfg.login) {
     return c.json({ error: "no_login", message: "GitHub login wasn't recorded — reconnect" }, 400);
-  }
-
-  // Spec: don't review uninvited. Re-check `requested_reviewers` here
-  // even though the UI already gates the button — the user could have
-  // been removed as reviewer between the list call and the click.
-  try {
-    const ok = await isRequestedReviewer(cfg.token, repoFullName, number, cfg.login);
-    if (!ok) {
-      return c.json(
-        {
-          error: "not_requested_reviewer",
-          message: `@${cfg.login} is not currently a requested reviewer on ${repoFullName}#${number}.`,
-        },
-        403,
-      );
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.warn("api.integrations.github.review_check_failed", { repoFullName, number, message });
-    return c.json({ error: "review_check_failed", message }, 502);
   }
 
   let pr;

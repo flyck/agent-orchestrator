@@ -87,7 +87,12 @@ When you produce `diagram_mermaid`:
   classDef ext fill:#f0eee8,stroke:#6E6E69,stroke-dasharray:4 2;
   ```
 
-- Node label = the thing's actual name (`auth/middleware.ts`,
+- **Always wrap node labels in double quotes:** `API["POST /api/sessions"]`.
+  Never use bare square brackets without quotes — labels with `:` `(`
+  `)` `{` `}` or `,` will break the parser. The node ID (before the
+  brackets) is the short alias, unquoted; the label (inside the
+  brackets) is the display text, always quoted.
+- Node label text = the thing's actual name (`auth/middleware.ts`,
   `User.create`, `POST /api/sessions`). Don't rename for prose.
 - Edges = real relationships (`A -- "calls" --> B`,
   `A -- "writes to" --> Db`). Avoid invented edges to make the

@@ -233,19 +233,12 @@ function relativeTsIso(iso: string): string {
                   <p class="pr-body">{{ truncateBody(pr.body) }}</p>
                 }
                 <div class="pr-actions">
-                  @if (pr.awaiting_me) {
-                    <button class="primary"
-                            type="button"
-                            [disabled]="busyOn() === pr.repo + '#' + pr.number"
-                            (click)="reviewPr(pr)">
-                      {{ busyOn() === pr.repo + '#' + pr.number ? 'starting…' : 'review' }}
-                    </button>
-                  } @else {
-                    <button type="button" disabled
-                            title="The Review action only spawns a task when GitHub has actually requested @{{ login() }} as a reviewer.">
-                      not requested
-                    </button>
-                  }
+                  <button class="primary"
+                          type="button"
+                          [disabled]="busyOn() === pr.repo + '#' + pr.number"
+                          (click)="reviewPr(pr)">
+                    {{ busyOn() === pr.repo + '#' + pr.number ? 'starting…' : 'review' }}
+                  </button>
                 </div>
               </li>
             }
@@ -644,7 +637,6 @@ export class ReviewPage implements OnDestroy {
   }
 
   reviewPr(pr: GithubPr): void {
-    if (!pr.awaiting_me) return;
     const key = `${pr.repo}#${pr.number}`;
     this.busyOn.set(key);
     this.integrationsApi.reviewPr(pr.repo, pr.number).subscribe({
