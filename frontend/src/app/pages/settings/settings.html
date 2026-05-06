@@ -135,6 +135,14 @@
                (ngModelChange)="setDraft('worktree_max_age_days', $event)" />
       </label>
 
+      <label>
+        <span class="label">Git repos directory</span>
+        <input type="text" placeholder="~/git"
+               [ngModel]="s.git_repos_dir"
+               (ngModelChange)="setDraft('git_repos_dir', $event)" />
+        <span class="hint meta">Directory containing all your git repos. Used by the new-task dialog's repo dropdown and by agents to find the right working directory.</span>
+      </label>
+
       <label class="span-2 cmd-row">
         <span class="label">IDE open command</span>
         <div class="cmd-input">

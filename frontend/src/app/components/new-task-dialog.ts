@@ -1,6 +1,7 @@
 import { Component, computed, EventEmitter, inject, Output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TasksService, type TaskWorkspace } from '../services/tasks.service';
+import { RepoService, type RepoEntry } from '../services/repo.service';
 
 /** User-creatable kinds in this dialog. Excludes `review`, `background`,
  *  and `internal` — those are created by other flows (Review tab, the
@@ -172,6 +173,18 @@ const KINDS: KindOption[] = [
                      placeholder="One-line summary, e.g. 'Add Today/Week/Month range buttons to usage chart'"
                      maxlength="500" />
             </label>
+
+            @if (repos().length > 0) {
+              <label class="label-row">
+                <span class="label">Repository</span>
+                <select [ngModel]="repoPath()" (ngModelChange)="repoPath.set($event)" name="repo">
+                  <option [ngValue]="null">(none — no worktree isolation)</option>
+                  @for (r of repos(); track r.path) {
+                    <option [ngValue]="r.path">{{ r.name }}</option>
+                  }
+                </select>
+              </label>
+            }
           } @else {
             <p class="meta editing-context">
               editing <code class="mono">{{ editingId() }}</code> — saves a new revision.
@@ -310,6 +323,7 @@ const KINDS: KindOption[] = [
 })
 export class NewTaskDialog {
   private tasksApi = inject(TasksService);
+  private repoApi = inject(RepoService);
 
   protected readonly open = signal(false);
   protected readonly busy = signal(false);
@@ -320,8 +334,11 @@ export class NewTaskDialog {
   protected readonly title = signal('');
   protected readonly spec = signal(TEMPLATES.feature);
   protected readonly kind = signal<DialogKind>('feature');
-  /** When set, the dialog is in edit-spec mode for that task id. Null = create. */
   protected readonly editingId = signal<string | null>(null);
+
+  protected readonly repos = signal<RepoEntry[]>([]);
+  protected readonly repoPath = signal<string | null>(null);
+  protected readonly reposLoaded = signal(false);
 
   /** Soft hints listing section names whose body is still the template
    *  placeholder. Recomputed on every spec keystroke (cheap — small string,
@@ -347,9 +364,32 @@ export class NewTaskDialog {
     this.title.set(initial?.title ?? '');
     this.kind.set('feature');
     this.spec.set(initial?.spec ?? TEMPLATES.feature);
+    this.repoPath.set(null);
     this.status.set(null);
     this.error.set(false);
     this.open.set(true);
+    this.loadRepos();
+  }
+
+  showEdit(taskId: string, currentSpec: string) {
+    this.editingId.set(taskId);
+    this.title.set('');
+    this.spec.set(currentSpec);
+    this.repoPath.set(null);
+    this.status.set(null);
+    this.error.set(false);
+    this.open.set(true);
+  }
+
+  private loadRepos() {
+    if (this.reposLoaded()) return;
+    this.repoApi.listRepos().subscribe({
+      next: (r) => {
+        this.repos.set(r.repos);
+        this.reposLoaded.set(true);
+      },
+      error: () => this.repos.set([]),
+    });
   }
 
   /** Open in edit-spec mode, pre-filled with the current spec. */
@@ -399,6 +439,7 @@ export class NewTaskDialog {
         title,
         input_kind: 'spec',
         input_payload: this.spec(),
+        repo_path: this.repoPath(),
       })
       .subscribe({
         next: (t) => {
