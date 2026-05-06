@@ -8,6 +8,7 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from "@angular/core";
 import { Subject, type Subscription, timer } from "rxjs";
@@ -1074,11 +1075,13 @@ export class TaskDetailPanelComponent {
 
     effect(() => {
       const id = this.taskId();
-      if (!id) {
-        this.resetAll();
-        return;
-      }
-      this.loadAll(id);
+      untracked(() => {
+        if (!id) {
+          this.resetAll();
+          return;
+        }
+        this.loadAll(id);
+      });
     });
 
 
@@ -1165,13 +1168,13 @@ export class TaskDetailPanelComponent {
   private refreshDiff(taskId: string) {
     this.diffLoading.set(true);
     this.diffError.set(null);
-    const t = this.task();
     this.tasksApi.diff(taskId).subscribe({
       next: (d) => {
         this.diff.set(d as unknown as DiffResponse);
         this.diffLoading.set(false);
       },
       error: () => {
+        const t = this.task();
         this.repoApi.diff({ base: t?.worktree_base_ref ?? null }).subscribe({
           next: (d) => {
             this.diff.set(d);
