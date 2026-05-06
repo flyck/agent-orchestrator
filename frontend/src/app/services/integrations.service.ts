@@ -173,6 +173,19 @@ export class IntegrationsService {
     return this.http.delete<{ ok: boolean }>('/api/integrations/bitbucket');
   }
 
+  /** Manually override the Bitbucket workspace slug. Used when
+   *  /2.0/user/workspaces returns empty (identity-mismatch case for
+   *  some Atlassian API tokens). */
+  setBitbucketWorkspace(workspace: string): Observable<{
+    ok: boolean;
+    workspace: string;
+  }> {
+    return this.http.patch<{ ok: boolean; workspace: string }>(
+      '/api/integrations/bitbucket/workspace',
+      { workspace },
+    );
+  }
+
   /** Provider-agnostic repo listing for the watched-repos picker. */
   listRepos(): Observable<{
     source: 'github' | 'bitbucket' | null;

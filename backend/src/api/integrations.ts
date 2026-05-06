@@ -245,6 +245,34 @@ integrations.delete("/bitbucket", (c) => {
   return c.json({ ok });
 });
 
+/**
+ * Manual workspace slug override. Some credentials — particularly
+ * Atlassian API tokens whose identity differs from the Bitbucket
+ * member account — return an empty /2.0/user/workspaces response
+ * even though the user has access via the bitbucket.org UI. Letting
+ * the user type the slug directly bypasses the auto-discovery path.
+ */
+const bitbucketWorkspaceSchema = z.object({
+  workspace: z.string().min(1).max(160),
+});
+integrations.patch("/bitbucket/workspace", async (c) => {
+  const cfg = getBitbucketConfig();
+  if (!cfg) return c.json({ error: "not_connected" }, 400);
+  const body = await c.req.json().catch(() => null);
+  const parsed = bitbucketWorkspaceSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  const workspace = parsed.data.workspace.trim();
+  upsertIntegration(
+    "bitbucket",
+    { ...cfg, workspace },
+    true,
+  );
+  log.info("api.integrations.bitbucket.workspace_set", { workspace });
+  return c.json({ ok: true, workspace });
+});
+
 // ─── Generic (provider-agnostic) ─────────────────────────────────────────
 
 /**

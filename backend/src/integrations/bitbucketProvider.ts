@@ -94,10 +94,14 @@ export function makeBitbucketProvider(): PrSourceProvider {
       // persist so subsequent calls hit the fast path.
       let workspace = cfg.workspace ?? null;
       if (!workspace) {
+        // Throws BitbucketError on HTTP failure (status + body bubble
+        // up to the API layer). null means the call succeeded but
+        // values[] was empty — token authenticated but Atlassian
+        // reports zero workspaces visible to this identity.
         workspace = await bbGetMyFirstWorkspace(cfg.username, cfg.app_password);
         if (!workspace) {
           throw new Error(
-            "bitbucket_no_workspaces — credential cannot see any workspaces; check the read:workspace:bitbucket scope",
+            "bitbucket_empty_workspaces_response — /2.0/user/workspaces returned 200 with values=[]. The credential authenticates but Atlassian reports no workspaces. If you used an Atlassian email + token, this can happen when the token's identity differs from the workspace member identity — try using the Bitbucket username (the lowercase slug from your profile URL) with an app password instead.",
           );
         }
         upsertIntegration("bitbucket", { ...cfg, workspace }, true);

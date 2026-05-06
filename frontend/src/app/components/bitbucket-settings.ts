@@ -96,13 +96,58 @@ import { WatchedReposPicker } from './watched-repos-picker';
         }
       } @else {
         <p class="small">
-          Connected as <strong>{{ displayName() ?? username() }}</strong>
-          @if (workspace()) { · workspace <code>{{ workspace() }}</code> }.
+          Connected as <strong>{{ displayName() ?? username() }}</strong>.
           @if (lastError()) {
             <span class="error"> Last sync error: {{ lastError() }}</span>
           }
         </p>
-        <app-watched-repos-picker [initialSelection]="watchedRepos()" />
+
+        <!-- Workspace slug. Editable so users can fix the auto-detected
+             slug (or set it from scratch when /2.0/user/workspaces
+             returned empty for an API-token identity). -->
+        <section class="bb-workspace">
+          <header class="bb-ws-head">
+            <span class="meta">workspace slug</span>
+            @if (workspace() && !editingWorkspace()) {
+              <code class="bb-ws-current">{{ workspace() }}</code>
+              <button type="button" class="meta-action" (click)="startEditWorkspace()">
+                change
+              </button>
+            }
+          </header>
+
+          @if (!workspace() || editingWorkspace()) {
+            <div class="bb-ws-row">
+              <input class="bb-ws-input"
+                     type="text"
+                     placeholder="e.g. whereversim — the slug from bitbucket.org/<slug>/…"
+                     [(ngModel)]="workspaceDraft"
+                     (keydown.enter)="saveWorkspace()" />
+              <button type="button"
+                      class="primary"
+                      [disabled]="workspaceSaving() || !workspaceDraft.trim()"
+                      (click)="saveWorkspace()">
+                {{ workspaceSaving() ? 'saving…' : 'save' }}
+              </button>
+              @if (workspace() && editingWorkspace()) {
+                <button type="button"
+                        (click)="cancelEditWorkspace()"
+                        [disabled]="workspaceSaving()">
+                  cancel
+                </button>
+              }
+            </div>
+            <p class="muted small">
+              Type your workspace slug (the part of <code>bitbucket.org/&lt;slug&gt;/&lt;repo&gt;</code>).
+              Saving here updates the API scope used for repo / PR listings.
+            </p>
+          }
+        </section>
+
+        @if (workspace()) {
+          <app-watched-repos-picker [initialSelection]="watchedRepos()" />
+        }
+
         <div class="bb-actions">
           <button type="button" (click)="rotate()">rotate credential</button>
           <button type="button" class="danger" (click)="disconnect()">disconnect</button>
@@ -145,6 +190,44 @@ import { WatchedReposPicker } from './watched-repos-picker';
         margin: 8px 0;
       }
       .bb-user, .bb-secret {
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+      }
+
+      .bb-workspace {
+        margin: 12px 0;
+        border-top: 1px dashed var(--rule);
+        padding-top: 10px;
+      }
+      .bb-ws-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin-bottom: 6px;
+        .meta { margin: 0; }
+        .meta-action {
+          font-size: 11px;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          background: transparent;
+          border: 1px solid var(--rule-strong);
+          padding: 3px 8px;
+        }
+      }
+      .bb-ws-current {
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+        background: var(--paper-soft);
+        padding: 1px 6px;
+        border: 1px solid var(--rule);
+      }
+      .bb-ws-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        margin: 4px 0 6px;
+      }
+      .bb-ws-input {
         font-family: var(--font-mono);
         font-size: 12.5px;
       }
@@ -192,6 +275,7 @@ export class BitbucketSettings implements OnInit {
 
   protected usernameDraft = '';
   protected passwordDraft = '';
+  protected workspaceDraft = '';
 
   protected readonly username = signal<string | null>(null);
   protected readonly displayName = signal<string | null>(null);
@@ -201,6 +285,8 @@ export class BitbucketSettings implements OnInit {
   protected readonly lastError = signal<string | null>(null);
   protected readonly saving = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly editingWorkspace = signal(false);
+  protected readonly workspaceSaving = signal(false);
 
   protected status(): string {
     return this.connected() ? 'configured' : 'not connected';
@@ -261,6 +347,36 @@ export class BitbucketSettings implements OnInit {
         this.username.set(null);
         this.displayName.set(null);
         this.workspace.set(null);
+      },
+    });
+  }
+
+  startEditWorkspace(): void {
+    this.workspaceDraft = this.workspace() ?? '';
+    this.editingWorkspace.set(true);
+    this.errorMessage.set(null);
+  }
+
+  cancelEditWorkspace(): void {
+    this.editingWorkspace.set(false);
+    this.workspaceDraft = '';
+  }
+
+  saveWorkspace(): void {
+    const slug = this.workspaceDraft.trim();
+    if (!slug || this.workspaceSaving()) return;
+    this.workspaceSaving.set(true);
+    this.errorMessage.set(null);
+    this.api.setBitbucketWorkspace(slug).subscribe({
+      next: (r) => {
+        this.workspace.set(r.workspace);
+        this.workspaceDraft = '';
+        this.editingWorkspace.set(false);
+        this.workspaceSaving.set(false);
+      },
+      error: (e) => {
+        this.workspaceSaving.set(false);
+        this.errorMessage.set(this.formatError(e));
       },
     });
   }

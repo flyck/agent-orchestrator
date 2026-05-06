@@ -124,14 +124,29 @@ export async function getMyUuid(
 
 /** Resolve the first workspace slug visible to the credential. Same
  *  lazy-backfill purpose as getMyUuid — covers connections persisted
- *  before BitbucketConfig.workspace existed. */
+ *  before BitbucketConfig.workspace existed. Throws BitbucketError on
+ *  HTTP failure so the caller can surface the upstream status / body
+ *  in the UI; returns null only when the response is 200 but empty. */
 export async function getMyFirstWorkspace(
   username: string,
   appPassword: string,
 ): Promise<string | null> {
-  const res = await bbFetch("/2.0/user/workspaces?pagelen=1", username, appPassword);
-  if (!res.ok) return null;
-  const data = (await res.json()) as { values?: Array<{ slug?: string }> };
+  const res = await bbFetch(
+    "/2.0/user/workspaces?pagelen=10",
+    username,
+    appPassword,
+  );
+  if (!res.ok) {
+    throw new BitbucketError(
+      res.status,
+      "/2.0/user/workspaces",
+      await res.text(),
+    );
+  }
+  const data = (await res.json()) as {
+    values?: Array<{ slug?: string }>;
+    size?: number;
+  };
   return data.values?.[0]?.slug ?? null;
 }
 
