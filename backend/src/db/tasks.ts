@@ -173,8 +173,21 @@ export interface TaskGithubMetadata {
   html_url?: string;
 }
 
+/** Provider-agnostic PR coordinates. Set by the generic /prs/.../review
+ *  endpoint; identifies which integration the task came from so the
+ *  comment-proxy can route writes back to the right host. */
+export interface TaskPrMetadata {
+  source: "github" | "bitbucket";
+  repo: string;
+  number: number;
+  base_ref?: string;
+  head_ref?: string;
+  html_url?: string;
+}
+
 export interface TaskMetadata {
   github?: TaskGithubMetadata;
+  pr?: TaskPrMetadata;
 }
 
 export function parseTaskMetadata(raw: string | null): TaskMetadata {

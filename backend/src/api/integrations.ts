@@ -29,6 +29,11 @@ import {
 } from "../integrations/github";
 import { validate as validateBitbucket } from "../integrations/bitbucket";
 import {
+  PullFilter as ProviderPullFilter,
+  getActiveProvider,
+  type NormalizedPull,
+} from "../integrations/provider";
+import {
   createTask,
   getTask,
   parseTaskMetadata,
@@ -91,6 +96,7 @@ integrations.get("/", (c) => {
       base.username = cfg?.username ?? null;
       base.display_name = cfg?.display_name ?? null;
       base.workspace = cfg?.workspace ?? null;
+      base.watched_repos = cfg?.watched_repos ?? [];
     }
     return base;
   });
@@ -229,6 +235,113 @@ integrations.post("/bitbucket/connect", async (c) => {
 integrations.delete("/bitbucket", (c) => {
   const ok = deleteIntegration("bitbucket");
   return c.json({ ok });
+});
+
+// ─── Generic (provider-agnostic) ─────────────────────────────────────────
+
+/**
+ * Provider-agnostic PR listing. Dispatches to whichever integration row
+ * has `enabled=1` (single-active rule). Returns NormalizedPull rows so
+ * the Review page can render GitHub + Bitbucket PRs through the same
+ * card. Filters mirror the github endpoint:
+ *   - awaiting_me (default) — review-requested for the user
+ *   - all_open — every open PR in any watched repo
+ */
+integrations.get("/prs", async (c) => {
+  const provider = await getActiveProvider();
+  if (!provider) return c.json({ error: "not_connected", source: null }, 400);
+  const watched = provider.listWatchedRepos();
+  if (watched.length === 0) {
+    return c.json({ source: provider.id, prs: [], message: "no_watched_repos" });
+  }
+  const filterRaw = c.req.query("filter");
+  const filter =
+    filterRaw === ProviderPullFilter.AllOpen
+      ? ProviderPullFilter.AllOpen
+      : ProviderPullFilter.AwaitingMe;
+  try {
+    const prs = await provider.listPullRequests(filter);
+    markSynced(provider.id);
+    return c.json({ source: provider.id, filter, prs });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    markError(provider.id, message);
+    log.warn("api.integrations.list_prs_failed", { source: provider.id, message });
+    return c.json({ error: "provider_request_failed", source: provider.id, message }, 502);
+  }
+});
+
+/**
+ * Spawn a review task from any provider's PR. The repo path is the
+ * single full-name string ({owner_or_workspace}/{slug}); since slugs
+ * can contain dashes but not slashes, we accept it as a single param
+ * and split on the last "/" so the route matches both "owner/name/123"
+ * and "workspace/repo-name/45".
+ */
+integrations.post("/prs/:owner/:repo/:number/review", async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const numStr = c.req.param("number");
+  const number = Number(numStr);
+  if (!owner || !repo || !Number.isFinite(number)) {
+    return c.json({ error: "invalid_pr_ref" }, 400);
+  }
+  const provider = await getActiveProvider();
+  if (!provider) return c.json({ error: "not_connected" }, 400);
+
+  const repoFullName = `${owner}/${repo}`;
+  if (!provider.listWatchedRepos().includes(repoFullName)) {
+    return c.json(
+      { error: "repo_not_watched", message: `${repoFullName} is not in your watched list` },
+      400,
+    );
+  }
+
+  let pull: NormalizedPull;
+  let diff: string;
+  try {
+    pull = await provider.fetchPullRequest(repoFullName, number);
+    diff = await provider.fetchPullDiff(repoFullName, number);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("api.integrations.fetch_pr_failed", {
+      source: provider.id,
+      repoFullName,
+      number,
+      message,
+    });
+    return c.json({ error: "provider_request_failed", source: provider.id, message }, 502);
+  }
+
+  const inputPayload = renderNormalizedPrInput(pull, diff);
+  const task = createTask({
+    workspace: "review",
+    title: `${repoFullName}#${number} — ${pull.title}`,
+    input_kind: "diff",
+    input_payload: inputPayload,
+    repo_path: null,
+    initial_state: "review",
+  });
+  setTaskMetadata(task.id, {
+    pr: {
+      source: provider.id,
+      repo: repoFullName,
+      number,
+      base_ref: pull.base_ref,
+      head_ref: pull.head_ref,
+      html_url: pull.url,
+    },
+  });
+  log.info("api.integrations.review_task_created", {
+    source: provider.id,
+    taskId: task.id,
+    repoFullName,
+    number,
+  });
+  startRun(task.id).catch((err) => {
+    log.warn("api.integrations.start_run_failed", { taskId: task.id, error: String(err) });
+  });
+  return c.json({ task_id: task.id, source: provider.id });
 });
 
 /**
@@ -479,6 +592,31 @@ function renderPrInput(repoFullName: string, pr: GithubPull, diff: string): stri
 - Author: @${author}
 - Base: \`${pr.base.ref}\` → Head: \`${pr.head.ref}\`
 - URL: ${pr.html_url}
+
+## Description
+
+${body || "_(no description)_"}
+
+## Diff
+
+\`\`\`diff
+${diff}
+\`\`\`
+`;
+}
+
+/** Provider-agnostic input payload renderer. Same shape as the GitHub
+ *  one above, just sourced from a NormalizedPull. */
+function renderNormalizedPrInput(pull: NormalizedPull, diff: string): string {
+  const body = (pull.body ?? "").trim();
+  const authorPrefix = pull.source === "github" ? "@" : "";
+  return `# Pull Request: ${pull.repo}#${pull.number}
+
+**${pull.title}**
+- Author: ${authorPrefix}${pull.author}
+- Base: \`${pull.base_ref}\` → Head: \`${pull.head_ref}\`
+- URL: ${pull.url}
+- Source: ${pull.source}
 
 ## Description
 

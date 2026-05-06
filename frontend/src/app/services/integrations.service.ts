@@ -54,6 +54,26 @@ export interface GithubPr {
   awaiting_me: boolean;
 }
 
+/** Normalized PR shape served by the generic /api/integrations/prs
+ *  endpoint. Same shape as GithubPr plus a `source` tag and a
+ *  nullable avatar (Bitbucket doesn't surface one on the listing). */
+export interface NormalizedPr {
+  source: 'github' | 'bitbucket';
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  author_avatar: string | null;
+  body: string;
+  base_ref: string;
+  head_ref: string;
+  draft: boolean;
+  updated_at: string;
+  created_at: string;
+  awaiting_me: boolean;
+}
+
 export const PrFilter = {
   AwaitingMe: 'awaiting_me',
   AllOpen: 'all_open',
@@ -140,5 +160,37 @@ export class IntegrationsService {
   /** Wipe the Bitbucket config. */
   disconnectBitbucket(): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>('/api/integrations/bitbucket');
+  }
+
+  /** Provider-agnostic PR list. Routes through whichever integration is
+   *  currently enabled (GitHub or Bitbucket). Returns `not_connected`
+   *  when nothing is set up. */
+  listPrs(filter: PrFilter = 'awaiting_me'): Observable<{
+    source: 'github' | 'bitbucket' | null;
+    filter?: PrFilter;
+    prs: NormalizedPr[];
+    message?: string;
+    error?: string;
+  }> {
+    return this.http.get<{
+      source: 'github' | 'bitbucket' | null;
+      filter?: PrFilter;
+      prs: NormalizedPr[];
+      message?: string;
+      error?: string;
+    }>('/api/integrations/prs', { params: { filter } });
+  }
+
+  /** Spawn a review task for a normalized PR. Backend dispatches to the
+   *  active provider. */
+  reviewNormalizedPr(
+    repoFullName: string,
+    number: number,
+  ): Observable<{ task_id: string; source: 'github' | 'bitbucket' }> {
+    const [owner, repo] = repoFullName.split('/');
+    return this.http.post<{ task_id: string; source: 'github' | 'bitbucket' }>(
+      `/api/integrations/prs/${owner}/${repo}/${number}/review`,
+      {},
+    );
   }
 }

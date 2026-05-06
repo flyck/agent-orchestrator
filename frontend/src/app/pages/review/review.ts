@@ -5,12 +5,20 @@ import { RouterLink } from '@angular/router';
 import { Subject, switchMap, takeUntil, timer, catchError, of } from 'rxjs';
 import {
   IntegrationsService,
-  type GithubPr,
+  type NormalizedPr,
   type PrFilter,
 } from '../../services/integrations.service';
 import { TasksService, type Task } from '../../services/tasks.service';
 import { formatTs, relativeTs } from '../../util/time';
 import { TaskDetailPanelComponent } from '../../components/task-detail-panel';
+
+type ProviderId = 'github' | 'bitbucket';
+type ConnectionStatus = 'unknown' | 'disconnected' | 'no-watched' | 'connected';
+
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  github: 'GitHub',
+  bitbucket: 'Bitbucket',
+};
 
 /**
  * PR-review pipeline phases (Design A). Mirrors the order in
@@ -90,22 +98,23 @@ function relativeTsIso(iso: string): string {
       </p>
     </header>
 
-    @if (githubStatus() === 'unknown') {
-      <p class="muted small">checking GitHub connection…</p>
-    } @else if (githubStatus() === 'disconnected') {
+    @if (connectionStatus() === 'unknown') {
+      <p class="muted small">checking integration…</p>
+    } @else if (connectionStatus() === 'disconnected') {
       <aside class="warning">
-        <p class="meta">github not connected</p>
+        <p class="meta">no integration connected</p>
         <p>
-          Connect a personal access token in
+          Connect GitHub or Bitbucket in
           <a routerLink="/settings">Settings → Integrations</a>
-          and pick the repos to watch.
+          and pick the repos to watch. Only one provider can be active at a time.
         </p>
       </aside>
-    } @else if (githubStatus() === 'no-watched') {
+    } @else if (connectionStatus() === 'no-watched') {
       <aside class="warning">
         <p class="meta">no watched repos</p>
         <p>
-          Connected as <strong>&#64;{{ login() }}</strong>. Pick a few repos in
+          Connected to <strong>{{ providerLabel() }}</strong>@if (login()) { as <strong>{{ login() }}</strong> }.
+          Pick a few repos in
           <a routerLink="/settings">Settings → Integrations</a> to populate this page.
         </p>
       </aside>
@@ -191,7 +200,7 @@ function relativeTsIso(iso: string): string {
     }
 
     <!-- ─── 2. Open pull requests with filters ───────────────────────── -->
-    @if (githubStatus() === 'connected') {
+    @if (connectionStatus() === 'connected') {
       <section class="block pr-section">
         <header class="block-head">
           <div>
@@ -240,7 +249,7 @@ function relativeTsIso(iso: string): string {
                 </div>
                 <div class="pr-meta meta">
                   <span class="mono">{{ pr.repo }}#{{ pr.number }}</span>
-                  · &#64;{{ pr.author }}
+                  · @if (pr.source === 'github') { &#64;{{ pr.author }} } @else { {{ pr.author }} }
                   · {{ pr.base_ref }} ← {{ pr.head_ref }}
                   · updated {{ relativeTsIso(pr.updated_at) }}
                 </div>
@@ -563,14 +572,17 @@ export class ReviewPage implements OnDestroy {
   protected readonly relativeTsIso = relativeTsIso;
   protected readonly formatTs = formatTs;
 
-  protected readonly githubStatus = signal<'unknown' | 'disconnected' | 'no-watched' | 'connected'>(
-    'unknown',
-  );
+  protected readonly connectionStatus = signal<ConnectionStatus>('unknown');
+  protected readonly provider = signal<ProviderId | null>(null);
   protected readonly login = signal<string | null>(null);
+  protected readonly providerLabel = computed(() => {
+    const p = this.provider();
+    return p ? PROVIDER_LABELS[p] : '';
+  });
 
   protected readonly prFilter = signal<PrFilter>('awaiting_me');
   protected prSearch = '';
-  protected readonly prs = signal<GithubPr[]>([]);
+  protected readonly prs = signal<NormalizedPr[]>([]);
   protected readonly prsLoading = signal(false);
   protected readonly prError = signal<string | null>(null);
   protected readonly busyOn = signal<string | null>(null);
@@ -616,30 +628,42 @@ export class ReviewPage implements OnDestroy {
   private destroy$ = new Subject<void>();
 
   constructor() {
-    // Hydrate GH status. /api/integrations carries login + watched_repos
-    // so the page can render its three states without an extra request.
+    // Hydrate provider status. The page accepts whichever integration row
+    // has enabled=true (single-active rule) so it shows GitHub or
+    // Bitbucket transparently. PR fetching dispatches through the generic
+    // /api/integrations/prs endpoint; GH-specific watched_repos +
+    // BB-specific watched_repos both feed the same listWatchedRepos()
+    // server-side.
     this.integrationsApi.list().subscribe({
       next: (r) => {
-        const gh = r.integrations.find((i) => i.id === 'github');
-        if (!gh || !gh.login) {
-          this.githubStatus.set('disconnected');
+        const active = r.integrations.find((i) => i.enabled);
+        if (!active) {
+          this.connectionStatus.set('disconnected');
+          return;
+        }
+        const id = active.id as ProviderId;
+        this.provider.set(id);
+        // Pretty "connected as" label per provider.
+        if (id === 'github') {
+          this.login.set(active.login ? `@${active.login}` : null);
         } else {
-          this.login.set(gh.login);
-          if ((gh.watched_repos ?? []).length === 0) {
-            this.githubStatus.set('no-watched');
-          } else {
-            this.githubStatus.set('connected');
-            this.refreshPrs();
-          }
+          this.login.set(active.display_name ?? active.username ?? null);
+        }
+        const watched = active.watched_repos ?? [];
+        if (watched.length === 0) {
+          this.connectionStatus.set('no-watched');
+        } else {
+          this.connectionStatus.set('connected');
+          this.refreshPrs();
         }
       },
-      error: () => this.githubStatus.set('disconnected'),
+      error: () => this.connectionStatus.set('disconnected'),
     });
 
     timer(60_000, 60_000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
-        if (this.githubStatus() === 'connected') this.refreshPrs();
+        if (this.connectionStatus() === 'connected') this.refreshPrs();
       });
 
     timer(0, 5000)
@@ -668,7 +692,7 @@ export class ReviewPage implements OnDestroy {
   refreshPrs(): void {
     this.prsLoading.set(true);
     this.prError.set(null);
-    this.integrationsApi.listGithubPrs(this.prFilter()).subscribe({
+    this.integrationsApi.listPrs(this.prFilter()).subscribe({
       next: (r) => {
         this.prs.set(r.prs);
         this.prsLoading.set(false);
@@ -680,10 +704,10 @@ export class ReviewPage implements OnDestroy {
     });
   }
 
-  reviewPr(pr: GithubPr): void {
+  reviewPr(pr: NormalizedPr): void {
     const key = `${pr.repo}#${pr.number}`;
     this.busyOn.set(key);
-    this.integrationsApi.reviewPr(pr.repo, pr.number).subscribe({
+    this.integrationsApi.reviewNormalizedPr(pr.repo, pr.number).subscribe({
       next: (r) => {
         this.busyOn.set(null);
         this.detailTaskId.set(r.task_id);
