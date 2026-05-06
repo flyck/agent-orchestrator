@@ -29,6 +29,7 @@ import {
   type StreamEvent,
 } from "../services/task-stream.service";
 import { RepoService, type DiffResponse } from "../services/repo.service";
+import { SettingsService } from "../services/settings.service";
 import { SuggestionsService } from "../services/suggestions.service";
 import {
   IssueLinksService,
@@ -674,6 +675,25 @@ function extractMermaid(text: string): string | null {
       .diff-files li:last-child { border-bottom: 0; }
       .diff-status { font-family: var(--font-mono); font-size: 11px; min-width: 24px; }
       .diff-path { font-family: var(--font-mono); font-size: 12px; }
+      /* Filename behaves like a button — enabled when ide_open_command is
+         configured, disabled otherwise. Underline on hover hints at the
+         link affordance without making it look pre-selected. */
+      .link-button {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        margin: 0;
+        font: inherit;
+        text-align: left;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .link-button:hover { text-decoration: underline; }
+      .link-button:disabled {
+        color: var(--ink-muted);
+        cursor: default;
+        text-decoration: none;
+      }
       .diff-counts { font-family: var(--font-mono); font-size: 11px; }
       .diff-patch {
         background: var(--paper-soft);
@@ -707,6 +727,7 @@ export class TaskDetailPanelComponent {
   private tasksApi = inject(TasksService);
   private streamApi = inject(TaskStreamService);
   private repoApi = inject(RepoService);
+  private settingsApi = inject(SettingsService);
   private suggestionsApi = inject(SuggestionsService);
   private issueLinksApi = inject(IssueLinksService);
 
@@ -1034,6 +1055,27 @@ export class TaskDetailPanelComponent {
     this.showPatch.update((v) => !v);
   }
 
+  // ─── IDE open ────────────────────────────────────────────────────────
+  // Tracks whether ide_open_command is configured so the file links in
+  // the Files-changed list can disable themselves cleanly when there is
+  // nothing to open with.
+  protected readonly hasIdeCommand = signal(false);
+  protected readonly openMessage = signal<string | null>(null);
+
+  /** Open `path` (repo-relative) in the user's configured IDE. Targets
+   *  the task's worktree when one exists so the link points at the
+   *  agent's checkout, not the parent repo. Mirrors the behavior of
+   *  the same control on the Home page. */
+  protected openInIde(path?: string): void {
+    const wt = this.task()?.worktree_path;
+    const target = path ? (wt ? `${wt}/${path}` : path) : (wt ?? undefined);
+    this.openMessage.set(null);
+    this.repoApi.open("ide", target).subscribe({
+      error: (e) =>
+        this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
+    });
+  }
+
   // ─── Suggestions (read-only display) ──────────────────────────────────
   protected readonly suggestions = signal<
     import("../services/suggestions.service").Suggestion[]
@@ -1062,6 +1104,13 @@ export class TaskDetailPanelComponent {
   }
 
   constructor() {
+    // One-shot settings load — drives whether the Files-changed list
+    // renders its filenames as clickable open-in-IDE links.
+    this.settingsApi.get().subscribe({
+      next: (s) => this.hasIdeCommand.set(!!s.ide_open_command?.trim()),
+      error: () => this.hasIdeCommand.set(false),
+    });
+
     effect(() => {
       this.streamLines();
       this.transcriptTail();

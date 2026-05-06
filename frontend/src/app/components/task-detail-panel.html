@@ -501,11 +501,20 @@
             @for (f of d.files; track f.path) {
               <li>
                 <span class="diff-status meta">{{ f.status }}</span>
-                <span class="diff-path mono">{{ f.path }}</span>
+                <button class="diff-path link-button"
+                        type="button"
+                        (click)="openInIde(f.path)"
+                        [disabled]="!hasIdeCommand()"
+                        [title]="hasIdeCommand() ? 'open in IDE' : 'set ide_open_command in Settings → Worktrees & IDE to enable'">
+                  {{ f.path }}
+                </button>
                 <span class="diff-counts meta">+{{ f.added }} −{{ f.deleted }}</span>
               </li>
             }
           </ul>
+          @if (openMessage()) {
+            <p class="diff-error">{{ openMessage() }}</p>
+          }
           <div class="diff-toggle">
             <button type="button" class="meta-action" (click)="togglePatch()">
               {{ showPatch() ? 'hide patch' : 'show patch' }}
