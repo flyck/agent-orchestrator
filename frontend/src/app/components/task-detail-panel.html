@@ -62,6 +62,33 @@
         <span class="meta">working tree</span>
         <code class="mono">repo root</code>
       }
+      <span class="meta-spacer"></span>
+      <!-- Always-visible open targets — review tasks, feature/bugfix
+           tasks, both same flow: select a task, click open-in-IDE. -->
+      <button type="button"
+              class="meta-action"
+              (click)="openInIde()"
+              [disabled]="!hasIdeCommand()"
+              [title]="hasIdeCommand() ? 'ide_open_command' : 'set ide_open_command in Settings → Worktrees & IDE to enable'">
+        open in IDE
+      </button>
+      <button type="button"
+              class="meta-action"
+              (click)="openInEmacs()"
+              [disabled]="!hasEmacsCommand()"
+              [title]="hasEmacsCommand() ? 'emacs_open_command' : 'set emacs_open_command in Settings → Worktrees & IDE to enable'">
+        open in emacs
+      </button>
+      <button type="button"
+              class="meta-action"
+              (click)="openInMagit()"
+              [disabled]="!hasMagitCommand()"
+              [title]="hasMagitCommand() ? 'magit_open_command' : 'set magit_open_command in Settings → Worktrees & IDE to enable'">
+        open magit
+      </button>
+      @if (openMessage()) {
+        <span class="meta open-msg">{{ openMessage() }}</span>
+      }
     </div>
 
     <!-- ─── Tab nav ──────────────────────────────────────────────────── -->

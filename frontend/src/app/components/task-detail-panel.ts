@@ -260,6 +260,8 @@ function extractMermaid(text: string): string | null {
         padding: 2px 6px;
         border-radius: 2px;
       }
+      .detail-meta .meta-spacer { flex: 1; }
+      .detail-meta .open-msg { color: var(--ink-red); }
       .time-meta {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1156,22 +1158,44 @@ export class TaskDetailPanelComponent {
     this.showPatch.update((v) => !v);
   }
 
-  // ─── IDE open ────────────────────────────────────────────────────────
-  // Tracks whether ide_open_command is configured so the file links in
-  // the Files-changed list can disable themselves cleanly when there is
-  // nothing to open with.
+  // ─── IDE / emacs / magit open ───────────────────────────────────────
+  // Tracks whether the corresponding *_open_command is configured so the
+  // top-of-panel buttons + the file links in the Files-changed list can
+  // disable themselves cleanly when there's nothing to open with.
   protected readonly hasIdeCommand = signal(false);
+  protected readonly hasEmacsCommand = signal(false);
+  protected readonly hasMagitCommand = signal(false);
   protected readonly openMessage = signal<string | null>(null);
+
+  private resolveTarget(path?: string): string | undefined {
+    const wt = this.task()?.worktree_path;
+    return path ? (wt ? `${wt}/${path}` : path) : (wt ?? undefined);
+  }
 
   /** Open `path` (repo-relative) in the user's configured IDE. Targets
    *  the task's worktree when one exists so the link points at the
    *  agent's checkout, not the parent repo. Mirrors the behavior of
    *  the same control on the Home page. */
   protected openInIde(path?: string): void {
-    const wt = this.task()?.worktree_path;
-    const target = path ? (wt ? `${wt}/${path}` : path) : (wt ?? undefined);
     this.openMessage.set(null);
-    this.repoApi.open("ide", target).subscribe({
+    this.repoApi.open("ide", this.resolveTarget(path)).subscribe({
+      error: (e) =>
+        this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
+    });
+  }
+
+  protected openInEmacs(path?: string): void {
+    this.openMessage.set(null);
+    this.repoApi.open("emacs", this.resolveTarget(path)).subscribe({
+      error: (e) =>
+        this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
+    });
+  }
+
+  protected openInMagit(): void {
+    this.openMessage.set(null);
+    const wt = this.task()?.worktree_path ?? undefined;
+    this.repoApi.open("magit", wt).subscribe({
       error: (e) =>
         this.openMessage.set(e?.error?.message ?? `error: ${e?.message ?? e}`),
     });
@@ -1205,11 +1229,19 @@ export class TaskDetailPanelComponent {
   }
 
   constructor() {
-    // One-shot settings load — drives whether the Files-changed list
-    // renders its filenames as clickable open-in-IDE links.
+    // One-shot settings load — drives the open-in-X buttons in the
+    // header meta row + the file links in the Files-changed list.
     this.settingsApi.get().subscribe({
-      next: (s) => this.hasIdeCommand.set(!!s.ide_open_command?.trim()),
-      error: () => this.hasIdeCommand.set(false),
+      next: (s) => {
+        this.hasIdeCommand.set(!!s.ide_open_command?.trim());
+        this.hasEmacsCommand.set(!!s.emacs_open_command?.trim());
+        this.hasMagitCommand.set(!!s.magit_open_command?.trim());
+      },
+      error: () => {
+        this.hasIdeCommand.set(false);
+        this.hasEmacsCommand.set(false);
+        this.hasMagitCommand.set(false);
+      },
     });
 
     effect(() => {
