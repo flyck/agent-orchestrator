@@ -35,6 +35,10 @@ export interface BitbucketConfig {
    *  passwords that hit /2.0/user without one set this from the
    *  validated user's primary workspace, or null if unknown. */
   workspace?: string | null;
+  /** "{workspace}/{slug}" repo full names the user opted in to, mirroring
+   *  the GitHub config shape so the rest of the system can treat them
+   *  uniformly. */
+  watched_repos?: string[];
   /** Atlassian account id from /2.0/user, surfaced for clarity. */
   account_id?: string | null;
   /** Display name from /2.0/user; null when the credential lacks the
@@ -77,6 +81,9 @@ export function getBitbucketConfig(handle: Database = db()): BitbucketConfig | n
       username: parsed.username,
       app_password: parsed.app_password,
       workspace: parsed.workspace ?? null,
+      watched_repos: Array.isArray(parsed.watched_repos)
+        ? parsed.watched_repos
+        : [],
       account_id: parsed.account_id ?? null,
       display_name: parsed.display_name ?? null,
     };
