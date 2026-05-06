@@ -35,6 +35,7 @@ import {
   IssueLinksService,
   type TaskIssueLink,
 } from "../services/issue-links.service";
+import { FormsModule } from "@angular/forms";
 import { ScoringRadar } from "./scoring-radar";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { formatTs, relativeTs, clockTs } from "../util/time";
@@ -151,7 +152,7 @@ function extractMermaid(text: string): string | null {
 @Component({
   selector: "app-task-detail-panel",
   standalone: true,
-  imports: [ScoringRadar, MermaidDiagram],
+  imports: [FormsModule, ScoringRadar, MermaidDiagram],
   templateUrl: "./task-detail-panel.html",
   styles: [
     `
@@ -503,6 +504,35 @@ function extractMermaid(text: string): string | null {
       .alt-rationale { margin: 0 0 8px; font-style: italic; }
       .alt-diagram { margin-top: 12px; }
       .alt-diagram .meta { margin: 0 0 6px; }
+      .direction-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px dashed var(--rule);
+      }
+      .direction-head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .direction-head h3 { margin: 0; font-family: var(--font-serif); font-size: 16px; }
+      .direction-row { margin: 12px 0; }
+      .direction-label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .direction-label.stretch textarea { width: 100%; resize: vertical; min-height: 100px; }
+      .direction-label .meta { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+      .direction-label select { font-size: 13px; padding: 4px 6px; }
+      .direction-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .direction-actions .error { color: var(--ink-red); }
+
       .review-section {
         margin-top: 16px;
         padding-top: 16px;
@@ -770,6 +800,13 @@ export class TaskDetailPanelComponent {
       });
     }
     tabs.push({ id: "live", label: "Live" });
+    // Direction tab — only when the task is paused at the direction
+    // gate. The runner sets awaiting_gate_id="direction-gate" so the
+    // tab appears for review tasks at the right phase, and disappears
+    // again once the user approves or sends back.
+    if (this.task()?.awaiting_gate_id === "direction-gate") {
+      tabs.push({ id: "direction", label: "Direction", badge: "decide" });
+    }
     tabs.push({ id: "review", label: "Review" });
     tabs.push({ id: "tokens", label: "Tokens" });
     tabs.push({ id: "files", label: "Files" });
@@ -995,6 +1032,69 @@ export class TaskDetailPanelComponent {
   protected readonly alternatives = signal<TaskAlternativeRow[]>([]);
   protected readonly altTabIndex = signal<number>(-1);
   protected readonly scoringVisible = computed(() => this.scoring().length > 0);
+
+  // ─── Direction-gate decision (only meaningful when paused at the gate)
+  // The dropdown chooses between three actions:
+  //   accept_implementation — approve the gate as-is.
+  //   accept_alternative    — approve, intent to use alt #N (today the
+  //     backend doesn't accept the alt id, so this is informational
+  //     only — same wire effect as accept_implementation).
+  //   send_back             — fire /continue with feedback so the
+  //     explorer revises.
+  protected readonly directionAction = signal<
+    "accept_implementation" | "accept_alternative" | "send_back"
+  >("accept_implementation");
+  protected readonly directionFeedback = signal<string>("");
+  protected readonly directionAltIndex = signal<number>(0);
+  protected readonly directionBusy = signal<boolean>(false);
+  protected readonly directionError = signal<string | null>(null);
+
+  setDirectionAction(value: string) {
+    if (value === "accept_implementation" || value === "accept_alternative" || value === "send_back") {
+      this.directionAction.set(value);
+    }
+  }
+
+  submitDirection() {
+    const id = this.taskId();
+    if (!id) return;
+    const action = this.directionAction();
+    this.directionBusy.set(true);
+    this.directionError.set(null);
+    if (action === "send_back") {
+      const feedback = this.directionFeedback().trim();
+      if (!feedback) {
+        this.directionBusy.set(false);
+        this.directionError.set("Feedback is required when sending back.");
+        return;
+      }
+      this.tasksApi.continueWithFeedback(id, feedback).subscribe({
+        next: () => {
+          this.directionBusy.set(false);
+          this.directionFeedback.set("");
+          this.taskChanged.emit();
+        },
+        error: (e) => {
+          this.directionBusy.set(false);
+          this.directionError.set(e?.error?.message ?? e?.message ?? String(e));
+        },
+      });
+      return;
+    }
+    // Both accept paths approve the gate. The alternative selection is
+    // captured client-side for now; backend extension can carry it once
+    // /gate/approve accepts a body.
+    this.tasksApi.approveGate(id).subscribe({
+      next: () => {
+        this.directionBusy.set(false);
+        this.taskChanged.emit();
+      },
+      error: (e) => {
+        this.directionBusy.set(false);
+        this.directionError.set(e?.error?.message ?? e?.message ?? String(e));
+      },
+    });
+  }
 
   setAltTab(idx: number) {
     this.altTabIndex.set(idx);

@@ -285,6 +285,94 @@
       </section>
     }
 
+    <!-- ═══ Direction tab ════════════════════════════════════════════
+         Visible only when the task is paused at the direction gate.
+         The user picks one of three actions; we route to /gate/approve
+         or /continue depending on the choice. The Explorer tab above
+         carries the actual evidence (summary / alternatives / scoring
+         / diagram) — this tab is purely the decision surface. -->
+    @if (detailTab() === 'direction') {
+      <section class="direction-section">
+        <header class="direction-head">
+          <h3>Direction decision</h3>
+          <span class="meta">paused at <code>direction-gate</code></span>
+        </header>
+        <p class="muted small">
+          Read the <strong>Explorer</strong> tab above for the implementation
+          summary, alternative options, scoring, and the architecture diagram.
+          Then pick one of the actions below. Sending back re-runs the explorer
+          with your feedback; accepting moves the pipeline to the deep-review
+          phase.
+        </p>
+
+        @if (alternatives().length === 0) {
+          <p class="muted small">
+            <em>No alternatives were proposed by the explorer for this task —
+            the only meaningful choices are accept the implementation as-is
+            or send back with feedback.</em>
+          </p>
+        }
+
+        <div class="direction-row">
+          <label class="direction-label">
+            <span class="meta">action</span>
+            <select [ngModel]="directionAction()"
+                    (ngModelChange)="setDirectionAction($event)">
+              <option value="accept_implementation">Accept implementation as-is</option>
+              <option value="accept_alternative" [disabled]="alternatives().length === 0">
+                Accept alternative
+              </option>
+              <option value="send_back">Send back to explorer with feedback</option>
+            </select>
+          </label>
+        </div>
+
+        @if (directionAction() === 'accept_alternative' && alternatives().length > 0) {
+          <div class="direction-row">
+            <label class="direction-label">
+              <span class="meta">which alternative</span>
+              <select [ngModel]="directionAltIndex()"
+                      (ngModelChange)="directionAltIndex.set(+$event)">
+                @for (alt of alternatives(); track alt.id; let i = $index) {
+                  <option [ngValue]="i">{{ alt.label }} ({{ alt.verdict }})</option>
+                }
+              </select>
+            </label>
+            <p class="muted small">
+              Note: the backend doesn't yet thread an explicit alternative
+              choice into the next phase — this records your preference but
+              wire-equivalent to "accept implementation". Will hook up once
+              the explorer reliably populates alternatives.
+            </p>
+          </div>
+        }
+
+        @if (directionAction() === 'send_back') {
+          <div class="direction-row">
+            <label class="direction-label stretch">
+              <span class="meta">feedback for the explorer</span>
+              <textarea rows="6"
+                        placeholder="What direction should the explorer take? Constraints, alternatives to consider, parts of the diff to focus on…"
+                        [ngModel]="directionFeedback()"
+                        (ngModelChange)="directionFeedback.set($event)"></textarea>
+            </label>
+          </div>
+        }
+
+        <div class="direction-actions">
+          <button type="button"
+                  class="primary"
+                  [disabled]="directionBusy()"
+                  (click)="submitDirection()">
+            {{ directionBusy() ? 'submitting…' : (directionAction() === 'send_back' ? 'send back' : 'approve') }}
+          </button>
+          @if (directionError()) {
+            <span class="error small">{{ directionError() }}</span>
+          }
+        </div>
+      </section>
+    }
+
     <!-- ═══ Review tab ═══════════════════════════════════════════════ -->
     @if (detailTab() === 'review') {
       @if (scoringVisible() || alternatives().length > 0) {
