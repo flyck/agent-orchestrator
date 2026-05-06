@@ -25,6 +25,18 @@ export interface GithubConfig {
   login?: string | null;
 }
 
+export interface BitbucketConfig {
+  /** Bitbucket username or Atlassian email (basic-auth username field). */
+  username: string;
+  /** App password (or Atlassian API token) — basic-auth secret. */
+  app_password: string;
+  /** Atlassian account id from /2.0/user, surfaced for clarity. */
+  account_id?: string | null;
+  /** Display name from /2.0/user; null when the credential lacks the
+   *  scope to read it. */
+  display_name?: string | null;
+}
+
 /** Read raw row by id. */
 export function getIntegration(id: string, handle: Database = db()): IntegrationRow | null {
   return handle
@@ -47,6 +59,41 @@ export function getGithubConfig(handle: Database = db()): GithubConfig | null {
   } catch {
     return null;
   }
+}
+
+/** Strongly-typed read for bitbucket. Returns null when unset. */
+export function getBitbucketConfig(handle: Database = db()): BitbucketConfig | null {
+  const row = getIntegration("bitbucket", handle);
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.config_json) as BitbucketConfig;
+    if (!parsed?.username || !parsed?.app_password) return null;
+    return {
+      username: parsed.username,
+      app_password: parsed.app_password,
+      account_id: parsed.account_id ?? null,
+      display_name: parsed.display_name ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Single-active enforcement. The product rule is "at most one integration
+ * is active at a time" — connecting a new one disables the others without
+ * deleting their stored config so the user can flip back without
+ * re-entering credentials.
+ */
+export function disableOtherIntegrations(
+  activeId: string,
+  handle: Database = db(),
+): void {
+  handle
+    .prepare(
+      `UPDATE integrations SET enabled = 0, updated_at = ? WHERE id != ?`,
+    )
+    .run(Date.now(), activeId);
 }
 
 /**

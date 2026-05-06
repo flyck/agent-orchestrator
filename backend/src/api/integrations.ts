@@ -8,6 +8,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   deleteIntegration,
+  disableOtherIntegrations,
+  getBitbucketConfig,
   getGithubConfig,
   getIntegration,
   markError,
@@ -25,6 +27,7 @@ import {
   validate,
   type GithubPull,
 } from "../integrations/github";
+import { validate as validateBitbucket } from "../integrations/bitbucket";
 import {
   createTask,
   getTask,
@@ -48,6 +51,12 @@ interface IntegrationListItem {
   /** GitHub only — opt-in repo list so the UI can render the multi-select
    *  state without a separate request. */
   watched_repos?: string[];
+  /** Bitbucket only — username (or Atlassian email) used as basic-auth
+   *  user. The app password itself is never returned. */
+  username?: string | null;
+  /** Bitbucket only — display name from /2.0/user, when the credential
+   *  has the scope to read it. */
+  display_name?: string | null;
 }
 
 const KNOWN: { id: string; name: string; description: string }[] = [
@@ -74,6 +83,11 @@ integrations.get("/", (c) => {
       const cfg = getGithubConfig();
       base.login = cfg?.login ?? null;
       base.watched_repos = cfg?.watched_repos ?? [];
+    }
+    if (k.id === "bitbucket") {
+      const cfg = getBitbucketConfig();
+      base.username = cfg?.username ?? null;
+      base.display_name = cfg?.display_name ?? null;
     }
     return base;
   });
@@ -126,6 +140,10 @@ integrations.post("/github/connect", async (c) => {
 
   const watched = parsed.data.watched_repos ?? existing?.watched_repos ?? [];
   upsertIntegration("github", { token, watched_repos: watched, login }, true);
+  // Single-active rule: turning on GitHub disables Bitbucket / GitLab.
+  // Their stored configs are kept so the user can flip back without
+  // re-entering credentials.
+  disableOtherIntegrations("github");
   markSynced("github");
   log.info("api.integrations.github.connected", { login, watched_count: watched.length });
   return c.json({ ok: true, login, watched_repos: watched });
@@ -134,6 +152,59 @@ integrations.post("/github/connect", async (c) => {
 /** Wipe the github config + token. */
 integrations.delete("/github", (c) => {
   const ok = deleteIntegration("github");
+  return c.json({ ok });
+});
+
+// ─── Bitbucket ───────────────────────────────────────────────────────────
+
+const bitbucketConnectSchema = z.object({
+  /** Bitbucket username, or the Atlassian email if you're using an API
+   *  token instead of an app password. */
+  username: z.string().min(1).max(160),
+  /** App password or Atlassian API token. Stored only on this host. */
+  app_password: z.string().min(8).max(400),
+});
+
+/**
+ * Validate the credential pair against /2.0/user, persist it, and flip
+ * the single-active flag so any other provider gets disabled. We don't
+ * support a separate "rotate without revalidating" path — Bitbucket's
+ * model is simpler than GitHub's so the user just re-submits.
+ */
+integrations.post("/bitbucket/connect", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = bitbucketConnectSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+
+  const { username, app_password } = parsed.data;
+  let display_name: string | null = null;
+  let account_id: string | null = null;
+  try {
+    const user = await validateBitbucket(username, app_password);
+    display_name = user.display_name ?? null;
+    account_id = user.account_id ?? null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("api.integrations.bitbucket.validate_failed", { message });
+    return c.json({ error: "credentials_invalid", message }, 401);
+  }
+
+  upsertIntegration(
+    "bitbucket",
+    { username, app_password, account_id, display_name },
+    true,
+  );
+  disableOtherIntegrations("bitbucket");
+  markSynced("bitbucket");
+  log.info("api.integrations.bitbucket.connected", { username });
+  return c.json({ ok: true, username, display_name });
+});
+
+/** Wipe the bitbucket config + credential. */
+integrations.delete("/bitbucket", (c) => {
+  const ok = deleteIntegration("bitbucket");
   return c.json({ ok });
 });
 
