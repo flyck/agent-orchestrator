@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { z } from "zod";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   createTask,
   clearNeedsFeedback,
@@ -160,6 +162,40 @@ tasks.post("/", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "invalid_task", issues: parsed.error.issues }, 400);
   }
+
+  // Implementation-style tasks need a real local checkout to work in:
+  // the agent edits files, runs tests, and we cut a worktree from there.
+  // Fail at create-time so the user sees the wrong-repo / missing-repo
+  // problem in the new-task dialog rather than 30s later when the
+  // worktree-create step blows up. Review tasks are diff-based and run
+  // in the orchestrator's own dir; they keep repo_path optional.
+  const REPO_REQUIRED_WORKSPACES = new Set([
+    "feature",
+    "bugfix",
+    "arch_compare",
+  ]);
+  if (REPO_REQUIRED_WORKSPACES.has(parsed.data.workspace)) {
+    const repoPath = parsed.data.repo_path?.trim();
+    if (!repoPath) {
+      return c.json(
+        {
+          error: "repo_path_required",
+          message: `Tasks of kind "${parsed.data.workspace}" need a local repository — pick one in the new-task dialog's Repository dropdown, or configure git_repos_dir in Settings if the dropdown is empty.`,
+        },
+        400,
+      );
+    }
+    if (!existsSync(repoPath) || !existsSync(join(repoPath, ".git"))) {
+      return c.json(
+        {
+          error: "repo_path_not_found",
+          message: `Local repo not found at ${repoPath}. The path was selected but no longer exists or has no .git directory.`,
+        },
+        400,
+      );
+    }
+  }
+
   const t = createTask(parsed.data);
   log.info("api.tasks.created", { id: t.id, workspace: t.workspace, title: t.title });
   // Fire-and-forget difficulty score. The user shouldn't wait on the LLM

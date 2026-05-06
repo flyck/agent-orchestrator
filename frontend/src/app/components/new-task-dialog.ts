@@ -1,5 +1,6 @@
 import { Component, computed, EventEmitter, inject, Output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { TasksService, type TaskWorkspace } from '../services/tasks.service';
 import { RepoService, type RepoEntry } from '../services/repo.service';
 
@@ -145,7 +146,7 @@ const KINDS: KindOption[] = [
 @Component({
   selector: 'app-new-task-dialog',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RouterLink],
   template: `
     @if (open()) {
       <div class="overlay" (click)="cancel()"></div>
@@ -174,16 +175,28 @@ const KINDS: KindOption[] = [
                      maxlength="500" />
             </label>
 
-            @if (repos().length > 0) {
-              <label class="label-row">
-                <span class="label">Repository</span>
+            <label class="label-row">
+              <span class="label">Repository</span>
+              @if (repos().length > 0) {
                 <select [ngModel]="repoPath()" (ngModelChange)="repoPath.set($event)" name="repo">
-                  <option [ngValue]="null">(none — no worktree isolation)</option>
+                  <option [ngValue]="null">(pick one)</option>
                   @for (r of repos(); track r.path) {
                     <option [ngValue]="r.path">{{ r.name }}</option>
                   }
                 </select>
-              </label>
+              } @else {
+                <span class="meta repo-empty">
+                  No repos found. Set <code>git_repos_dir</code> in
+                  <a routerLink="/settings">Settings</a> to a directory containing your
+                  git checkouts.
+                </span>
+              }
+            </label>
+            @if (repos().length > 0 && !repoPath()) {
+              <p class="hint meta">
+                Implementation tasks need a real local checkout — pick the repo this task
+                will edit.
+              </p>
             }
           } @else {
             <p class="meta editing-context">
@@ -222,7 +235,7 @@ const KINDS: KindOption[] = [
         <footer>
           <button type="button" (click)="cancel()" [disabled]="busy()">Cancel</button>
           <button type="button" class="primary" (click)="submit()"
-                  [disabled]="busy() || (!editingId() && !title().trim())">
+                  [disabled]="busy() || (!editingId() && (!title().trim() || !repoPath()))">
             {{ submitLabel() }}
           </button>
         </footer>
@@ -308,6 +321,11 @@ const KINDS: KindOption[] = [
         margin: 0;
         font-size: 12px;
         color: var(--ink-faint);
+      }
+      .repo-empty {
+        font-size: 12.5px;
+        color: var(--ink-muted);
+        a { color: var(--ink); }
       }
       .hint-section {
         color: var(--ink-muted);
