@@ -25,6 +25,7 @@ import {
   type TaskWorkspace,
 } from "../db/tasks";
 import { getPipeline } from "../orchestrator/pipelines";
+import { parseExplorerOutput } from "../orchestrator/explorer";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, listScoringSummary, upsertScoring } from "../db/scorings";
@@ -721,6 +722,56 @@ tasks.post("/:id/cancel", async (c) => {
   const id = c.req.param("id");
   await cancelRun(id);
   return c.json({ ok: true });
+});
+
+/**
+ * YAML self-check for the solution-explorer. The agent posts what it's
+ * about to emit; we run it through the same parser the orchestrator
+ * uses post-reply and report what came out. The agent can call this as
+ * many times as it wants before finishing — strictly cheaper than
+ * sending a malformed final answer that triggers a re-prompt round-
+ * trip.
+ *
+ * Body: { yaml: string } — the full YAML body, with or without the
+ *   ```yaml fence wrapper.
+ * Returns: { ok: bool, parsed: { ... } | null, errors: string[] } —
+ *   ok is true when scoring is present and alternatives is an array
+ *   (even if empty); the parsed shape mirrors what would land in the
+ *   DB.
+ */
+const explorerVerifySchema = z.object({
+  yaml: z.string().min(1).max(40_000),
+});
+tasks.post("/:id/explorer/verify", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = explorerVerifySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  const out = parseExplorerOutput(parsed.data.yaml);
+  const errors: string[] = [];
+  if (!out) {
+    errors.push("yaml_unparseable: the body could not be parsed as YAML or contained no recognizable scoring/alternatives object.");
+  } else {
+    if (!out.scoring) {
+      errors.push("scoring_missing: top-level `scoring:` block with the five-axis radar (complexity, involved_parts, lines_of_code, user_benefit, maintainability) is required.");
+    } else {
+      const required = ["complexity", "involved_parts", "lines_of_code", "user_benefit", "maintainability"];
+      const missing = required.filter((k) => !(k in out.scoring!.scores));
+      if (missing.length > 0) {
+        errors.push(`scoring_axis_missing: ${missing.join(", ")}`);
+      }
+    }
+    if (out.alternatives === undefined) {
+      errors.push("alternatives_missing: top-level `alternatives:` field is required (use [] when there are none — empty is a valid answer).");
+    }
+  }
+  const ok = errors.length === 0 && out !== null;
+  return c.json({
+    ok,
+    parsed: out,
+    errors,
+  });
 });
 
 /**

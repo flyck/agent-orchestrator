@@ -780,6 +780,24 @@ function loadAgentPrompt(relPath: string): string {
   }
 }
 
+/** Sent in the same session when the explorer's first reply isn't
+ *  parseable YAML. Short and direct — the agent already has the full
+ *  role prompt; this is just a course-correction nudge. */
+const EXPLORER_REPROMPT = [
+  "Your last reply was not a valid fenced YAML block in the shape this role requires.",
+  "",
+  "Re-emit your analysis now as a single ```yaml ... ``` block following the schema in your role prompt.",
+  "",
+  "Hard requirements:",
+  "- The reply must contain ONE fenced ```yaml block. Nothing before it, nothing after it.",
+  "- Top-level keys: `verdict`, `confidence`, `summary`, `scoring`, `alternatives` (use `alternatives: []` when none).",
+  "- `scoring` must include all five axes: complexity, involved_parts, lines_of_code, user_benefit, maintainability — each `{ value: <1-10>, rationale: \"…\" }`.",
+  "",
+  "Tip: before sending, you can verify your YAML with:",
+  "  curl -sS -X POST http://localhost:3000/api/tasks/{{TASK_ID}}/explorer/verify -H 'content-type: application/json' -d '{\"yaml\": \"<your yaml body here, escaped>\"}'",
+  "It returns { ok: bool, errors: [...] } so you can fix mistakes before finalizing.",
+].join("\n");
+
 /** Per-agent prompt bodies used by the pipeline runner. Loaded once at
  *  module init; restart the backend to pick up edits. */
 const PIPELINE_AGENT_PROMPTS: Record<string, string> = {
@@ -929,7 +947,41 @@ async function runPipelineAgent(
     return false;
   }
 
-  const r = await pumpUntilTerminal(a);
+  let r = await pumpUntilTerminal(a);
+
+  // Solution-explorer YAML re-prompt. If the reply doesn't parse as
+  // the expected fenced YAML, send a follow-up in the same session
+  // asking for a clean re-emission. Cap retries so a stubborn agent
+  // can't loop forever — after the cap, we accept the malformed reply
+  // and move on (the explorer post-step logs the parse failure).
+  if (
+    agentSlug === "solution-explorer" &&
+    phase.id === "explore" &&
+    r.terminal !== "error"
+  ) {
+    const MAX_REPROMPTS = 2;
+    for (let attempt = 0; attempt < MAX_REPROMPTS; attempt++) {
+      const reply = (r.assistantText ?? "").trim();
+      if (parseExplorerOutput(reply)) break;
+      log.warn("orchestrator.pipeline.explorer_reprompt", {
+        taskId,
+        attempt: attempt + 1,
+        replyHead: reply.slice(0, 200),
+      });
+      try {
+        await session.send(EXPLORER_REPROMPT.replaceAll("{{TASK_ID}}", taskId), { system });
+      } catch (err) {
+        log.warn("orchestrator.pipeline.explorer_reprompt_send_failed", {
+          taskId,
+          error: String(err),
+        });
+        break;
+      }
+      r = await pumpUntilTerminal(a);
+      if (r.terminal === "error") break;
+    }
+  }
+
   await safeClose(session, taskId, `${phase.id}_done`);
 
   if (r.terminal === "error") {
