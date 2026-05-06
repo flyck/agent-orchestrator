@@ -14,6 +14,7 @@ import { getBitbucketConfig, upsertIntegration } from "../db/integrations";
 import {
   fetchPullDiff as bbFetchPullDiff,
   fetchPullRequest as bbFetchPullRequest,
+  getMyFirstWorkspace as bbGetMyFirstWorkspace,
   getMyUuid as bbGetMyUuid,
   listPullRequests as bbListPullRequests,
   listRepos as bbListRepos,
@@ -88,10 +89,19 @@ export function makeBitbucketProvider(): PrSourceProvider {
     async listRepos() {
       const cfg = getBitbucketConfig();
       if (!cfg) throw new Error("bitbucket_not_connected");
-      if (!cfg.workspace) {
-        throw new Error("bitbucket_workspace_unset");
+      // Lazy backfill: connections persisted before the workspace field
+      // existed have it null. Resolve from /2.0/user/workspaces and
+      // persist so subsequent calls hit the fast path.
+      let workspace = cfg.workspace ?? null;
+      if (!workspace) {
+        workspace = await bbGetMyFirstWorkspace(cfg.username, cfg.app_password);
+        if (!workspace) {
+          throw new Error(
+            "bitbucket_no_workspaces — credential cannot see any workspaces; check the read:workspace:bitbucket scope",
+          );
+        }
+        upsertIntegration("bitbucket", { ...cfg, workspace }, true);
       }
-      const workspace = cfg.workspace;
       const repos = await bbListRepos(cfg.username, cfg.app_password, workspace);
       return repos.map<NormalizedRepo>((r) => ({
         full_name: r.full_name,

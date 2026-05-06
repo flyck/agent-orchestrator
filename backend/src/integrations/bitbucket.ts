@@ -122,6 +122,19 @@ export async function getMyUuid(
   return u.uuid ?? null;
 }
 
+/** Resolve the first workspace slug visible to the credential. Same
+ *  lazy-backfill purpose as getMyUuid — covers connections persisted
+ *  before BitbucketConfig.workspace existed. */
+export async function getMyFirstWorkspace(
+  username: string,
+  appPassword: string,
+): Promise<string | null> {
+  const res = await bbFetch("/2.0/user/workspaces?pagelen=1", username, appPassword);
+  if (!res.ok) return null;
+  const data = (await res.json()) as { values?: Array<{ slug?: string }> };
+  return data.values?.[0]?.slug ?? null;
+}
+
 export async function validate(
   username: string,
   appPassword: string,
