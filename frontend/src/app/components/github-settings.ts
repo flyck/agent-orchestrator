@@ -2,8 +2,8 @@ import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   IntegrationsService,
-  type GithubRepo,
 } from '../services/integrations.service';
+import { WatchedReposPicker } from './watched-repos-picker';
 
 /**
  * GitHub integration card for Settings → Integrations. Two states:
@@ -22,7 +22,7 @@ import {
 @Component({
   selector: 'app-github-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, WatchedReposPicker],
   template: `
     <article class="gh">
       <header class="gh-head">
@@ -95,50 +95,14 @@ import {
           }
         </p>
 
-        <div class="gh-watch">
-          <header class="gh-watch-head">
-            <span class="meta">watched repos · {{ selected().size }} of {{ filteredRepos().length }}</span>
-            <button type="button" class="meta-action" (click)="reloadRepos()" [disabled]="reposLoading()">
-              {{ reposLoading() ? 'loading…' : 'refresh list' }}
-            </button>
-          </header>
-          <input class="gh-filter"
-                 type="text"
-                 placeholder="filter…"
-                 [(ngModel)]="filter" />
-          @if (reposLoading() && repos().length === 0) {
-            <p class="muted small">loading repos…</p>
-          } @else if (repos().length === 0) {
-            <p class="muted small">no repos visible to this token</p>
-          } @else {
-            <ul class="gh-repos">
-              @for (r of filteredRepos(); track r.full_name) {
-                <li>
-                  <label>
-                    <input type="checkbox"
-                           [checked]="selected().has(r.full_name)"
-                           (change)="toggle(r.full_name, $event)" />
-                    <span class="repo-name mono">{{ r.full_name }}</span>
-                    @if (r.private) { <span class="meta">private</span> }
-                  </label>
-                </li>
-              }
-            </ul>
-          }
-        </div>
+        <app-watched-repos-picker [initialSelection]="watchedRepos()" />
 
         <div class="gh-actions">
-          <button class="primary" type="button" (click)="saveWatched()" [disabled]="saving() || !dirty()">
-            {{ saving() ? 'saving…' : 'save selection' }}
-          </button>
           <button type="button" (click)="rotate()">rotate token</button>
           <button type="button" class="danger" (click)="disconnect()">disconnect</button>
         </div>
         @if (errorMessage()) {
           <p class="error small">{{ errorMessage() }}</p>
-        }
-        @if (saveOk()) {
-          <p class="small ok">saved.</p>
         }
       }
     </article>
@@ -281,52 +245,26 @@ export class GithubSettings implements OnInit {
   private api = inject(IntegrationsService);
 
   protected tokenDraft = '';
-  protected filter = '';
 
   protected readonly login = signal<string | null>(null);
   protected readonly connected = computed(() => !!this.login());
   protected readonly lastError = signal<string | null>(null);
   protected readonly saving = signal(false);
-  protected readonly saveOk = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
-  protected readonly reposLoading = signal(false);
-
-  protected readonly repos = signal<GithubRepo[]>([]);
-  protected readonly selected = signal<Set<string>>(new Set());
-  /** Snapshot of the saved selection — used to compute dirty state. */
-  private savedSnapshot = new Set<string>();
-
-  protected readonly filteredRepos = computed(() => {
-    const q = this.filter.trim().toLowerCase();
-    const list = this.repos();
-    if (!q) return list;
-    return list.filter((r) => r.full_name.toLowerCase().includes(q));
-  });
-
-  protected readonly dirty = computed(() => {
-    const sel = this.selected();
-    if (sel.size !== this.savedSnapshot.size) return true;
-    for (const f of sel) if (!this.savedSnapshot.has(f)) return true;
-    return false;
-  });
+  protected readonly watchedRepos = signal<string[]>([]);
 
   protected status(): string {
     return this.connected() ? 'configured' : 'not connected';
   }
 
   ngOnInit(): void {
-    // Hydrate from /api/integrations: reads stored login + watched_repos
-    // without needing the token to round-trip.
     this.api.list().subscribe({
       next: (r) => {
         const gh = r.integrations.find((i) => i.id === 'github');
         if (!gh) return;
         if (gh.login) this.login.set(gh.login);
-        const watched = gh.watched_repos ?? [];
-        this.selected.set(new Set(watched));
-        this.savedSnapshot = new Set(watched);
+        this.watchedRepos.set(gh.watched_repos ?? []);
         this.lastError.set(gh.last_error);
-        if (gh.login) this.reloadRepos();
       },
     });
   }
@@ -340,9 +278,7 @@ export class GithubSettings implements OnInit {
         this.saving.set(false);
         this.login.set(r.login);
         this.tokenDraft = '';
-        this.selected.set(new Set(r.watched_repos));
-        this.savedSnapshot = new Set(r.watched_repos);
-        this.reloadRepos();
+        this.watchedRepos.set(r.watched_repos);
       },
       error: (e) => {
         this.saving.set(false);
@@ -364,53 +300,9 @@ export class GithubSettings implements OnInit {
     this.api.disconnectGithub().subscribe({
       next: () => {
         this.login.set(null);
-        this.repos.set([]);
-        this.selected.set(new Set());
-        this.savedSnapshot = new Set();
+        this.watchedRepos.set([]);
       },
     });
-  }
-
-  reloadRepos(): void {
-    this.reposLoading.set(true);
-    this.api.listGithubRepos().subscribe({
-      next: (r) => {
-        this.repos.set(r.repos);
-        this.reposLoading.set(false);
-      },
-      error: (e) => {
-        this.reposLoading.set(false);
-        this.errorMessage.set(this.formatError(e));
-      },
-    });
-  }
-
-  toggle(fullName: string, ev: Event): void {
-    const checked = (ev.target as HTMLInputElement).checked;
-    const next = new Set(this.selected());
-    if (checked) next.add(fullName);
-    else next.delete(fullName);
-    this.selected.set(next);
-    this.saveOk.set(false);
-  }
-
-  saveWatched(): void {
-    this.errorMessage.set(null);
-    this.saveOk.set(false);
-    this.saving.set(true);
-    this.api
-      .connectGithub({ watched_repos: [...this.selected()] })
-      .subscribe({
-        next: (r) => {
-          this.saving.set(false);
-          this.savedSnapshot = new Set(r.watched_repos);
-          this.saveOk.set(true);
-        },
-        error: (e) => {
-          this.saving.set(false);
-          this.errorMessage.set(this.formatError(e));
-        },
-      });
   }
 
   private formatError(e: { error?: { message?: string }; message?: string } | string): string {

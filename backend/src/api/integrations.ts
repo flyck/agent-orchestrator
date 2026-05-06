@@ -240,6 +240,59 @@ integrations.delete("/bitbucket", (c) => {
 // ─── Generic (provider-agnostic) ─────────────────────────────────────────
 
 /**
+ * Repos the active provider can see. Used by the watched-repos picker
+ * in Settings. Same slim shape regardless of provider.
+ */
+integrations.get("/repos", async (c) => {
+  const provider = await getActiveProvider();
+  if (!provider) return c.json({ error: "not_connected", source: null }, 400);
+  try {
+    const repos = await provider.listRepos();
+    markSynced(provider.id);
+    return c.json({ source: provider.id, repos });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    markError(provider.id, message);
+    log.warn("api.integrations.list_repos_failed", { source: provider.id, message });
+    return c.json({ error: "provider_request_failed", source: provider.id, message }, 502);
+  }
+});
+
+/**
+ * Update the watched-repos selection on the active provider. The picker
+ * sends the full desired list (not a diff) so this is idempotent and
+ * tolerant of stale views.
+ */
+const watchedSchema = z.object({
+  watched_repos: z.array(z.string().min(3).max(140)).max(500),
+});
+integrations.patch("/watched", async (c) => {
+  const provider = await getActiveProvider();
+  if (!provider) return c.json({ error: "not_connected", source: null }, 400);
+  const body = await c.req.json().catch(() => null);
+  const parsed = watchedSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  try {
+    provider.setWatchedRepos(parsed.data.watched_repos);
+    log.info("api.integrations.watched_updated", {
+      source: provider.id,
+      count: parsed.data.watched_repos.length,
+    });
+    return c.json({
+      ok: true,
+      source: provider.id,
+      watched_repos: parsed.data.watched_repos,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("api.integrations.watched_update_failed", { source: provider.id, message });
+    return c.json({ error: "provider_write_failed", source: provider.id, message }, 500);
+  }
+});
+
+/**
  * Provider-agnostic PR listing. Dispatches to whichever integration row
  * has `enabled=1` (single-active rule). Returns NormalizedPull rows so
  * the Review page can render GitHub + Bitbucket PRs through the same

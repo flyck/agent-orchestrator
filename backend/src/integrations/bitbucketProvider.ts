@@ -10,7 +10,7 @@
  * follow-up.
  */
 
-import { getBitbucketConfig } from "../db/integrations";
+import { getBitbucketConfig, upsertIntegration } from "../db/integrations";
 import {
   fetchPullDiff as bbFetchPullDiff,
   fetchPullRequest as bbFetchPullRequest,
@@ -72,6 +72,16 @@ export function makeBitbucketProvider(): PrSourceProvider {
 
     listWatchedRepos() {
       return getBitbucketConfig()?.watched_repos ?? [];
+    },
+
+    setWatchedRepos(repos: string[]) {
+      const cfg = getBitbucketConfig();
+      if (!cfg) throw new Error("bitbucket_not_connected");
+      upsertIntegration(
+        "bitbucket",
+        { ...cfg, watched_repos: repos },
+        true,
+      );
     },
 
     async listRepos() {

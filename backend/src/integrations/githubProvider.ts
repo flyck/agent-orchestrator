@@ -5,7 +5,7 @@
  * transport-ready output.
  */
 
-import { getGithubConfig } from "../db/integrations";
+import { getGithubConfig, upsertIntegration } from "../db/integrations";
 import {
   fetchPullDiff as ghFetchPullDiff,
   fetchPullRequest as ghFetchPullRequest,
@@ -69,6 +69,16 @@ export function makeGithubProvider(): PrSourceProvider {
 
     listWatchedRepos() {
       return getGithubConfig()?.watched_repos ?? [];
+    },
+
+    setWatchedRepos(repos: string[]) {
+      const cfg = getGithubConfig();
+      if (!cfg) throw new Error("github_not_connected");
+      upsertIntegration(
+        "github",
+        { ...cfg, watched_repos: repos },
+        true,
+      );
     },
 
     async listRepos() {

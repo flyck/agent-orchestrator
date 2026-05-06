@@ -36,6 +36,17 @@ export interface GithubRepo {
   pushed_at: string | null;
 }
 
+/** Same slim shape as GithubRepo — the generic /api/integrations/repos
+ *  endpoint returns this for both providers. */
+export interface NormalizedRepo {
+  full_name: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  description: string | null;
+  pushed_at: string | null;
+}
+
 export interface GithubPr {
   repo: string;
   number: number;
@@ -160,6 +171,30 @@ export class IntegrationsService {
   /** Wipe the Bitbucket config. */
   disconnectBitbucket(): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>('/api/integrations/bitbucket');
+  }
+
+  /** Provider-agnostic repo listing for the watched-repos picker. */
+  listRepos(): Observable<{
+    source: 'github' | 'bitbucket' | null;
+    repos: NormalizedRepo[];
+  }> {
+    return this.http.get<{
+      source: 'github' | 'bitbucket' | null;
+      repos: NormalizedRepo[];
+    }>('/api/integrations/repos');
+  }
+
+  /** Persist the watched-repos selection on the active provider. */
+  setWatchedRepos(repos: string[]): Observable<{
+    ok: boolean;
+    source: 'github' | 'bitbucket';
+    watched_repos: string[];
+  }> {
+    return this.http.patch<{
+      ok: boolean;
+      source: 'github' | 'bitbucket';
+      watched_repos: string[];
+    }>('/api/integrations/watched', { watched_repos: repos });
   }
 
   /** Provider-agnostic PR list. Routes through whichever integration is

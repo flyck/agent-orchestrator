@@ -92,6 +92,10 @@ export interface PrSourceProvider {
   /** Repos the user opted in to via the watched-repos picker. PR
    *  listing only walks these; empty means "no watched repos". */
   listWatchedRepos(): string[];
+  /** Persist the watched-repos selection. The implementation rewrites
+   *  the provider's stored config in place; the credential portion is
+   *  untouched. Caller already validated the array shape. */
+  setWatchedRepos(repos: string[]): void;
   /** PRs across the watched repos. */
   listPullRequests(filter: PullFilter): Promise<NormalizedPull[]>;
   /** Single PR — fetched when the user clicks Review. */

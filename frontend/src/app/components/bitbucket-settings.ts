@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import {
   IntegrationsService,
 } from '../services/integrations.service';
+import { WatchedReposPicker } from './watched-repos-picker';
 
 /**
  * Bitbucket integration card. Mirrors the GithubSettings shape (connect /
@@ -18,7 +19,7 @@ import {
 @Component({
   selector: 'app-bitbucket-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, WatchedReposPicker],
   template: `
     <article class="bb">
       <header class="bb-head">
@@ -101,10 +102,7 @@ import {
             <span class="error"> Last sync error: {{ lastError() }}</span>
           }
         </p>
-        <p class="muted small">
-          Watched-repo selection + PR fetching land alongside the Review-page Bitbucket
-          source — for now, the credential is stored and ready.
-        </p>
+        <app-watched-repos-picker [initialSelection]="watchedRepos()" />
         <div class="bb-actions">
           <button type="button" (click)="rotate()">rotate credential</button>
           <button type="button" class="danger" (click)="disconnect()">disconnect</button>
@@ -198,6 +196,7 @@ export class BitbucketSettings implements OnInit {
   protected readonly username = signal<string | null>(null);
   protected readonly displayName = signal<string | null>(null);
   protected readonly workspace = signal<string | null>(null);
+  protected readonly watchedRepos = signal<string[]>([]);
   protected readonly connected = computed(() => !!this.username());
   protected readonly lastError = signal<string | null>(null);
   protected readonly saving = signal(false);
@@ -215,6 +214,7 @@ export class BitbucketSettings implements OnInit {
         if (bb.username) this.username.set(bb.username);
         this.displayName.set(bb.display_name ?? null);
         this.workspace.set(bb.workspace ?? null);
+        this.watchedRepos.set(bb.watched_repos ?? []);
         this.lastError.set(bb.last_error);
       },
     });
