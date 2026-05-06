@@ -1,6 +1,11 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { recordContextSwitch, listContextSwitchesForDate } from "../db/contextSwitches";
+import {
+  recordContextSwitch,
+  listContextSwitchesForDate,
+  getCurrentContext,
+  clearCurrentContext,
+} from "../db/contextSwitches";
 import { generateContextLabel } from "../orchestrator/contextLabel";
 import { log } from "../log";
 
@@ -39,4 +44,19 @@ contextSwitches.get("/", (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
   const rows = listContextSwitchesForDate(date);
   return c.json({ date, switches: rows });
+});
+
+// Latest context-switch since the user last cleared — drives the navbar
+// "current context" label. `null` when the user has cleared or has never
+// marked a switch.
+contextSwitches.get("/current", (c) => {
+  return c.json({ current: getCurrentContext() });
+});
+
+// Clear the navbar "current context" indicator. Doesn't delete history —
+// subsequent listings still show today's switches in the donut chart.
+contextSwitches.post("/clear", (c) => {
+  const result = clearCurrentContext();
+  log.info("api.context_switch.cleared", { clearedAt: result.cleared_at });
+  return c.json({ ok: true, ...result });
 });

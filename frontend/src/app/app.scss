@@ -57,6 +57,51 @@
   gap: 8px;
 }
 
+.ctx-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+  max-width: 240px;
+  .meta {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .ctx-value {
+    font-size: 12.5px;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+  }
+  &.empty {
+    border-style: dashed;
+    .ctx-none {
+      font-style: italic;
+      color: var(--ink-muted);
+    }
+  }
+}
+
+.ctx-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.ctx-clear:hover { color: var(--ink); border-color: var(--ink); }
+.ctx-clear:disabled { opacity: 0.4; cursor: default; }
+
 .page {
   padding: 32px 0;
 }

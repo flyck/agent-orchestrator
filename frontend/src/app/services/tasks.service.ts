@@ -409,6 +409,17 @@ export class TasksService {
   getContextSwitches(date: string): Observable<{ date: string; switches: ContextSwitchRow[] }> {
     return this.http.get<{ date: string; switches: ContextSwitchRow[] }>(`/api/context-switches?date=${date}`);
   }
+
+  /** Latest context switch since the user last cleared. Drives the navbar
+   *  "current context" indicator. */
+  getCurrentContextSwitch(): Observable<{ current: ContextSwitchRow | null }> {
+    return this.http.get<{ current: ContextSwitchRow | null }>(`/api/context-switches/current`);
+  }
+
+  /** Clear the navbar "current context" indicator without deleting history. */
+  clearCurrentContext(): Observable<{ ok: true; cleared_at: number }> {
+    return this.http.post<{ ok: true; cleared_at: number }>(`/api/context-switches/clear`, {});
+  }
 }
 
 export interface TaskPhaseOutputRow {
