@@ -108,6 +108,20 @@ export interface BitbucketValidation extends BitbucketUser {
  * display name, but fall through to /2.0/user/workspaces on 403/410
  * since some scoped tokens have workspace scope but not account scope.
  */
+/** Fetch just the caller's Bitbucket UUID. Used to lazily backfill the
+ *  stored config for connections persisted before the uuid field
+ *  existed. Returns null when the credential lacks `account` scope —
+ *  the caller falls back to client-side awaiting_me detection. */
+export async function getMyUuid(
+  username: string,
+  appPassword: string,
+): Promise<string | null> {
+  const res = await bbFetch("/2.0/user", username, appPassword);
+  if (!res.ok) return null;
+  const u = (await res.json()) as BitbucketUser;
+  return u.uuid ?? null;
+}
+
 export async function validate(
   username: string,
   appPassword: string,
@@ -284,15 +298,15 @@ export async function listPullRequests(
   if (repos.length === 0) return [];
 
   // Bitbucket has no workspace-level "all open PRs" endpoint, so we fan
-  // out per-repo. We push as much filtering as possible into the `q=`
-  // query so the wire payload only contains rows we'll actually return.
-  // For awaiting_me, q=reviewers.uuid="{me}" is supported (per Bitbucket's
-  // filtering docs) and skips the post-filter loop entirely.
-  const baseQuery = `state="OPEN"`;
-  const fullQuery =
+  // out per-repo. For awaiting_me + a known UUID, we push the
+  // reviewers.uuid filter into the q= query so Bitbucket pre-filters
+  // server-side. For all_open we omit q= entirely — the endpoint
+  // already defaults to state=OPEN, and a no-q request hits the
+  // server's plain-listing path which is faster than a parsed query.
+  const qFilter =
     filter === BitbucketPullFilter.AwaitingMe && myUuid
-      ? `${baseQuery} AND reviewers.uuid="${myUuid}"`
-      : baseQuery;
+      ? `state="OPEN" AND reviewers.uuid="${myUuid}"`
+      : null;
 
   const perRepo = await mapWithConcurrency(repos, 6, async (full) => {
     let workspace: string;
@@ -303,10 +317,11 @@ export async function listPullRequests(
       return [] as BitbucketPull[];
     }
     try {
-      const url =
-        `/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
-          slug,
-        )}/pullrequests?pagelen=50&q=${encodeURIComponent(fullQuery)}`;
+      const params = new URLSearchParams({ state: "OPEN", pagelen: "50" });
+      if (qFilter) params.set("q", qFilter);
+      const url = `/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+        slug,
+      )}/pullrequests?${params.toString()}`;
       const data = await bbJson<PaginatedResponse<BitbucketPullRaw>>(
         url,
         username,

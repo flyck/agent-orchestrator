@@ -14,6 +14,7 @@ import { getBitbucketConfig, upsertIntegration } from "../db/integrations";
 import {
   fetchPullDiff as bbFetchPullDiff,
   fetchPullRequest as bbFetchPullRequest,
+  getMyUuid as bbGetMyUuid,
   listPullRequests as bbListPullRequests,
   listRepos as bbListRepos,
   postPullComment as bbPostPullComment,
@@ -110,12 +111,26 @@ export function makeBitbucketProvider(): PrSourceProvider {
         filter === PullFilter.AllOpen
           ? BitbucketPullFilter.AllOpen
           : BitbucketPullFilter.AwaitingMe;
+
+      // Lazy backfill: connections persisted before the uuid field
+      // existed have it as null. Without uuid, q=reviewers.uuid can't be
+      // emitted and the awaiting_me detection silently falls back to the
+      // empty case. Fetch + persist once on first listing so subsequent
+      // calls hit the fast path.
+      let myUuid = cfg.uuid ?? null;
+      if (!myUuid) {
+        myUuid = await bbGetMyUuid(cfg.username, cfg.app_password);
+        if (myUuid) {
+          upsertIntegration("bitbucket", { ...cfg, uuid: myUuid }, true);
+        }
+      }
+
       const prs = await bbListPullRequests(
         cfg.username,
         cfg.app_password,
         watched,
         bbFilter,
-        cfg.uuid ?? null,
+        myUuid,
       );
       // bbListPullRequests already returns the BitbucketPull shape
       // (slim, with awaiting_me set). Map to NormalizedPull.
