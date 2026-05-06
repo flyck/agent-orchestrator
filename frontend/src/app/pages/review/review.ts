@@ -1,7 +1,7 @@
 import { Component, computed, inject, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { Subject, switchMap, takeUntil, timer, catchError, of } from 'rxjs';
 import {
   IntegrationsService,
@@ -10,6 +10,7 @@ import {
 } from '../../services/integrations.service';
 import { TasksService, type Task } from '../../services/tasks.service';
 import { formatTs, relativeTs } from '../../util/time';
+import { TaskDetailPanelComponent } from '../../components/task-detail-panel';
 
 /**
  * PR-review pipeline phases (Design A). Mirrors the order in
@@ -78,7 +79,7 @@ function relativeTsIso(iso: string): string {
 @Component({
   selector: 'app-review-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, TaskDetailPanelComponent],
   template: `
     <header class="head">
       <p class="meta">workspace</p>
@@ -169,11 +170,16 @@ function relativeTsIso(iso: string): string {
       </div>
 
       <p class="muted small">
-        Detail view (Stream / Review / Files tabs) opens on the Home page when you click a
-        card. The same task lives in both views — Home renders the full panel, Review focuses
-        on the queue.
+        Click a card to open the detail panel below. The same task also lives on
+        the Home page with full interactive controls.
       </p>
     </section>
+
+    @if (detailTaskId()) {
+      <app-task-detail-panel
+        [taskId]="detailTaskId()!"
+        (close)="closeDetail()" />
+    }
 
     <!-- ─── 2. Open pull requests with filters ───────────────────────── -->
     @if (githubStatus() === 'connected') {
@@ -512,7 +518,6 @@ function relativeTsIso(iso: string): string {
 export class ReviewPage implements OnDestroy {
   private integrationsApi = inject(IntegrationsService);
   private tasksApi = inject(TasksService);
-  private router = inject(Router);
 
   protected readonly states = REVIEW_PIPELINE_STATES;
   protected readonly stateLabels = STATE_LABELS;
@@ -532,6 +537,7 @@ export class ReviewPage implements OnDestroy {
   protected readonly prsLoading = signal(false);
   protected readonly prError = signal<string | null>(null);
   protected readonly busyOn = signal<string | null>(null);
+  protected readonly detailTaskId = signal<string | null>(null);
 
   protected readonly filteredPrs = computed(() => {
     const q = this.prSearch.trim().toLowerCase();
@@ -642,7 +648,7 @@ export class ReviewPage implements OnDestroy {
     this.integrationsApi.reviewPr(pr.repo, pr.number).subscribe({
       next: (r) => {
         this.busyOn.set(null);
-        this.router.navigate(['/home'], { queryParams: { task: r.task_id, tab: 'stream' } });
+        this.detailTaskId.set(r.task_id);
       },
       error: (e) => {
         this.busyOn.set(null);
@@ -652,7 +658,11 @@ export class ReviewPage implements OnDestroy {
   }
 
   openOnHome(taskId: string): void {
-    this.router.navigate(['/home'], { queryParams: { task: taskId } });
+    this.detailTaskId.set(this.detailTaskId() === taskId ? null : taskId);
+  }
+
+  closeDetail(): void {
+    this.detailTaskId.set(null);
   }
 
   truncateBody(s: string): string {
