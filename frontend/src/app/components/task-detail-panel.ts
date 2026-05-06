@@ -1220,6 +1220,11 @@ export class TaskDetailPanelComponent {
   // ─── Scroll container ──────────────────────────────────────────────────
   private readonly scrollContainer =
     viewChild<ElementRef<HTMLElement>>("scrollContainer");
+  // Per-session transcript view — separate from the live tail. Scrolls
+  // to the bottom whenever the session changes or its lines load so
+  // the most recent agent text is visible without manual scrolling.
+  private readonly sessionTranscriptContainer =
+    viewChild<ElementRef<HTMLElement>>("sessionTranscriptContainer");
   private autoScrollPinned = true;
 
   protected onStreamScroll(ev: Event): void {
@@ -1250,6 +1255,21 @@ export class TaskDetailPanelComponent {
       if (!this.autoScrollPinned) return;
       queueMicrotask(() => {
         const el = this.scrollContainer()?.nativeElement;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+      });
+    });
+
+    // Auto-scroll the per-session transcript to the bottom when the
+    // user opens an agent tab — the latest assistant text is what they
+    // care about. Triggers on tab change + when the lines for that
+    // session arrive (transcripts load asynchronously).
+    effect(() => {
+      const sess = this.selectedPhaseSession();
+      if (!sess) return;
+      this.sessionTranscripts().get(sess.session_id);
+      queueMicrotask(() => {
+        const el = this.sessionTranscriptContainer()?.nativeElement;
         if (!el) return;
         el.scrollTop = el.scrollHeight;
       });

@@ -223,7 +223,7 @@
               produced no assistant text.
             </p>
           } @else {
-            <div class="transcript">
+            <div class="transcript" #sessionTranscriptContainer>
               @for (line of lines; track $index) {
                 <article class="transcript-line" [attr.data-role]="line.role">
                   <header class="transcript-head meta">
