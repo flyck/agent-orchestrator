@@ -22,6 +22,7 @@ export interface Settings {
   magit_open_command: string;
   pr_review_poll_interval_minutes: number;
   suggestions_enabled: boolean;
+  git_repos_dir: string;
 }
 
 const NUMBER_KEYS = new Set<keyof Settings>([
