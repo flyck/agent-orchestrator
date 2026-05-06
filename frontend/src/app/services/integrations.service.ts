@@ -214,7 +214,7 @@ export class IntegrationsService {
     cached_age_ms?: number;
   }> {
     const params: Record<string, string> = { filter };
-    if (fresh) params.fresh = '1';
+    if (fresh) params['fresh'] = '1';
     return this.http.get<{
       source: 'github' | 'bitbucket' | null;
       filter?: PrFilter;
