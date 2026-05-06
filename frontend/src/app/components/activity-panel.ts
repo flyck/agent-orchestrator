@@ -34,7 +34,7 @@ const KIND_LABEL: Record<ActivityKind, string> = {
   standalone: true,
   imports: [NgApexchartsModule],
   template: `
-    <section class="activity">
+    <section class="block activity">
       <header class="block-head">
         <div>
           <p class="meta">recent activity · last {{ activities().length }} events</p>
@@ -42,65 +42,75 @@ const KIND_LABEL: Record<ActivityKind, string> = {
         </div>
       </header>
 
-      <div class="activity-body">
-        <div class="squares" role="list">
-          @for (a of activities(); track a.id) {
-            <button
-              class="sq"
-              type="button"
-              role="listitem"
-              [class.sq-agent]="a.actor === 'agent' && a.kind !== 'abandon'"
-              [class.sq-spec]="a.kind === 'spec_create' || a.kind === 'spec_edit'"
-              [class.sq-review]="
-                a.kind === 'review_sendback' ||
-                a.kind === 'review_rate' ||
-                a.kind === 'finalize'
-              "
-              [class.sq-abandoned]="a.kind === 'abandon'"
-              [title]="tooltip(a)"
-              [disabled]="!a.task_id"
-              (click)="jumpToTask(a.task_id)"
-            ></button>
-          } @empty {
-            <p class="muted small">No activity yet — finish a task to populate this strip.</p>
+      <div class="chart-wrap activity-wrap">
+        <div class="activity-body">
+          <div class="squares" role="list">
+            @for (a of activities(); track a.id) {
+              <button
+                class="sq"
+                type="button"
+                role="listitem"
+                [class.sq-agent]="a.actor === 'agent' && a.kind !== 'abandon'"
+                [class.sq-spec]="a.kind === 'spec_create' || a.kind === 'spec_edit'"
+                [class.sq-review]="
+                  a.kind === 'review_sendback' ||
+                  a.kind === 'review_rate' ||
+                  a.kind === 'finalize'
+                "
+                [class.sq-abandoned]="a.kind === 'abandon'"
+                [title]="tooltip(a)"
+                [disabled]="!a.task_id"
+                (click)="jumpToTask(a.task_id)"
+              ></button>
+            } @empty {
+              <p class="muted small">No activity yet — finish a task to populate this strip.</p>
+            }
+          </div>
+
+          @if (activities().length > 0) {
+            <div class="ratio">
+              @let opts = pieOptions();
+              <apx-chart
+                [chart]="opts.chart!"
+                [series]="opts.series!"
+                [labels]="opts.labels!"
+                [colors]="opts.colors!"
+                [legend]="opts.legend!"
+                [stroke]="opts.stroke!"
+                [dataLabels]="opts.dataLabels!"
+                [tooltip]="opts.tooltip!"
+                [plotOptions]="opts.plotOptions!"
+              />
+              <p class="ratio-meta meta">{{ ratioLabel() }}</p>
+            </div>
           }
         </div>
-
-        @if (activities().length > 0) {
-          <div class="ratio">
-            @let opts = pieOptions();
-            <apx-chart
-              [chart]="opts.chart!"
-              [series]="opts.series!"
-              [labels]="opts.labels!"
-              [colors]="opts.colors!"
-              [legend]="opts.legend!"
-              [stroke]="opts.stroke!"
-              [dataLabels]="opts.dataLabels!"
-              [tooltip]="opts.tooltip!"
-              [plotOptions]="opts.plotOptions!"
-            />
-            <p class="ratio-meta meta">{{ ratioLabel() }}</p>
-          </div>
-        }
       </div>
     </section>
   `,
   styles: [
     `
       :host { display: block; }
-      .activity {
-        border: 1px solid var(--rule);
-        background: var(--paper);
-        padding: 14px 16px;
-      }
+      /* No outer border — match the sibling cards on the top row that
+         use a bare .block + bordered inner .chart-wrap. */
+      .activity { padding: 0; }
       .block-head {
         display: flex;
         justify-content: space-between;
         align-items: flex-end;
         gap: 16px;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
         h2 { margin: 0; }
+      }
+      /* Mirror home.scss .chart-wrap so the activity strip lives in the
+         same bordered surface as the spend chart + context-switch
+         donut. Component is view-encapsulated so the home rule does
+         not reach in. */
+      .activity-wrap {
+        border: 1px solid var(--rule);
+        background: var(--paper-soft);
+        padding: 12px 12px 8px;
+        min-height: 200px;
       }
       .legend {
         display: flex;
@@ -121,8 +131,8 @@ const KIND_LABEL: Record<ActivityKind, string> = {
       }
       .activity-body {
         display: grid;
-        grid-template-columns: 1fr 140px;
-        gap: 16px;
+        grid-template-columns: 1fr 120px;
+        gap: 12px;
         align-items: start;
       }
       .squares {
