@@ -77,6 +77,7 @@ import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { appendReview } from "../db/reviews";
 import { upsertScoring } from "../db/scorings";
 import { replaceForTask as replaceAlternatives } from "../db/alternatives";
+import { parseExplorerOutput } from "./explorer";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -974,6 +975,55 @@ async function runPipelineAgent(
       log.warn("orchestrator.pipeline.review_persist_failed", {
         taskId,
         agentSlug,
+        error: String(err),
+      });
+    }
+  }
+
+  // Solution-explorer YAML → task_scorings + task_alternatives. Same
+  // shape as the reviewer's, separate persist branch since it fires on
+  // a different phase and writes set_by='solution-explorer'.
+  if (agentSlug === "solution-explorer" && phase.id === "explore") {
+    try {
+      const out = parseExplorerOutput(reply);
+      if (out) {
+        if (out.scoring) {
+          upsertScoring(taskId, {
+            scores: out.scoring.scores,
+            rationale: out.scoring.rationale,
+            set_by: "solution-explorer",
+          });
+        }
+        if (out.alternatives !== undefined) {
+          replaceAlternatives(taskId, {
+            alternatives: out.alternatives.map((a) => ({
+              label: a.label,
+              description: a.description,
+              scores: a.scores,
+              rationales: a.rationales,
+              verdict: a.verdict,
+              rationale: a.rationale ?? null,
+              diagram_mermaid:
+                (a as { diagram_mermaid?: string }).diagram_mermaid ?? null,
+            })),
+            set_by: "solution-explorer",
+          });
+        }
+        log.info("orchestrator.pipeline.explorer_persisted", {
+          taskId,
+          hasScoring: !!out.scoring,
+          altCount: out.alternatives?.length ?? 0,
+          verdict: out.verdict,
+        });
+      } else {
+        log.warn("orchestrator.pipeline.explorer_yaml_missing", {
+          taskId,
+          replyHead: reply.slice(0, 160),
+        });
+      }
+    } catch (err) {
+      log.warn("orchestrator.pipeline.explorer_persist_failed", {
+        taskId,
         error: String(err),
       });
     }
