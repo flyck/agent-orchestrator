@@ -3,12 +3,12 @@ import { FormsModule } from '@angular/forms';
 import { SettingsService, type Settings } from '../../services/settings.service';
 import { AgentsService, type Agent } from '../../services/agents.service';
 import { RepoService } from '../../services/repo.service';
-import { GithubSettings } from '../../components/github-settings';
+import { IntegrationsPanel } from '../../components/integrations-panel';
 
 @Component({
   selector: 'app-settings-page',
   standalone: true,
-  imports: [FormsModule, GithubSettings],
+  imports: [FormsModule, IntegrationsPanel],
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
 })

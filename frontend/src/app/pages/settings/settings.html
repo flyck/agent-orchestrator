@@ -205,6 +205,14 @@
 
   <section class="block">
     <header class="block-head">
+      <h2>Integrations</h2>
+      <p class="meta">connect external systems · only one provider can be active at a time</p>
+    </header>
+    <app-integrations-panel />
+  </section>
+
+  <section class="block">
+    <header class="block-head">
       <h2>Agents</h2>
       <p class="meta">{{ agents().length }} loaded · prompts in <code>agents/builtin/</code></p>
     </header>
@@ -239,13 +247,5 @@
         backend re-syncs on restart. UI editing lands in Phase 10.
       </p>
     }
-  </section>
-
-  <section class="block">
-    <header class="block-head">
-      <h2>Integrations</h2>
-      <p class="meta">connect external systems · v1: GitHub</p>
-    </header>
-    <app-github-settings />
   </section>
 }

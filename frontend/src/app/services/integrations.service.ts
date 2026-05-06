@@ -14,6 +14,10 @@ export interface IntegrationStatus {
   login?: string | null;
   /** GitHub only: opted-in repo full names. */
   watched_repos?: string[];
+  /** Bitbucket only: the basic-auth username (or Atlassian email). */
+  username?: string | null;
+  /** Bitbucket only: display name from /2.0/user (when scope allows). */
+  display_name?: string | null;
 }
 
 export interface IntegrationsResponse {
@@ -107,5 +111,24 @@ export class IntegrationsService {
       `/api/integrations/github/prs/${owner}/${repo}/${number}/review`,
       {},
     );
+  }
+
+  /** Connect Bitbucket using a username + app password (or Atlassian email
+   *  + API token). The credentials are validated against /2.0/user before
+   *  persisting; failure surfaces as a 401. */
+  connectBitbucket(input: {
+    username: string;
+    app_password: string;
+  }): Observable<{ ok: boolean; username: string; display_name: string | null }> {
+    return this.http.post<{
+      ok: boolean;
+      username: string;
+      display_name: string | null;
+    }>('/api/integrations/bitbucket/connect', input);
+  }
+
+  /** Wipe the Bitbucket config. */
+  disconnectBitbucket(): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>('/api/integrations/bitbucket');
   }
 }
