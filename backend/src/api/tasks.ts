@@ -581,6 +581,34 @@ tasks.get("/:id/diff", (c) => {
   const task = c.var.task;
   const id = task.id;
 
+  // Review tasks have no local worktree — the PR diff is what the
+  // reviewer agent runs against, stored in input_payload as a
+  // ```diff fenced block (see api/integrations.ts:renderPrInput /
+  // renderNormalizedPrInput). Extract + return that directly.
+  if (task.workspace === "review" && task.input_kind === "diff") {
+    const patch = extractDiffFence(task.input_payload ?? "");
+    if (!patch) {
+      return c.json(
+        {
+          error: "no_diff_in_payload",
+          message: "Review task input_payload contained no parseable diff block.",
+        },
+        400,
+      );
+    }
+    const files = parseDiffFiles(patch);
+    return c.json({
+      repo_root: null,
+      base: null,
+      base_resolved: false,
+      branch: null,
+      files,
+      patch,
+      truncated: false,
+      fetched_at: Date.now(),
+    });
+  }
+
   const cwd = task.worktree_path;
   if (!cwd) {
     return c.json(
@@ -929,6 +957,42 @@ tasks.post("/:id/messages", async (c) => {
  */
 const ATTACH_POLL_MS = 250;
 const ATTACH_MAX_MS = 5_000;
+
+/** Extract the ```diff fenced block from the PR-review input_payload.
+ *  Returns the diff body (without fence markers), or null if no block. */
+function extractDiffFence(input: string): string | null {
+  const m = input.match(/```diff\s*\n([\s\S]*?)\n```/);
+  return m ? (m[1] ?? null) : null;
+}
+
+/** Walk a unified diff and produce {path, status, added, deleted} rows.
+ *  Mirrors what `git diff --numstat` would emit so the file-list UI
+ *  doesn't care which path produced the diff. */
+function parseDiffFiles(
+  patch: string,
+): Array<{ path: string; status: string; added: number; deleted: number }> {
+  const out = new Map<
+    string,
+    { path: string; status: string; added: number; deleted: number }
+  >();
+  let current: { path: string; status: string; added: number; deleted: number } | null = null;
+  for (const line of patch.split("\n")) {
+    const head = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+    if (head) {
+      const path = head[2] ?? head[1] ?? "";
+      current = { path, status: "M ", added: 0, deleted: 0 };
+      out.set(path, current);
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("new file mode")) current.status = "A ";
+    else if (line.startsWith("deleted file mode")) current.status = "D ";
+    else if (line.startsWith("rename ")) current.status = "R ";
+    else if (line.startsWith("+") && !line.startsWith("+++")) current.added += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) current.deleted += 1;
+  }
+  return [...out.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
 
 function isPausedTask(t: ReturnType<typeof getTask>): boolean {
   if (!t) return false;
