@@ -26,6 +26,7 @@ import {
 import { SettingsService } from "../../services/settings.service";
 import {
   TasksService,
+  type ContextSwitchRow,
   type ReviewFinding,
   type Task,
   type TaskAlternativeRow,
@@ -324,6 +325,15 @@ function toViewTask(t: Task): ViewTask {
     step: p.step,
     total: p.total,
   };
+}
+
+function groupByLabel(rows: ContextSwitchRow[]): Record<string, number> {
+  const groups: Record<string, number> = {};
+  for (const r of rows) {
+    const key = r.label ?? "pending";
+    groups[key] = (groups[key] ?? 0) + 1;
+  }
+  return groups;
 }
 
 @Component({
@@ -1688,6 +1698,33 @@ export class HomePage {
       window.matchMedia?.("(prefers-color-scheme: dark)").matches === true,
   );
 
+  // ─── Context switch pie chart ─────────────────────────────────────────
+  protected readonly ctxSwitches = signal<ContextSwitchRow[]>([]);
+
+  protected readonly ctxLabels = computed(() => {
+    const groups = groupByLabel(this.ctxSwitches());
+    return Object.keys(groups);
+  });
+
+  protected readonly ctxChartSeries = computed(() => {
+    const groups = groupByLabel(this.ctxSwitches());
+    return Object.values(groups) as number[];
+  });
+
+  protected readonly ctxColors = computed(() => {
+    const dark = this.darkMode();
+    return dark
+      ? ["#E8E6DF", "#9D9A93", "#E5B870", "#E69090", "#7EB5B5", "#B8A0D0", "#D0B8A0", "#A0C8A0"]
+      : ["#1A1A18", "#6E6E69", "#A66A1F", "#8B1E1E", "#3D5882", "#6B4E8A", "#8A6B4E", "#4F7048"];
+  });
+
+  protected readonly ctxChartOptions = {
+    chart: { type: "donut" as const, height: 160, fontFamily: "Inter, system-ui, sans-serif", animations: { enabled: false }, background: "transparent" },
+    legend: { show: true, position: "bottom" as const, fontSize: "11px", fontFamily: "Inter, sans-serif", itemMargin: { horizontal: 8, vertical: 2 } },
+    dataLabels: { enabled: true, dropShadow: { enabled: false }, style: { fontSize: "10px", fontFamily: "Inter, sans-serif" } },
+    tooltip: { theme: (this.darkMode() ? "dark" : "light") as "dark" | "light" },
+  };
+
   // Selected range for the usage chart. Possible values: 'today', '7d', '30d'
   protected readonly selectedRange = signal<"today" | "7d" | "30d">("today");
   private readonly rangeChanged = new Subject<void>();
@@ -1980,6 +2017,17 @@ export class HomePage {
         this.costSummary.set({ ...cs, series });
         this.costLoading.set(false);
       });
+
+    // Context switches — refresh every 30s
+    const today = new Date().toISOString().slice(0, 10);
+    timer(0, 30_000)
+      .pipe(
+        takeUntil(this.destroy$),
+        switchMap(() =>
+          this.tasksApi.getContextSwitches(today).pipe(catchError(() => of({ date: today, switches: [] }))),
+        ),
+      )
+      .subscribe((r) => this.ctxSwitches.set(r.switches));
   }
 
   ngOnDestroy() {

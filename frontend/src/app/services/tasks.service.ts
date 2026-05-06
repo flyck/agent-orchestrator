@@ -487,6 +487,23 @@ export interface TaskAlternativeRow {
   created_at: number;
 }
 
+export interface ContextSwitchRow {
+  id: string;
+  task_id: string;
+  label: string | null;
+  created_at: number;
+}
+
+  /** Mark a task as a context switch. The label is filled in asynchronously by an LLM. */
+  markContextSwitch(taskId: string): Observable<ContextSwitchRow> {
+    return this.http.post<ContextSwitchRow>('/api/context-switches', { task_id: taskId });
+  }
+
+  /** Get context switches for a given date (ISO date string like "2026-05-06"). */
+  getContextSwitches(date: string): Observable<{ date: string; switches: ContextSwitchRow[] }> {
+    return this.http.get<{ date: string; switches: ContextSwitchRow[] }>(`/api/context-switches?date=${date}`);
+  }
+
 export interface SpecRevision {
   id: number;
   task_id: string;

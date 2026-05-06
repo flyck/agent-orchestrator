@@ -153,16 +153,25 @@ function relativeTsIso(iso: string): string {
               <div class="column-empty"><span class="meta">no tasks</span></div>
             } @else {
               @for (vt of openByState()[state]; track vt.raw.id) {
-                <button class="task-card" (click)="openOnHome(vt.raw.id)">
-                  <div class="task-card-head">
-                    <span class="kind">PR review</span>
-                    <span class="dot running"></span>
-                  </div>
-                  <div class="task-title">{{ vt.raw.title }}</div>
-                  <div class="task-foot meta">
-                    {{ relativeTs(vt.raw.updated_at) }}
-                  </div>
-                </button>
+                <div class="task-card-row">
+                  <button class="task-card" (click)="openOnHome(vt.raw.id)">
+                    <div class="task-card-head">
+                      <span class="kind">PR review</span>
+                      <span class="dot running"></span>
+                    </div>
+                    <div class="task-title">{{ vt.raw.title }}</div>
+                    <div class="task-foot meta">
+                      {{ relativeTs(vt.raw.updated_at) }}
+                    </div>
+                  </button>
+                  <button class="ctx-switch-btn"
+                          type="button"
+                          [disabled]="ctxBusy() === vt.raw.id"
+                          (click)="markContextSwitch(vt.raw.id); $event.stopPropagation()"
+                          title="Mark as a context switch — the label is filled in by an LLM">
+                    {{ ctxBusy() === vt.raw.id ? '…' : '↻' }}
+                  </button>
+                </div>
               }
             }
           </div>
@@ -386,6 +395,34 @@ function relativeTsIso(iso: string): string {
         font: inherit;
       }
       .task-card:hover { background: var(--paper-soft); }
+      .task-card-row {
+        display: flex;
+        gap: 4px;
+        align-items: stretch;
+      }
+      .task-card-row .task-card { flex: 1; }
+      .ctx-switch-btn {
+        width: 26px;
+        min-width: 26px;
+        font-size: 13px;
+        border: 1px solid var(--rule);
+        background: transparent;
+        color: var(--ink-muted);
+        cursor: pointer;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .ctx-switch-btn:hover {
+        color: var(--ink);
+        background: var(--paper-soft);
+        border-color: var(--rule-strong);
+      }
+      .ctx-switch-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
       .task-card-head { display: flex; justify-content: space-between; align-items: center; }
       .kind {
         font-size: 11.5px;
@@ -538,6 +575,7 @@ export class ReviewPage implements OnDestroy {
   protected readonly prError = signal<string | null>(null);
   protected readonly busyOn = signal<string | null>(null);
   protected readonly detailTaskId = signal<string | null>(null);
+  protected readonly ctxBusy = signal<string | null>(null);
 
   protected readonly filteredPrs = computed(() => {
     const q = this.prSearch.trim().toLowerCase();
@@ -663,6 +701,14 @@ export class ReviewPage implements OnDestroy {
 
   closeDetail(): void {
     this.detailTaskId.set(null);
+  }
+
+  markContextSwitch(taskId: string): void {
+    this.ctxBusy.set(taskId);
+    this.tasksApi.markContextSwitch(taskId).subscribe({
+      next: () => this.ctxBusy.set(null),
+      error: () => this.ctxBusy.set(null),
+    });
   }
 
   truncateBody(s: string): string {

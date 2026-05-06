@@ -69,6 +69,16 @@
   min-height: 200px;
   apx-chart { display: block; }
 }
+.ctx-chart {
+  min-height: unset;
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+}
+.chart-label {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
 /* Apex injects inline styles; nudge tooltip/legend type to match the page. */
 .chart-wrap .apexcharts-tooltip,
 .chart-wrap .apexcharts-legend {

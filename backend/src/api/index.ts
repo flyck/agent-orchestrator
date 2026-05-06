@@ -12,6 +12,7 @@ import { nudge } from "./nudge";
 import { activities } from "./activities";
 import { analysis } from "./analysis";
 import { architecture } from "./architecture";
+import { contextSwitches } from "./contextSwitches";
 import { suggestionsForTasks, suggestionsRoot } from "./suggestions";
 import { issueLinks } from "./issueLinks";
 
@@ -35,3 +36,4 @@ app.route("/api/nudge", nudge);
 app.route("/api/activities", activities);
 app.route("/api/analysis", analysis);
 app.route("/api/architecture", architecture);
+app.route("/api/context-switches", contextSwitches);

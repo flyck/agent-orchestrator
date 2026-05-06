@@ -370,3 +370,14 @@ CREATE TABLE IF NOT EXISTS task_phase_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_phase_sessions_task ON task_phase_sessions(task_id, started_at);
+
+-- Context switches: user clicks "mark as context switch" on a task.
+-- The label is filled in asynchronously by an LLM one-shot query.
+CREATE TABLE IF NOT EXISTS context_switches (
+  id          TEXT PRIMARY KEY,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  label       TEXT,                     -- LLM-assigned, null until the one-shot completes
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_switches_task ON context_switches(task_id);

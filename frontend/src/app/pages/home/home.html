@@ -37,6 +37,22 @@
         [dataLabels]="opts.dataLabels!"
       />
     </div>
+
+    @if (ctxChartSeries().length > 0) {
+      <div class="chart-wrap ctx-chart">
+        <p class="chart-label meta">context switches · today</p>
+        <apx-chart
+          [chart]="ctxChartOptions.chart!"
+          [series]="ctxChartSeries()!"
+          [noData]="{ text: '', align: 'center', style: { color: '#6E6E69', fontSize: '11px' } }"
+          [labels]="ctxLabels()!"
+          [colors]="ctxColors()!"
+          [legend]="ctxChartOptions.legend!"
+          [tooltip]="ctxChartOptions.tooltip!"
+          [dataLabels]="ctxChartOptions.dataLabels!"
+        />
+      </div>
+    }
   </section>
 </section>
 
