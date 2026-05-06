@@ -9,7 +9,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -126,6 +126,28 @@ repo.get("/diff", async (c) => {
     truncated,
     fetched_at: Date.now(),
   });
+});
+
+/**
+ * List git repos under the configured git_repos_dir (e.g. ~/git).
+ * Each entry is a directory name that contains a .git folder.
+ */
+repo.get("/repos", (c) => {
+  const settings = readAllSettings();
+  const dir = (settings.git_repos_dir ?? "").trim().replace(/^~/, process.env.HOME ?? "/home");
+  if (!dir) return c.json({ error: "git_repos_dir not configured" }, 400);
+  if (!existsSync(dir)) return c.json({ repos: [], dir, message: "directory does not exist" });
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    const repos = entries
+      .filter((d) => d.isDirectory() && existsSync(join(dir, d.name, ".git")))
+      .map((d) => ({ name: d.name, path: join(dir, d.name) }));
+    return c.json({ repos, dir });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: "readdir_failed", message }, 500);
+  }
 });
 
 const openSchema = z.object({

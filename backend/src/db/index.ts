@@ -146,6 +146,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // history scan and the per-task panel stays empty. Spec:
   // docs/15-integrations-and-suggested-next.md.
   suggestions_enabled: "true",
+  // Directory where all git repos live (e.g. ~/git). The new-task dialog
+  // uses this to populate the repo dropdown, and agents are started with
+  // the selected repo as their working directory.
+  git_repos_dir: "",
 };
 
 function seedDefaultSettings(db: Database) {

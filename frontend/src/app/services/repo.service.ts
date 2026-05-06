@@ -26,6 +26,16 @@ export interface OpenResponse {
   target: string;
 }
 
+export interface RepoEntry {
+  name: string;
+  path: string;
+}
+
+export interface ReposResponse {
+  repos: RepoEntry[];
+  dir: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class RepoService {
   private http = inject(HttpClient);
@@ -35,6 +45,10 @@ export class RepoService {
       ? `/api/repo/diff?base=${encodeURIComponent(opts.base)}`
       : '/api/repo/diff';
     return this.http.get<DiffResponse>(url);
+  }
+
+  listRepos(): Observable<ReposResponse> {
+    return this.http.get<ReposResponse>('/api/repo/repos');
   }
 
   open(command: 'ide' | 'emacs' | 'magit', path?: string): Observable<OpenResponse> {
