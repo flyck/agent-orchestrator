@@ -11,8 +11,7 @@ import {
   viewChild,
 } from "@angular/core";
 import { Subject, type Subscription, timer } from "rxjs";
-import { takeUntil, catchError, switchMap } from "rxjs/operators";
-import { of } from "rxjs";
+import { takeUntil } from "rxjs/operators";
 import {
   TasksService,
   type ReviewFinding,
@@ -869,6 +868,7 @@ export class TaskDetailPanelComponent {
           );
           this.streamConnected.set(false);
           this.streamStatus.set({ state: "unavailable", reason });
+          this.closeStream();
           return;
         }
         this.streamConnected.set(true);
@@ -1081,27 +1081,6 @@ export class TaskDetailPanelComponent {
       this.loadAll(id);
     });
 
-    // Poll sub-resources every 5s while a task is selected — picks up
-    // new scoring, reviews, usage events, and phase outputs as the
-    // agents produce them.
-    timer(0, 5000)
-      .pipe(
-        takeUntil(this.destroy$),
-        switchMap(() => {
-          const id = this.taskId();
-          if (!id) return of(null);
-          return of(id);
-        }),
-      )
-      .subscribe((id) => {
-        if (!id) return;
-        this.refreshScoring(id);
-        this.refreshReviews(id);
-        this.refreshAlternatives(id);
-        this.refreshPhaseOutputs(id);
-        this.refreshPhaseSessions(id);
-        this.refreshUsageEvents(id);
-      });
 
     if (typeof window !== "undefined" && window.matchMedia) {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");

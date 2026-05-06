@@ -1273,6 +1273,7 @@ export class HomePage {
           );
           this.streamConnected.set(false);
           this.streamStatus.set({ state: "unavailable", reason });
+          this.closeStream();
           return;
         }
         // Real engine event.
@@ -1944,10 +1945,8 @@ export class HomePage {
       )
       .subscribe((q) => this.queueState.set(q));
 
-    // Tasks — refresh every 2s. The Done list's range filter is now
-    // client-side, so the fetch isn't range-scoped anymore — the kanban
-    // always shows in-flight, and Done filters from the same payload.
-    timer(0, 2000)
+    // Tasks — refresh every 5s.
+    timer(0, 5000)
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>

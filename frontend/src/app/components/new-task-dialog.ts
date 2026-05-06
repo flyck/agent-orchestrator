@@ -371,16 +371,6 @@ export class NewTaskDialog {
     this.loadRepos();
   }
 
-  showEdit(taskId: string, currentSpec: string) {
-    this.editingId.set(taskId);
-    this.title.set('');
-    this.spec.set(currentSpec);
-    this.repoPath.set(null);
-    this.status.set(null);
-    this.error.set(false);
-    this.open.set(true);
-  }
-
   private loadRepos() {
     if (this.reposLoaded()) return;
     this.repoApi.listRepos().subscribe({
