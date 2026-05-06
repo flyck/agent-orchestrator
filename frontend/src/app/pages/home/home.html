@@ -1,9 +1,41 @@
-<!-- ─── Top row: activity panel + usage chart, 50/50 split ──────────────── -->
-<section class="top-row">
+<!-- ─── Top row: activity · context switches · token usage ──────────────── -->
+<section class="top-row top-row-three">
   <!-- Activity squares + manual/agent ratio donut. Replaces the manual-coding
        reminder banner — the visualisation is itself the reminder. Hover a
        square to see the activity type + task title; click jumps to it. -->
   <app-activity-panel />
+
+  <!-- Context switches: pie of today's user-marked context switches plus a
+       running counter. Sits between the activity panel and the spend chart
+       so the user sees how fragmented today was at a glance. -->
+  <section class="block ctx-block">
+    <header class="block-head">
+      <div>
+        <p class="meta">today · {{ ctxSwitchesTotal() }} switch(es)</p>
+        <h2>Context switches</h2>
+      </div>
+    </header>
+
+    <div class="chart-wrap ctx-chart">
+      @if (ctxChartSeries().length > 0) {
+        <apx-chart
+          [chart]="ctxChartOptions.chart!"
+          [series]="ctxChartSeries()!"
+          [noData]="{ text: '', align: 'center', style: { color: '#6E6E69', fontSize: '11px' } }"
+          [labels]="ctxLabels()!"
+          [colors]="ctxColors()!"
+          [legend]="ctxChartOptions.legend!"
+          [tooltip]="ctxChartOptions.tooltip!"
+          [dataLabels]="ctxChartOptions.dataLabels!"
+        />
+      } @else {
+        <p class="muted small ctx-empty">
+          No context switches logged today. Mark one on the Review page (↻ on a card)
+          to track interruptions.
+        </p>
+      }
+    </div>
+  </section>
 
   <section class="block usage">
     <header class="block-head">
@@ -37,22 +69,6 @@
         [dataLabels]="opts.dataLabels!"
       />
     </div>
-
-    @if (ctxChartSeries().length > 0) {
-      <div class="chart-wrap ctx-chart">
-        <p class="chart-label meta">context switches · today</p>
-        <apx-chart
-          [chart]="ctxChartOptions.chart!"
-          [series]="ctxChartSeries()!"
-          [noData]="{ text: '', align: 'center', style: { color: '#6E6E69', fontSize: '11px' } }"
-          [labels]="ctxLabels()!"
-          [colors]="ctxColors()!"
-          [legend]="ctxChartOptions.legend!"
-          [tooltip]="ctxChartOptions.tooltip!"
-          [dataLabels]="ctxChartOptions.dataLabels!"
-        />
-      </div>
-    }
   </section>
 </section>
 

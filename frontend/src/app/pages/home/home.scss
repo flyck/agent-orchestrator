@@ -57,8 +57,25 @@
   > .block { padding: 0; border-top: 0; }
 }
 
+/* Three-column layout when the context-switch block is in the row.
+   Activity panel + ctx-pie + spend chart split evenly; collapses to a
+   single column on narrow screens like the 2-col layout does. */
+.top-row-three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+@media (max-width: 1280px) {
+  .top-row-three { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 900px) {
-  .top-row { grid-template-columns: 1fr; }
+  .top-row,
+  .top-row-three { grid-template-columns: 1fr; }
+}
+
+.ctx-block .ctx-empty {
+  padding: 16px 8px;
+  text-align: center;
+  margin: 0;
 }
 
 /* ─── Chart wrap ──────────────────────────────────────────────────────── */

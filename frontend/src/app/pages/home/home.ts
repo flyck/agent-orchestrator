@@ -1702,6 +1702,8 @@ export class HomePage {
   // ─── Context switch pie chart ─────────────────────────────────────────
   protected readonly ctxSwitches = signal<ContextSwitchRow[]>([]);
 
+  protected readonly ctxSwitchesTotal = computed(() => this.ctxSwitches().length);
+
   protected readonly ctxLabels = computed(() => {
     const groups = groupByLabel(this.ctxSwitches());
     return Object.keys(groups);
