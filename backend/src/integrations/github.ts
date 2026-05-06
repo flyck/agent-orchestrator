@@ -153,22 +153,41 @@ async function listAllOpen(
   watched: string[],
   myLogin?: string,
 ): Promise<GithubPull[]> {
-  const out: GithubPull[] = [];
-  for (const repo of watched) {
-    try {
-      const pulls = await ghJson<GithubPull[]>(
-        `/repos/${repo}/pulls?state=open&per_page=50`,
-        token,
-      );
-      for (const pr of pulls) {
-        const awaiting = !!myLogin && (pr.requested_reviewers ?? []).some((r) => r.login === myLogin);
-        out.push({ ...pr, repo_full_name: repo, awaiting_me: awaiting });
-      }
-    } catch (err) {
-      console.warn("[github] list pulls failed", repo, err);
-    }
-  }
+  // Parallelize per-repo fetches with bounded concurrency. GitHub's
+  // secondary rate limit kicks in around 100 concurrent requests, so 6
+  // is well inside the safe band even for users with many watched repos.
+  const perRepo = await Promise.all(
+    chunk(watched, 6).map(async (group) =>
+      Promise.all(
+        group.map(async (repo) => {
+          try {
+            const pulls = await ghJson<GithubPull[]>(
+              `/repos/${repo}/pulls?state=open&per_page=50`,
+              token,
+            );
+            return pulls.map((pr) => {
+              const awaiting =
+                !!myLogin &&
+                (pr.requested_reviewers ?? []).some((r) => r.login === myLogin);
+              return { ...pr, repo_full_name: repo, awaiting_me: awaiting };
+            });
+          } catch (err) {
+            console.warn("[github] list pulls failed", repo, err);
+            return [] as GithubPull[];
+          }
+        }),
+      ),
+    ),
+  );
+  const out = perRepo.flat(2);
   out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return out;
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  if (size <= 0) return [arr];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 }
 

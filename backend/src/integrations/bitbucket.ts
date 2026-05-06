@@ -276,14 +276,16 @@ export async function listPullRequests(
   myUuid: string | null,
 ): Promise<BitbucketPull[]> {
   if (repos.length === 0) return [];
-  const out: BitbucketPull[] = [];
-  for (const full of repos) {
+  // Parallelize per-repo fetches — Bitbucket has no cross-repo PR index,
+  // so the only way to scale to many watched repos is to fan out. Bounded
+  // by mapWithConcurrency so we don't blast the user's rate limit.
+  const perRepo = await mapWithConcurrency(repos, 6, async (full) => {
     let workspace: string;
     let slug: string;
     try {
       ({ workspace, slug } = splitRepo(full));
     } catch {
-      continue;
+      return [] as BitbucketPull[];
     }
     try {
       const data = await bbJson<PaginatedResponse<BitbucketPullRaw>>(
@@ -293,17 +295,41 @@ export async function listPullRequests(
         username,
         appPassword,
       );
+      const out: BitbucketPull[] = [];
       for (const pr of data.values ?? []) {
         const awaiting = isAwaitingMe(pr, myUuid);
         if (filter === BitbucketPullFilter.AwaitingMe && !awaiting) continue;
         out.push(toBitbucketPull(full, pr, awaiting));
       }
+      return out;
     } catch (err) {
       console.warn("[bitbucket] list pulls failed", full, err);
+      return [] as BitbucketPull[];
     }
-  }
-  out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  return out;
+  });
+  const flat = perRepo.flat();
+  flat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return flat;
+}
+
+/** Bounded parallelism — runs `fn` over `items` with at most `limit`
+ *  in-flight at any time, preserving order in the returned array. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]!, i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function isAwaitingMe(pr: BitbucketPullRaw, myUuid: string | null): boolean {

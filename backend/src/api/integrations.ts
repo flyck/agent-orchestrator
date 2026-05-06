@@ -34,6 +34,12 @@ import {
   type NormalizedPull,
 } from "../integrations/provider";
 import {
+  cacheKey as prCacheKey,
+  getFresh as getFreshPrCache,
+  set as setPrCache,
+  invalidate as invalidatePrCache,
+} from "../integrations/prCache";
+import {
   createTask,
   getTask,
   parseTaskMetadata,
@@ -276,6 +282,7 @@ integrations.patch("/watched", async (c) => {
   }
   try {
     provider.setWatchedRepos(parsed.data.watched_repos);
+    invalidatePrCache(provider.id);
     log.info("api.integrations.watched_updated", {
       source: provider.id,
       count: parsed.data.watched_repos.length,
@@ -312,10 +319,29 @@ integrations.get("/prs", async (c) => {
     filterRaw === ProviderPullFilter.AllOpen
       ? ProviderPullFilter.AllOpen
       : ProviderPullFilter.AwaitingMe;
+
+  // 60s TTL cache — collapses repeated Review-page polls into one
+  // upstream fetch. ?fresh=1 bypasses the cache (refresh button).
+  const fresh = c.req.query("fresh") === "1";
+  const key = prCacheKey(provider.id, filter, watched);
+  if (!fresh) {
+    const hit = getFreshPrCache(key);
+    if (hit) {
+      return c.json({
+        source: provider.id,
+        filter,
+        prs: hit.prs,
+        cached: true,
+        cached_age_ms: Date.now() - hit.cachedAt,
+      });
+    }
+  }
+
   try {
     const prs = await provider.listPullRequests(filter);
+    setPrCache(key, prs);
     markSynced(provider.id);
-    return c.json({ source: provider.id, filter, prs });
+    return c.json({ source: provider.id, filter, prs, cached: false });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     markError(provider.id, message);
