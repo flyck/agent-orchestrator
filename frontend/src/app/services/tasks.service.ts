@@ -233,6 +233,10 @@ export class TasksService {
 
   /** Approve a paused pipeline gate so the runner advances to the next
    *  phase. Called by the "approve direction" button. */
+  sendBackGate(id: string, message: string): Observable<{ task_id: string }> {
+    return this.http.post<{ task_id: string }>(`/api/tasks/${id}/gate/sendback`, { message });
+  }
+
   approveGate(id: string): Observable<{ task_id: string }> {
     return this.http.post<{ task_id: string }>(`/api/tasks/${id}/gate/approve`, {});
   }

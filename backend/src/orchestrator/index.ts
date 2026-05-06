@@ -375,7 +375,9 @@ async function startRunInternal(
   // whether to switch to the reviewer, send back to the coder, or
   // finalize. Replaces the old single-session pump. PR-review tasks
   // walk the multi-phase pipeline runner instead.
-  a.pump = usePipeline ? runPipelineLifecycle(a, task) : runLifecycle(a, task);
+  a.pump = usePipeline
+    ? runPipelineLifecycle(a, task, opts.followUp)
+    : runLifecycle(a, task);
 
   // Send the initial message AFTER setting up the active record + pump so we
   // don't lose early events.
@@ -874,6 +876,10 @@ async function runPipelineAgent(
   task: TaskRow,
   phase: PhaseDef,
   agentSlug: string,
+  /** Optional user feedback to splice in front of the phase's regular
+   *  builder output. Used by the gate-sendback path so the agent
+   *  re-runs with explicit "the user said this" guidance. */
+  followUp: string | null = null,
 ): Promise<boolean> {
   const taskId = task.id;
   const cwd = task.worktree_path ?? REPO_ROOT;
@@ -883,7 +889,20 @@ async function runPipelineAgent(
     return false;
   }
   const system = `${renderSharedPrompt(taskId, cwd)}\n\n---\n\n${promptBody}`;
-  const message = buildPipelinePhaseMessage(task, phase, agentSlug);
+  let message = buildPipelinePhaseMessage(task, phase, agentSlug);
+  if (followUp) {
+    message =
+      `# User feedback (you previously paused at the gate; the user sent this back to you)\n\n` +
+      followUp +
+      `\n\n---\n\n` +
+      message;
+    log.info("orchestrator.pipeline.followup_attached", {
+      taskId,
+      phaseId: phase.id,
+      agentSlug,
+      bytes: followUp.length,
+    });
+  }
 
   const engine = await getEngine();
   const session = await engine.openSession({
@@ -974,7 +993,11 @@ async function runPipelineAgent(
  * gate (pause) or the end (finalize). Replaces runLifecycle for tasks
  * with pipeline_id set.
  */
-async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
+async function runPipelineLifecycle(
+  a: ActiveTask,
+  task: TaskRow,
+  followUp?: string,
+): Promise<void> {
   const taskId = task.id;
   const pipelineId = task.pipeline_id ?? "pr-review-gated";
   const pipeline = getPipeline(pipelineId);
@@ -984,12 +1007,29 @@ async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void>
     return;
   }
 
-  // Resume after a gate, or start at 0.
+  // Pick the phase to start at:
+  //   1. awaiting_gate_id set → user just approved; advance to gate+1.
+  //   2. current_state matches an agent phase + awaiting_gate_id null →
+  //      user sent back to that phase; resume there with the followUp
+  //      message threaded into the agent message.
+  //   3. Otherwise → fresh run, start at 0.
   const startIdx = (() => {
-    if (!task.awaiting_gate_id) return 0;
-    const idx = pipeline.phases.findIndex((p) => p.id === task.awaiting_gate_id);
-    return idx >= 0 ? idx + 1 : 0;
+    if (task.awaiting_gate_id) {
+      const idx = pipeline.phases.findIndex((p) => p.id === task.awaiting_gate_id);
+      return idx >= 0 ? idx + 1 : 0;
+    }
+    if (followUp && task.current_state) {
+      const idx = pipeline.phases.findIndex(
+        (p) => p.id === task.current_state && p.kind === PhaseKind.Agent,
+      );
+      if (idx >= 0) return idx;
+    }
+    return 0;
   })();
+  // Track whether the followUp has been spliced into a phase yet — only
+  // the FIRST agent phase encountered after start sees it; later phases
+  // get their normal builder output.
+  let pendingFollowUp = followUp ?? null;
 
   log.info("orchestrator.pipeline.start", {
     taskId,
@@ -1029,7 +1069,12 @@ async function runPipelineLifecycle(a: ActiveTask, task: TaskRow): Promise<void>
       const agents = phase.agents ?? [];
       let allOk = true;
       for (const agentSlug of agents) {
-        const ok = await runPipelineAgent(a, task, phase, agentSlug);
+        // Splice the user's send-back feedback into the first agent
+        // call we make after resume. Subsequent agent calls (e.g.
+        // parallel reviewers) get their plain builder output.
+        const followUpForThis = pendingFollowUp;
+        pendingFollowUp = null;
+        const ok = await runPipelineAgent(a, task, phase, agentSlug, followUpForThis);
         if (!ok) { allOk = false; break; }
       }
       if (!allOk) {

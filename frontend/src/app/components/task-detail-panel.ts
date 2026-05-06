@@ -1071,7 +1071,7 @@ export class TaskDetailPanelComponent {
         this.directionError.set("Feedback is required when sending back.");
         return;
       }
-      this.tasksApi.continueWithFeedback(id, feedback).subscribe({
+      this.tasksApi.sendBackGate(id, feedback).subscribe({
         next: () => {
           this.directionBusy.set(false);
           this.directionFeedback.set("");

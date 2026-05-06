@@ -11,6 +11,7 @@ import {
   incrementUserSendbacks,
   listTasks,
   markAbandoned,
+  setAwaitingGate,
   setNeedsFeedback,
   setProposedCommitMessage,
   setTaskDifficulty,
@@ -20,8 +21,10 @@ import {
   TERMINAL_STATUSES,
   updateTaskSpec,
   updateTaskStatus,
+  type TaskRow,
   type TaskWorkspace,
 } from "../db/tasks";
+import { getPipeline } from "../orchestrator/pipelines";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, listScoringSummary, upsertScoring } from "../db/scorings";
@@ -712,6 +715,84 @@ tasks.post("/:id/gate/approve", async (c) => {
     return c.json({ task_id: id, session_id: r.sessionId });
   } catch (err) {
     log.error("api.tasks.gate_approve_failed", { id, error: String(err) });
+    return c.json({ error: "resume_failed", message: String(err) }, 500);
+  }
+});
+
+/**
+ * Send a paused gate back to the previous agent phase with feedback.
+ * Distinct from /continue (which is for terminal-state Ready tasks):
+ * this one rewinds the pipeline cursor to the agent phase that
+ * preceded the gate, clears awaiting_gate_id, and re-runs that phase
+ * with the user's feedback spliced in front of the agent message.
+ *
+ * Used by the Direction tab's "send back to explorer" path. Without
+ * this, /continue accidentally advanced the runner past the gate
+ * because the pipeline runner's resume logic interpreted any startRun
+ * with awaiting_gate_id set as approval — losing the task into
+ * deep-review.
+ */
+const sendbackSchema = z.object({
+  message: z.string().min(1).max(20_000),
+});
+tasks.post("/:id/gate/sendback", async (c) => {
+  const id = c.var.task.id;
+  const t = c.var.task;
+  if (!t.awaiting_gate_id) {
+    return c.json({ error: "not_at_gate", message: "Task is not paused at a gate." }, 400);
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = sendbackSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_message", issues: parsed.error.issues }, 400);
+  }
+
+  const pipeline = t.pipeline_id ? getPipeline(t.pipeline_id) : null;
+  if (!pipeline) {
+    return c.json({ error: "no_pipeline", message: "Task has no pipeline configured." }, 400);
+  }
+  const gateIdx = pipeline.phases.findIndex((p) => p.id === t.awaiting_gate_id);
+  if (gateIdx < 0) {
+    return c.json({ error: "gate_phase_not_found" }, 400);
+  }
+  // Find the most-recent agent phase before the gate.
+  let targetIdx = -1;
+  for (let i = gateIdx - 1; i >= 0; i--) {
+    const ph = pipeline.phases[i]!;
+    if (ph.kind === "agent" || ph.kind === "parallel") {
+      targetIdx = i;
+      break;
+    }
+  }
+  if (targetIdx < 0) {
+    return c.json(
+      { error: "no_agent_phase_before_gate", message: "Gate has no preceding agent phase to rewind to." },
+      400,
+    );
+  }
+  const targetPhase = pipeline.phases[targetIdx]!;
+  log.info("api.tasks.gate_sendback", {
+    id,
+    gate: t.awaiting_gate_id,
+    targetPhase: targetPhase.id,
+  });
+
+  // Rewind: clear awaiting_gate_id and stamp current_state to the
+  // target phase. The pipeline runner's startIdx logic looks at both
+  // signals to decide where to resume; current_state + null gate +
+  // followUp tells it to start at that agent phase with feedback.
+  setAwaitingGate(id, null);
+  updateTaskStatus(id, "running" as const, targetPhase.id as TaskRow["current_state"]);
+  incrementUserSendbacks(id);
+
+  try {
+    const r = await startRun(id, { followUp: parsed.data.message });
+    if (!r) {
+      return c.json({ task_id: id, queued: true });
+    }
+    return c.json({ task_id: id, session_id: r.sessionId });
+  } catch (err) {
+    log.error("api.tasks.gate_sendback_failed", { id, error: String(err) });
     return c.json({ error: "resume_failed", message: String(err) }, 500);
   }
 });
