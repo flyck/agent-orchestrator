@@ -41,6 +41,10 @@ export interface BitbucketConfig {
   watched_repos?: string[];
   /** Atlassian account id from /2.0/user, surfaced for clarity. */
   account_id?: string | null;
+  /** Bitbucket-internal UUID (`{guid}` format). Required for the
+   *  `q=reviewers.uuid="…"` filter on PR listings — distinct from
+   *  account_id which uses Atlassian's colon-separated id format. */
+  uuid?: string | null;
   /** Display name from /2.0/user; null when the credential lacks the
    *  scope to read it. */
   display_name?: string | null;
@@ -85,6 +89,7 @@ export function getBitbucketConfig(handle: Database = db()): BitbucketConfig | n
         ? parsed.watched_repos
         : [],
       account_id: parsed.account_id ?? null,
+      uuid: parsed.uuid ?? null,
       display_name: parsed.display_name ?? null,
     };
   } catch {

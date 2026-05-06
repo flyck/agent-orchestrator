@@ -689,10 +689,13 @@ export class ReviewPage implements OnDestroy {
     this.refreshPrs();
   }
 
-  refreshPrs(): void {
+  /** `fresh=true` bypasses the backend's 60s PR-list cache. The
+   *  user-clicked refresh button passes this; the periodic 60s timer
+   *  does not (it intentionally aligns with the cache TTL). */
+  refreshPrs(fresh = false): void {
     this.prsLoading.set(true);
     this.prError.set(null);
-    this.integrationsApi.listPrs(this.prFilter()).subscribe({
+    this.integrationsApi.listPrs(this.prFilter(), fresh).subscribe({
       next: (r) => {
         this.prs.set(r.prs);
         this.prsLoading.set(false);

@@ -196,11 +196,13 @@ integrations.post("/bitbucket/connect", async (c) => {
   const { username, app_password } = parsed.data;
   let display_name: string | null = null;
   let account_id: string | null = null;
+  let uuid: string | null = null;
   let workspaces: string[] = [];
   try {
     const user = await validateBitbucket(username, app_password);
     display_name = user.display_name ?? null;
     account_id = user.account_id ?? null;
+    uuid = user.uuid ?? null;
     workspaces = user.workspaces ?? [];
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -218,7 +220,7 @@ integrations.post("/bitbucket/connect", async (c) => {
   const workspace = workspaces[0] ?? null;
   upsertIntegration(
     "bitbucket",
-    { username, app_password, workspace, account_id, display_name },
+    { username, app_password, workspace, account_id, uuid, display_name },
     true,
   );
   disableOtherIntegrations("bitbucket");

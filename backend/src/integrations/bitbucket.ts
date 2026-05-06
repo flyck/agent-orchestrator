@@ -72,6 +72,9 @@ interface PaginatedResponse<T> {
 export interface BitbucketUser {
   /** Atlassian account id — stable across username changes. */
   account_id?: string;
+  /** Bitbucket-internal UUID, formatted as `{guid}`. Distinct from
+   *  account_id; used for q-filter matching against reviewers.uuid. */
+  uuid?: string;
   /** Display name; absent on some workspace-token responses. */
   display_name?: string;
   /** Username (slug); absent on token-only auth. */
@@ -111,12 +114,14 @@ export async function validate(
 ): Promise<BitbucketValidation> {
   let display_name: string | undefined;
   let account_id: string | undefined;
+  let uuid: string | undefined;
 
   const userRes = await bbFetch("/2.0/user", username, appPassword);
   if (userRes.ok) {
     const u = (await userRes.json()) as BitbucketUser;
     display_name = u.display_name;
     account_id = u.account_id;
+    uuid = u.uuid;
   } else if (userRes.status === 401) {
     // Bad credential — no fallback worth attempting.
     throw new BitbucketError(401, "/2.0/user", await userRes.text());
@@ -142,6 +147,7 @@ export async function validate(
   return {
     display_name,
     account_id,
+    uuid,
     workspaces,
   };
 }
@@ -276,9 +282,18 @@ export async function listPullRequests(
   myUuid: string | null,
 ): Promise<BitbucketPull[]> {
   if (repos.length === 0) return [];
-  // Parallelize per-repo fetches — Bitbucket has no cross-repo PR index,
-  // so the only way to scale to many watched repos is to fan out. Bounded
-  // by mapWithConcurrency so we don't blast the user's rate limit.
+
+  // Bitbucket has no workspace-level "all open PRs" endpoint, so we fan
+  // out per-repo. We push as much filtering as possible into the `q=`
+  // query so the wire payload only contains rows we'll actually return.
+  // For awaiting_me, q=reviewers.uuid="{me}" is supported (per Bitbucket's
+  // filtering docs) and skips the post-filter loop entirely.
+  const baseQuery = `state="OPEN"`;
+  const fullQuery =
+    filter === BitbucketPullFilter.AwaitingMe && myUuid
+      ? `${baseQuery} AND reviewers.uuid="${myUuid}"`
+      : baseQuery;
+
   const perRepo = await mapWithConcurrency(repos, 6, async (full) => {
     let workspace: string;
     let slug: string;
@@ -288,15 +303,20 @@ export async function listPullRequests(
       return [] as BitbucketPull[];
     }
     try {
-      const data = await bbJson<PaginatedResponse<BitbucketPullRaw>>(
+      const url =
         `/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
           slug,
-        )}/pullrequests?state=OPEN&pagelen=50`,
+        )}/pullrequests?pagelen=50&q=${encodeURIComponent(fullQuery)}`;
+      const data = await bbJson<PaginatedResponse<BitbucketPullRaw>>(
+        url,
         username,
         appPassword,
       );
       const out: BitbucketPull[] = [];
       for (const pr of data.values ?? []) {
+        // Server already pre-filtered, but recompute awaiting_me so the
+        // approved/changes_requested cases are surfaced in the UI even
+        // when the q-filter let them through.
         const awaiting = isAwaitingMe(pr, myUuid);
         if (filter === BitbucketPullFilter.AwaitingMe && !awaiting) continue;
         out.push(toBitbucketPull(full, pr, awaiting));

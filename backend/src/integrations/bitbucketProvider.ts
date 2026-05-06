@@ -115,7 +115,7 @@ export function makeBitbucketProvider(): PrSourceProvider {
         cfg.app_password,
         watched,
         bbFilter,
-        cfg.account_id ?? null,
+        cfg.uuid ?? null,
       );
       // bbListPullRequests already returns the BitbucketPull shape
       // (slim, with awaiting_me set). Map to NormalizedPull.
@@ -141,7 +141,7 @@ export function makeBitbucketProvider(): PrSourceProvider {
       const cfg = getBitbucketConfig();
       if (!cfg) throw new Error("bitbucket_not_connected");
       const raw = await bbFetchPullRequest(cfg.username, cfg.app_password, repo, number);
-      return toNormalizedPullFromRaw(repo, raw, cfg.account_id ?? null);
+      return toNormalizedPullFromRaw(repo, raw, cfg.uuid ?? null);
     },
 
     async fetchPullDiff(repo: string, number: number) {

@@ -199,21 +199,31 @@ export class IntegrationsService {
 
   /** Provider-agnostic PR list. Routes through whichever integration is
    *  currently enabled (GitHub or Bitbucket). Returns `not_connected`
-   *  when nothing is set up. */
-  listPrs(filter: PrFilter = 'awaiting_me'): Observable<{
+   *  when nothing is set up. Pass `fresh=true` to bypass the 60s
+   *  server-side cache — used by the manual refresh button. */
+  listPrs(
+    filter: PrFilter = 'awaiting_me',
+    fresh = false,
+  ): Observable<{
     source: 'github' | 'bitbucket' | null;
     filter?: PrFilter;
     prs: NormalizedPr[];
     message?: string;
     error?: string;
+    cached?: boolean;
+    cached_age_ms?: number;
   }> {
+    const params: Record<string, string> = { filter };
+    if (fresh) params.fresh = '1';
     return this.http.get<{
       source: 'github' | 'bitbucket' | null;
       filter?: PrFilter;
       prs: NormalizedPr[];
       message?: string;
       error?: string;
-    }>('/api/integrations/prs', { params: { filter } });
+      cached?: boolean;
+      cached_age_ms?: number;
+    }>('/api/integrations/prs', { params });
   }
 
   /** Spawn a review task for a normalized PR. Backend dispatches to the
