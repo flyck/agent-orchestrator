@@ -63,60 +63,68 @@ export interface BitbucketUser {
   email?: string;
 }
 
-interface WorkspaceResponse {
-  slug?: string;
-  name?: string;
-  uuid?: string;
+interface UserWorkspacesResponse {
+  values?: Array<{
+    slug?: string;
+    name?: string;
+    uuid?: string;
+  }>;
+}
+
+export interface BitbucketValidation extends BitbucketUser {
+  /** All workspace slugs the credential can see — populated from
+   *  /2.0/user/workspaces. The first one is selected by default for the
+   *  navbar workspace label. */
+  workspaces?: string[];
 }
 
 /**
- * Validate the credential pair against Bitbucket. As of CHANGE-2770
- * (sunset 2026-04-14) all "cross-workspace" introspection endpoints —
- * `/2.0/user`, `/2.0/repositories?role=member`, `/2.0/workspaces`,
- * `/2.0/user/permissions/workspaces` — return 410 Gone for the new
- * Atlassian-issued Bitbucket API tokens. Atlassian's recommended
- * replacement is to scope every call to a known workspace.
+ * Validate the credential pair against Bitbucket.
  *
- * So the validate flow now requires a workspace slug and probes
- * `/2.0/workspaces/{workspace}` (the workspace metadata endpoint, which
- * survives) — that doubles as auth check + workspace existence check
- * in one call. Returns the workspace name for the connected-as label.
- *
- * Old-style app passwords with the `account:read` scope still hit
- * `/2.0/user` successfully, so we try that first when no workspace
- * slug was provided — only the new tokens are forced to specify one.
+ * The /2.0/user/workspaces endpoint (the supported replacement after
+ * CHANGE-2770 killed /2.0/workspaces and /2.0/user/permissions/workspaces
+ * in 2026-Q1) lists every workspace the caller can see — auth check +
+ * workspace enumeration in one call. We try /2.0/user first for the
+ * display name, but fall through to /2.0/user/workspaces on 403/410
+ * since some scoped tokens have workspace scope but not account scope.
  */
 export async function validate(
   username: string,
   appPassword: string,
-  workspace: string | null,
-): Promise<BitbucketUser> {
-  if (!workspace) {
-    // No workspace given → assume legacy app password and try /2.0/user.
-    const userRes = await bbFetch("/2.0/user", username, appPassword);
-    if (userRes.ok) {
-      return userRes.json() as Promise<BitbucketUser>;
-    }
-    if (userRes.status === 401) {
-      throw new BitbucketError(401, "/2.0/user", await userRes.text());
-    }
-    // 403 / 410 → token is the new kind that needs a workspace slug.
+): Promise<BitbucketValidation> {
+  let display_name: string | undefined;
+  let account_id: string | undefined;
+
+  const userRes = await bbFetch("/2.0/user", username, appPassword);
+  if (userRes.ok) {
+    const u = (await userRes.json()) as BitbucketUser;
+    display_name = u.display_name;
+    account_id = u.account_id;
+  } else if (userRes.status === 401) {
+    // Bad credential — no fallback worth attempting.
+    throw new BitbucketError(401, "/2.0/user", await userRes.text());
+  } else if (userRes.status !== 403 && userRes.status !== 410 && userRes.status !== 404) {
+    throw new BitbucketError(userRes.status, "/2.0/user", await userRes.text());
+  }
+  // 403/410/404 just means the token lacks `account` scope; the
+  // workspace listing is the actual authorization probe.
+
+  const wsRes = await bbFetch("/2.0/user/workspaces?pagelen=100", username, appPassword);
+  if (!wsRes.ok) {
     throw new BitbucketError(
-      userRes.status,
-      "/2.0/user",
-      `Atlassian API tokens cannot introspect across workspaces — please fill in the 'workspace' field. Original: ${await userRes.text()}`,
+      wsRes.status,
+      "/2.0/user/workspaces",
+      await wsRes.text(),
     );
   }
+  const data = (await wsRes.json()) as UserWorkspacesResponse;
+  const workspaces = (data.values ?? [])
+    .map((w) => w.slug)
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
 
-  const slug = encodeURIComponent(workspace);
-  const wsRes = await bbFetch(`/2.0/workspaces/${slug}`, username, appPassword);
-  if (wsRes.ok) {
-    const data = (await wsRes.json()) as WorkspaceResponse;
-    return { username: data.slug, display_name: data.name };
-  }
-  throw new BitbucketError(
-    wsRes.status,
-    `/2.0/workspaces/${slug}`,
-    await wsRes.text(),
-  );
+  return {
+    display_name,
+    account_id,
+    workspaces,
+  };
 }

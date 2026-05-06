@@ -83,12 +83,6 @@ import {
                  placeholder="app password / API token"
                  autocomplete="current-password"
                  [(ngModel)]="passwordDraft" />
-        </div>
-        <div class="bb-row-ws">
-          <input class="bb-ws"
-                 type="text"
-                 placeholder="workspace slug (e.g. myteam from bitbucket.org/myteam/…)"
-                 [(ngModel)]="workspaceDraft" />
           <button class="primary"
                   type="button"
                   [disabled]="!usernameDraft || !passwordDraft || saving()"
@@ -96,11 +90,6 @@ import {
             {{ saving() ? 'connecting…' : 'connect' }}
           </button>
         </div>
-        <p class="muted small">
-          Workspace is required for Atlassian API tokens — Bitbucket killed cross-workspace
-          introspection in CHANGE-2770. Leave blank only if you're using a legacy app password
-          with the <em>Account: Read</em> scope.
-        </p>
         @if (errorMessage()) {
           <p class="error small">{{ errorMessage() }}</p>
         }
@@ -153,17 +142,11 @@ import {
 
       .bb-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 1fr auto;
         gap: 8px;
-        margin: 8px 0 6px;
+        margin: 8px 0;
       }
-      .bb-row-ws {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 8px;
-        margin: 0 0 6px;
-      }
-      .bb-user, .bb-secret, .bb-ws {
+      .bb-user, .bb-secret {
         font-family: var(--font-mono);
         font-size: 12.5px;
       }
@@ -211,7 +194,6 @@ export class BitbucketSettings implements OnInit {
 
   protected usernameDraft = '';
   protected passwordDraft = '';
-  protected workspaceDraft = '';
 
   protected readonly username = signal<string | null>(null);
   protected readonly displayName = signal<string | null>(null);
@@ -246,7 +228,6 @@ export class BitbucketSettings implements OnInit {
       .connectBitbucket({
         username: this.usernameDraft.trim(),
         app_password: this.passwordDraft,
-        workspace: this.workspaceDraft.trim() || null,
       })
       .subscribe({
         next: (r) => {
@@ -256,7 +237,6 @@ export class BitbucketSettings implements OnInit {
           this.workspace.set(r.workspace);
           this.usernameDraft = '';
           this.passwordDraft = '';
-          this.workspaceDraft = '';
         },
         error: (e) => {
           this.saving.set(false);
@@ -271,7 +251,6 @@ export class BitbucketSettings implements OnInit {
     this.workspace.set(null);
     this.usernameDraft = '';
     this.passwordDraft = '';
-    this.workspaceDraft = '';
     this.errorMessage.set(null);
   }
 

@@ -115,24 +115,24 @@ export class IntegrationsService {
     );
   }
 
-  /** Connect Bitbucket. The new Atlassian-issued Bitbucket API tokens
-   *  require a `workspace` slug since CHANGE-2770 sunset cross-workspace
-   *  introspection (2026-04-14). Legacy app passwords with `account:read`
-   *  may pass null and the backend falls back to /2.0/user. */
+  /** Connect Bitbucket. The backend introspects the credential against
+   *  /2.0/user/workspaces (the supported replacement after CHANGE-2770)
+   *  and stores the first visible workspace as the default. */
   connectBitbucket(input: {
     username: string;
     app_password: string;
-    workspace?: string | null;
   }): Observable<{
     ok: boolean;
     username: string;
     workspace: string | null;
+    workspaces: string[];
     display_name: string | null;
   }> {
     return this.http.post<{
       ok: boolean;
       username: string;
       workspace: string | null;
+      workspaces: string[];
       display_name: string | null;
     }>('/api/integrations/bitbucket/connect', input);
   }
