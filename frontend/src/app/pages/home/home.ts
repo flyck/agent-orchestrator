@@ -2018,9 +2018,9 @@ export class HomePage {
         this.costLoading.set(false);
       });
 
-    // Context switches — refresh every 30s
+    // Context switches — refresh every 5 min
     const today = new Date().toISOString().slice(0, 10);
-    timer(0, 30_000)
+    timer(0, 300_000)
       .pipe(
         takeUntil(this.destroy$),
         switchMap(() =>
