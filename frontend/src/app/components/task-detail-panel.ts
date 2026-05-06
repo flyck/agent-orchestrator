@@ -38,6 +38,7 @@ import {
 import { FormsModule } from "@angular/forms";
 import { ScoringRadar } from "./scoring-radar";
 import { MermaidDiagram } from "./mermaid-diagram";
+import { MarkdownView } from "./markdown-view";
 import { formatTs, relativeTs, clockTs } from "../util/time";
 
 // ─── Stream / transcript types ────────────────────────────────────────
@@ -152,7 +153,7 @@ function extractMermaid(text: string): string | null {
 @Component({
   selector: "app-task-detail-panel",
   standalone: true,
-  imports: [FormsModule, ScoringRadar, MermaidDiagram],
+  imports: [FormsModule, ScoringRadar, MermaidDiagram, MarkdownView],
   templateUrl: "./task-detail-panel.html",
   styles: [
     `

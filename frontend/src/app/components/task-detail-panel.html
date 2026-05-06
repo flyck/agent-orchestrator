@@ -203,7 +203,7 @@
                     {{ line.role }}
                     @if (line.ts) { · {{ relativeTs(line.ts) }} · {{ clockTs(line.ts) }} }
                   </header>
-                  <pre class="transcript-text">{{ line.text }}</pre>
+                  <app-markdown-view [source]="line.text" />
                 </article>
               }
             </div>
@@ -246,7 +246,7 @@
                     {{ line.role }}
                     @if (line.ts) { · {{ relativeTs(line.ts) }} }
                   </header>
-                  <pre class="transcript-text">{{ line.text }}</pre>
+                  <app-markdown-view [source]="line.text" />
                 </article>
               }
             </div>
