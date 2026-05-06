@@ -863,6 +863,10 @@ export class TaskDetailPanelComponent {
           parts?: Array<{ type?: string; text?: string }>;
         }>) {
           const role = m.info?.role ?? "unknown";
+          // Hide the agent's input — it's the spec + diff, identical on
+          // every cycle and already shown in the Spec / Files tabs. The
+          // transcript becomes "what the agent said" only.
+          if (role === "user") continue;
           const text = (m.parts ?? [])
             .filter((p) => p.type === "text" && typeof p.text === "string")
             .map((p) => p.text!)
@@ -978,6 +982,7 @@ export class TaskDetailPanelComponent {
           parts?: Array<{ type?: string; text?: string }>;
         }>) {
           const role = m.info?.role ?? "unknown";
+          if (role === "user") continue;
           const text = (m.parts ?? [])
             .filter((p) => p.type === "text" && typeof p.text === "string")
             .map((p) => p.text!)
