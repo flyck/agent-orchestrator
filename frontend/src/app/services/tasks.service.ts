@@ -420,6 +420,16 @@ export class TasksService {
   clearCurrentContext(): Observable<{ ok: true; cleared_at: number }> {
     return this.http.post<{ ok: true; cleared_at: number }>(`/api/context-switches/clear`, {});
   }
+
+  /** Set a free-form manual context label from the navbar — used when the
+   *  user wants to mark "what I'm working on now" without it being tied to
+   *  a specific task. */
+  setManualContext(label: string): Observable<{ ok: true; label: string; created_at: number }> {
+    return this.http.post<{ ok: true; label: string; created_at: number }>(
+      `/api/context-switches/manual`,
+      { label },
+    );
+  }
 }
 
 export interface TaskPhaseOutputRow {

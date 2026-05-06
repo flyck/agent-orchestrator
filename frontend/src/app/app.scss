@@ -85,6 +85,20 @@
       color: var(--ink-muted);
     }
   }
+  .ctx-input {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    font-size: 12.5px;
+    font-family: inherit;
+    color: var(--ink);
+    width: 140px;
+    min-width: 0;
+    outline: none;
+  }
+  .ctx-input:focus { outline: none; }
+  .ctx-input::placeholder { color: var(--ink-muted); font-style: italic; }
 }
 
 .ctx-clear {

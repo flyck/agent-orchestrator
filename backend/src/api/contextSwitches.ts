@@ -5,6 +5,7 @@ import {
   listContextSwitchesForDate,
   getCurrentContext,
   clearCurrentContext,
+  setManualContext,
 } from "../db/contextSwitches";
 import { generateContextLabel } from "../orchestrator/contextLabel";
 import { log } from "../log";
@@ -59,4 +60,25 @@ contextSwitches.post("/clear", (c) => {
   const result = clearCurrentContext();
   log.info("api.context_switch.cleared", { clearedAt: result.cleared_at });
   return c.json({ ok: true, ...result });
+});
+
+// Set a free-form manual context label from the navbar. Stored separately
+// from the task-derived context_switches table so it doesn't pollute the
+// donut chart's task-attribution data.
+const manualSchema = z.object({
+  label: z.string().min(1).max(80),
+});
+contextSwitches.post("/manual", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = manualSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  try {
+    const result = setManualContext(parsed.data.label);
+    log.info("api.context_switch.manual_set", { label: result.label });
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    return c.json({ error: "manual_set_failed", message: String(err) }, 400);
+  }
 });

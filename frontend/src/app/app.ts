@@ -1,5 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { catchError, of, timer, switchMap } from 'rxjs';
 import { BugReportButton } from './components/bug-report-button';
@@ -30,7 +31,7 @@ const TABS: { path: string; label: string }[] = [
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, BugReportButton],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, FormsModule, BugReportButton],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -49,6 +50,8 @@ export class App {
   // Latest context switch since last clear. Drives the navbar label.
   protected readonly currentContext = signal<ContextSwitchRow | null>(null);
   protected readonly ctxClearing = signal(false);
+  protected readonly ctxSaving = signal(false);
+  protected manualContextDraft = '';
 
   constructor() {
     timer(0, 5000)
@@ -88,14 +91,35 @@ export class App {
     this.tasksApi.clearCurrentContext().subscribe({
       next: () => {
         this.currentContext.set(null);
+        this.manualContextDraft = '';
         this.ctxClearing.set(false);
       },
       error: () => this.ctxClearing.set(false),
     });
   }
 
+  protected submitManualContext(): void {
+    if (this.ctxSaving()) return;
+    const label = this.manualContextDraft.trim();
+    if (!label) return;
+    this.ctxSaving.set(true);
+    this.tasksApi.setManualContext(label).subscribe({
+      next: (r) => {
+        this.currentContext.set({
+          id: 'manual',
+          task_id: '',
+          label: r.label,
+          created_at: r.created_at,
+        });
+        this.manualContextDraft = '';
+        this.ctxSaving.set(false);
+      },
+      error: () => this.ctxSaving.set(false),
+    });
+  }
+
   protected ctxLabelTooltip(cs: ContextSwitchRow | null): string {
-    if (!cs) return 'No current context — mark a context switch on the Review page (↻ on a card) to track interruptions.';
+    if (!cs) return 'No current context — type a label or mark a context switch on the Review page (↻ on a card).';
     const when = formatTs(cs.created_at);
     const label = cs.label ?? 'pending — agent is labeling…';
     return `${label} · marked ${when}`;
