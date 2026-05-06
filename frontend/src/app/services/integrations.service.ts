@@ -18,6 +18,8 @@ export interface IntegrationStatus {
   username?: string | null;
   /** Bitbucket only: display name from /2.0/user (when scope allows). */
   display_name?: string | null;
+  /** Bitbucket only: workspace slug the credential is scoped to. */
+  workspace?: string | null;
 }
 
 export interface IntegrationsResponse {
@@ -113,16 +115,24 @@ export class IntegrationsService {
     );
   }
 
-  /** Connect Bitbucket using a username + app password (or Atlassian email
-   *  + API token). The credentials are validated against /2.0/user before
-   *  persisting; failure surfaces as a 401. */
+  /** Connect Bitbucket. The new Atlassian-issued Bitbucket API tokens
+   *  require a `workspace` slug since CHANGE-2770 sunset cross-workspace
+   *  introspection (2026-04-14). Legacy app passwords with `account:read`
+   *  may pass null and the backend falls back to /2.0/user. */
   connectBitbucket(input: {
     username: string;
     app_password: string;
-  }): Observable<{ ok: boolean; username: string; display_name: string | null }> {
+    workspace?: string | null;
+  }): Observable<{
+    ok: boolean;
+    username: string;
+    workspace: string | null;
+    display_name: string | null;
+  }> {
     return this.http.post<{
       ok: boolean;
       username: string;
+      workspace: string | null;
       display_name: string | null;
     }>('/api/integrations/bitbucket/connect', input);
   }

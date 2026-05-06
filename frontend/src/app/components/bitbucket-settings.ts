@@ -32,34 +32,44 @@ import {
           paste the email in the username field). The orchestrator only reads.
         </p>
         <details class="bb-perms" open>
-          <summary>required app password permissions</summary>
+          <summary>required permissions</summary>
+          <h4>Option A — App password (classic)</h4>
           <p class="muted small">
-            Create the credential at
+            Create at
             <a href="https://bitbucket.org/account/settings/app-passwords/" target="_blank" rel="noopener">
               bitbucket.org/account/settings/app-passwords
-            </a>
-            with these scopes:
+            </a>. Username field: your <strong>Bitbucket username</strong> (the lowercase slug, not
+            your email).
           </p>
           <ul>
-            <li><strong>Account</strong> → <em>Read</em> — surfaces your
-              display name in the Settings UI ("connected as …").</li>
-            <li><strong>Repositories</strong> → <em>Read</em> — lists workspaces and
-              repos you've opted in to watch.</li>
+            <li><strong>Account</strong> → <em>Read</em> — surfaces your display name in
+              "connected as …".</li>
+            <li><strong>Workspace membership</strong> → <em>Read</em> — needed to list the
+              workspaces this credential can see.</li>
+            <li><strong>Repositories</strong> → <em>Read</em> — lists repos you've opted in
+              to watch.</li>
             <li><strong>Pull requests</strong> → <em>Read</em> — fetches PR metadata + diffs.</li>
           </ul>
+          <h4>Option B — Atlassian API token with Bitbucket scopes</h4>
           <p class="muted small">
-            Optional, only if you later want the orchestrator to post a review back as a comment:
+            Create at
+            <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">
+              id.atlassian.com/manage-profile/security/api-tokens
+            </a>
+            and tick the <em>Bitbucket</em> scopes at creation. Username field: your
+            <strong>Atlassian email</strong>.
           </p>
           <ul>
-            <li><strong>Pull requests</strong> → <em>Write</em> — posts comment reviews on PRs.
-              Like the GitHub flow, the orchestrator never approves or requests changes on your
-              behalf.</li>
+            <li><code>read:workspace:bitbucket</code> — required.</li>
+            <li><code>read:repository:bitbucket</code> — list repos.</li>
+            <li><code>read:pullrequest:bitbucket</code> — fetch PRs.</li>
+            <li>Optional, for posting review comments later:
+              <code>write:pullrequest:bitbucket</code>.</li>
           </ul>
           <p class="muted small">
-            If you'd rather use an Atlassian API token (managed at
-            <code>id.atlassian.com/manage-profile/security/api-tokens</code>), put your Atlassian
-            email in the username field and the token in the app-password field. Same scope rules
-            apply at the credential level.
+            Plain Atlassian API tokens scoped for Jira/Confluence only — i.e. created without
+            ticking any Bitbucket scope — will NOT authenticate against
+            <code>api.bitbucket.org</code>.
           </p>
         </details>
         <div class="bb-row">
@@ -73,6 +83,12 @@ import {
                  placeholder="app password / API token"
                  autocomplete="current-password"
                  [(ngModel)]="passwordDraft" />
+        </div>
+        <div class="bb-row-ws">
+          <input class="bb-ws"
+                 type="text"
+                 placeholder="workspace slug (e.g. myteam from bitbucket.org/myteam/…)"
+                 [(ngModel)]="workspaceDraft" />
           <button class="primary"
                   type="button"
                   [disabled]="!usernameDraft || !passwordDraft || saving()"
@@ -80,12 +96,18 @@ import {
             {{ saving() ? 'connecting…' : 'connect' }}
           </button>
         </div>
+        <p class="muted small">
+          Workspace is required for Atlassian API tokens — Bitbucket killed cross-workspace
+          introspection in CHANGE-2770. Leave blank only if you're using a legacy app password
+          with the <em>Account: Read</em> scope.
+        </p>
         @if (errorMessage()) {
           <p class="error small">{{ errorMessage() }}</p>
         }
       } @else {
         <p class="small">
-          Connected as <strong>{{ displayName() ?? username() }}</strong>.
+          Connected as <strong>{{ displayName() ?? username() }}</strong>
+          @if (workspace()) { · workspace <code>{{ workspace() }}</code> }.
           @if (lastError()) {
             <span class="error"> Last sync error: {{ lastError() }}</span>
           }
@@ -127,15 +149,21 @@ import {
       }
       .small { font-size: 13px; }
       .muted { color: var(--ink-muted); }
-      .error { color: var(--ink-red); }
+      .error { color: var(--ink-red); white-space: pre-wrap; }
 
       .bb-row {
         display: grid;
-        grid-template-columns: 1fr 1fr auto;
+        grid-template-columns: 1fr 1fr;
         gap: 8px;
-        margin: 8px 0;
+        margin: 8px 0 6px;
       }
-      .bb-user, .bb-secret {
+      .bb-row-ws {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        margin: 0 0 6px;
+      }
+      .bb-user, .bb-secret, .bb-ws {
         font-family: var(--font-mono);
         font-size: 12.5px;
       }
@@ -183,9 +211,11 @@ export class BitbucketSettings implements OnInit {
 
   protected usernameDraft = '';
   protected passwordDraft = '';
+  protected workspaceDraft = '';
 
   protected readonly username = signal<string | null>(null);
   protected readonly displayName = signal<string | null>(null);
+  protected readonly workspace = signal<string | null>(null);
   protected readonly connected = computed(() => !!this.username());
   protected readonly lastError = signal<string | null>(null);
   protected readonly saving = signal(false);
@@ -202,6 +232,7 @@ export class BitbucketSettings implements OnInit {
         if (!bb) return;
         if (bb.username) this.username.set(bb.username);
         this.displayName.set(bb.display_name ?? null);
+        this.workspace.set(bb.workspace ?? null);
         this.lastError.set(bb.last_error);
       },
     });
@@ -215,14 +246,17 @@ export class BitbucketSettings implements OnInit {
       .connectBitbucket({
         username: this.usernameDraft.trim(),
         app_password: this.passwordDraft,
+        workspace: this.workspaceDraft.trim() || null,
       })
       .subscribe({
         next: (r) => {
           this.saving.set(false);
           this.username.set(r.username);
           this.displayName.set(r.display_name);
+          this.workspace.set(r.workspace);
           this.usernameDraft = '';
           this.passwordDraft = '';
+          this.workspaceDraft = '';
         },
         error: (e) => {
           this.saving.set(false);
@@ -234,8 +268,10 @@ export class BitbucketSettings implements OnInit {
   rotate(): void {
     this.username.set(null);
     this.displayName.set(null);
+    this.workspace.set(null);
     this.usernameDraft = '';
     this.passwordDraft = '';
+    this.workspaceDraft = '';
     this.errorMessage.set(null);
   }
 
@@ -245,12 +281,19 @@ export class BitbucketSettings implements OnInit {
       next: () => {
         this.username.set(null);
         this.displayName.set(null);
+        this.workspace.set(null);
       },
     });
   }
 
-  private formatError(e: { error?: { message?: string }; message?: string } | string): string {
+  private formatError(
+    e:
+      | { error?: { message?: string; hint?: string }; message?: string }
+      | string,
+  ): string {
     if (typeof e === 'string') return e;
-    return e?.error?.message ?? e?.message ?? 'unknown error';
+    const msg = e?.error?.message ?? e?.message ?? 'unknown error';
+    const hint = e?.error?.hint;
+    return hint ? `${msg}\n\nHint: ${hint}` : msg;
   }
 }

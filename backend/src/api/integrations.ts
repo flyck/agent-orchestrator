@@ -57,6 +57,8 @@ interface IntegrationListItem {
   /** Bitbucket only — display name from /2.0/user, when the credential
    *  has the scope to read it. */
   display_name?: string | null;
+  /** Bitbucket only — workspace slug the credential is scoped to. */
+  workspace?: string | null;
 }
 
 const KNOWN: { id: string; name: string; description: string }[] = [
@@ -88,6 +90,7 @@ integrations.get("/", (c) => {
       const cfg = getBitbucketConfig();
       base.username = cfg?.username ?? null;
       base.display_name = cfg?.display_name ?? null;
+      base.workspace = cfg?.workspace ?? null;
     }
     return base;
   });
@@ -163,6 +166,10 @@ const bitbucketConnectSchema = z.object({
   username: z.string().min(1).max(160),
   /** App password or Atlassian API token. Stored only on this host. */
   app_password: z.string().min(8).max(400),
+  /** Workspace slug — required for Atlassian-issued Bitbucket API tokens
+   *  (CHANGE-2770 sunset cross-workspace introspection). Optional for
+   *  legacy app passwords with `account:read`. */
+  workspace: z.string().min(1).max(160).nullable().optional(),
 });
 
 /**
@@ -179,27 +186,52 @@ integrations.post("/bitbucket/connect", async (c) => {
   }
 
   const { username, app_password } = parsed.data;
+  const workspace = parsed.data.workspace?.trim() || null;
   let display_name: string | null = null;
   let account_id: string | null = null;
+  let resolved_workspace: string | null = workspace;
   try {
-    const user = await validateBitbucket(username, app_password);
+    const user = await validateBitbucket(username, app_password, workspace);
     display_name = user.display_name ?? null;
     account_id = user.account_id ?? null;
+    if (user.username) resolved_workspace = user.username;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn("api.integrations.bitbucket.validate_failed", { message });
-    return c.json({ error: "credentials_invalid", message }, 401);
+    // Surface the specific failure mode in the hint so the user knows
+    // which knob to turn (workspace slug, scope, token type, etc.).
+    const hint = !workspace
+      ? "Atlassian killed cross-workspace introspection in CHANGE-2770 (sunset 2026-04-14). New Atlassian API tokens with Bitbucket scopes need a 'workspace' slug — fill that field with the URL slug, e.g. for bitbucket.org/myteam/somerepo it's 'myteam'. Legacy app passwords with the 'Account: Read' scope still work without a workspace."
+      : "Check that the workspace slug matches the URL on bitbucket.org (lowercase, no spaces), and that the credential has at least the 'read:workspace:bitbucket' scope. App passwords need 'Workspaces: Read' ticked.";
+    return c.json(
+      { error: "credentials_invalid", message, hint },
+      401,
+    );
   }
 
   upsertIntegration(
     "bitbucket",
-    { username, app_password, account_id, display_name },
+    {
+      username,
+      app_password,
+      workspace: resolved_workspace,
+      account_id,
+      display_name,
+    },
     true,
   );
   disableOtherIntegrations("bitbucket");
   markSynced("bitbucket");
-  log.info("api.integrations.bitbucket.connected", { username });
-  return c.json({ ok: true, username, display_name });
+  log.info("api.integrations.bitbucket.connected", {
+    username,
+    workspace: resolved_workspace,
+  });
+  return c.json({
+    ok: true,
+    username,
+    workspace: resolved_workspace,
+    display_name,
+  });
 });
 
 /** Wipe the bitbucket config + credential. */

@@ -30,6 +30,11 @@ export interface BitbucketConfig {
   username: string;
   /** App password (or Atlassian API token) — basic-auth secret. */
   app_password: string;
+  /** Workspace slug. Required for the post-CHANGE-2770 Atlassian API
+   *  tokens since cross-workspace introspection is gone; legacy app
+   *  passwords that hit /2.0/user without one set this from the
+   *  validated user's primary workspace, or null if unknown. */
+  workspace?: string | null;
   /** Atlassian account id from /2.0/user, surfaced for clarity. */
   account_id?: string | null;
   /** Display name from /2.0/user; null when the credential lacks the
@@ -71,6 +76,7 @@ export function getBitbucketConfig(handle: Database = db()): BitbucketConfig | n
     return {
       username: parsed.username,
       app_password: parsed.app_password,
+      workspace: parsed.workspace ?? null,
       account_id: parsed.account_id ?? null,
       display_name: parsed.display_name ?? null,
     };
