@@ -1,7 +1,7 @@
 import { Component, computed, inject, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subject, switchMap, takeUntil, timer, catchError, of } from 'rxjs';
 import {
   IntegrationsService,
@@ -564,6 +564,8 @@ function relativeTsIso(iso: string): string {
 export class ReviewPage implements OnDestroy {
   private integrationsApi = inject(IntegrationsService);
   private tasksApi = inject(TasksService);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   protected readonly states = REVIEW_PIPELINE_STATES;
   protected readonly stateLabels = STATE_LABELS;
@@ -628,6 +630,13 @@ export class ReviewPage implements OnDestroy {
   private destroy$ = new Subject<void>();
 
   constructor() {
+    // Hydrate detail-panel selection from ?task=<id> so reload + share
+    // links work. Subsequent clicks update the URL via syncQueryParams.
+    this.route.queryParamMap.pipe(takeUntil(this.destroy$)).subscribe((p) => {
+      const t = p.get('task');
+      if (t !== this.detailTaskId()) this.detailTaskId.set(t || null);
+    });
+
     // Hydrate provider status. The page accepts whichever integration row
     // has enabled=true (single-active rule) so it shows GitHub or
     // Bitbucket transparently. PR fetching dispatches through the generic
@@ -723,11 +732,23 @@ export class ReviewPage implements OnDestroy {
   }
 
   openOnHome(taskId: string): void {
-    this.detailTaskId.set(this.detailTaskId() === taskId ? null : taskId);
+    const next = this.detailTaskId() === taskId ? null : taskId;
+    this.detailTaskId.set(next);
+    this.syncQueryParams({ task: next });
   }
 
   closeDetail(): void {
     this.detailTaskId.set(null);
+    this.syncQueryParams({ task: null });
+  }
+
+  private syncQueryParams(patch: Record<string, string | null>): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: patch,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   markContextSwitch(taskId: string): void {
