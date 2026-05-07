@@ -50,6 +50,7 @@ import {
   type PhaseDef,
   type PipelineDef,
 } from "./pipelines";
+import { resumeFrom } from "./resume";
 import { getPhaseOutput, recordPhaseOutput } from "../db/phaseOutputs";
 import {
   buildReviewerMessage,
@@ -1118,34 +1119,17 @@ async function runPipelineLifecycle(
     return;
   }
 
-  // Pick the phase to start at:
-  //   1. awaiting_gate_id set → user just approved; advance to gate+1.
-  //   2. current_state matches an agent phase + awaiting_gate_id null →
-  //      user sent back to that phase; resume there with the followUp
-  //      message threaded into the agent message.
-  //   3. Otherwise → fresh run, start at 0.
-  const startIdx = (() => {
-    if (task.awaiting_gate_id) {
-      const idx = pipeline.phases.findIndex((p) => p.id === task.awaiting_gate_id);
-      return idx >= 0 ? idx + 1 : 0;
-    }
-    if (followUp && task.current_state) {
-      const idx = pipeline.phases.findIndex(
-        (p) => p.id === task.current_state && p.kind === PhaseKind.Agent,
-      );
-      if (idx >= 0) return idx;
-    }
-    return 0;
-  })();
-  // Track whether the followUp has been spliced into a phase yet — only
-  // the FIRST agent phase encountered after start sees it; later phases
-  // get their normal builder output.
-  let pendingFollowUp = followUp ?? null;
+  const decision = resumeFrom(task, pipeline, { followUp });
+  const startIdx = decision.phaseIdx;
+  // Only the FIRST agent phase after resume sees the followUp; later
+  // phases use their plain builder output.
+  let pendingFollowUp = decision.followUp;
 
   log.info("orchestrator.pipeline.start", {
     taskId,
     pipelineId,
     startIdx,
+    reason: decision.reason,
     totalPhases: pipeline.phases.length,
   });
 
