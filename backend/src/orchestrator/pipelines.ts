@@ -95,14 +95,46 @@ export interface PipelineDef {
  * `runLifecycle` currently implements; defining it here is a no-op
  * until the runner switches to phase-driven walking.
  */
+/**
+ * Code-task pipeline expressed in the runner's vocabulary. Mirrors
+ * the legacy runLifecycle behavior using on_error + cycle_back so
+ * the pipeline runner can drive code tasks once the
+ * `pipeline_runner_v2` setting is on. While the flag is off, the
+ * existing runLifecycle continues to handle them — same definition,
+ * two routes, until step 5c deletes the legacy lifecycle.
+ *
+ * Phase semantics encoded:
+ *   plan    — on_error: 'fall_through' (planner failure shouldn't
+ *             block coder; runLifecycle's plan-error fall-through).
+ *   code    — on_error: 'fail' (coder failure is fatal — same as
+ *             today's default).
+ *   review  — on_error: 'accept' (reviewer engine failure → ship,
+ *             matching runLifecycle's fail-open).
+ *             cycle_back to 'code' up to MAX_REVIEW_CYCLES (= 2).
+ *   ready   — gate (existing).
+ *   finalize — gate (existing).
+ */
 export const CODE_TASK_PIPELINE: PipelineDef = {
   id: PipelineId.CodeTask,
   label: "Code task",
   phases: [
     { id: "spec",     label: "Spec",     kind: "gate", prompt: "Author the spec, then submit." },
-    { id: "plan",     label: "Plan",     kind: "agent", agents: ["plan-coder"], builder: "planner" },
-    { id: "code",     label: "Code",     kind: "agent", agents: ["coder"],      builder: "coder" },
-    { id: "review",   label: "Review",   kind: "agent", agents: ["reviewer-coder"], builder: "reviewer" },
+    {
+      id: "plan",     label: "Plan",     kind: "agent",
+      agents: ["plan-coder"], builder: "planner",
+      on_error: "fall_through",
+    },
+    {
+      id: "code",     label: "Code",     kind: "agent",
+      agents: ["coder"],      builder: "coder",
+      on_error: "fail",
+    },
+    {
+      id: "review",   label: "Review",   kind: "agent",
+      agents: ["reviewer-coder"], builder: "reviewer",
+      on_error: "accept",
+      cycle_back: { phase_id: "code", max: 2 },
+    },
     { id: "ready",    label: "Ready",    kind: "gate",  prompt: "Inspect the diff. Commit, send back with feedback, or finish." },
     { id: "finalize", label: "Finalize", kind: "gate",  prompt: "Committed — close out the task." },
   ],

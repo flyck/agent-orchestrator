@@ -23,6 +23,13 @@ export interface Settings {
   pr_review_poll_interval_minutes: number;
   suggestions_enabled: boolean;
   git_repos_dir: string;
+  /** When true, code tasks (feature/bugfix/arch_compare) are walked
+   *  by the pipeline runner using CODE_TASK_PIPELINE's on_error +
+   *  cycle_back fields. When false, the legacy runLifecycle handles
+   *  them (current default). Per the simplification plan's step
+   *  5b: dual-run for a release, then flip the default in 5c and
+   *  delete runLifecycle. */
+  pipeline_runner_v2: boolean;
 }
 
 const NUMBER_KEYS = new Set<keyof Settings>([
@@ -46,6 +53,7 @@ const NULLABLE_NUMBER_KEYS = new Set<keyof Settings>([
 const BOOLEAN_KEYS = new Set<keyof Settings>([
   "repo_context_enabled",
   "suggestions_enabled",
+  "pipeline_runner_v2",
 ]);
 
 function parseValue<K extends keyof Settings>(key: K, raw: string): Settings[K] {

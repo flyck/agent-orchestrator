@@ -758,8 +758,12 @@ function pipelineForType(type: TaskType): PipelineId | null {
     case TaskType.Review:
       return PipelineId.PrReviewGated;
     case TaskType.Coding:
-      // Legacy plan→code→review→ready lifecycle for now. Will become
-      // PipelineId.CodeTask once the runner replaces runLifecycle.
+      // Legacy plan→code→review→ready lifecycle for now. Flipping to
+      // PipelineId.CodeTask needs more than the on_error / cycle_back
+      // wiring — the runner's per-phase message builders +
+      // PIPELINE_AGENTS still need the planner / coder / reviewer
+      // entries that runLifecycle currently hand-rolls. Tracked in
+      // docs/refactor-pipeline-simplification.md (step 5b proper).
       return null;
   }
 }

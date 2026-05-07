@@ -161,6 +161,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // uses this to populate the repo dropdown, and agents are started with
   // the selected repo as their working directory.
   git_repos_dir: "",
+  // Pipeline runner v2 — opt-in for code tasks during step 5b of
+  // the simplification plan. Off by default; runLifecycle handles
+  // code tasks until the dual-run period validates the new path.
+  pipeline_runner_v2: "false",
 };
 
 function seedDefaultSettings(db: Database) {

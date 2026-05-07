@@ -149,38 +149,57 @@ runtime coupling. `index.ts` lost ~140 LOC. Did NOT do the proposed
 table dispatch would just be a different shape of branch. Land
 that if a fifth phase appears.
 
-### Step 5 — collapse runLifecycle into CODE_TASK_PIPELINE — NOT YET
+### Step 5 — collapse runLifecycle into CODE_TASK_PIPELINE — IN PROGRESS
 
-Investigated and DEFERRED. The pipeline runner today walks distinct
-phases with distinct sessions per agent; `runLifecycle` does
-something genuinely different that the pipeline runner can't do
-yet:
+Re-scoped into 5a/5b/5c after investigation.
 
-  - Watchdog-triggered phase advancement (`watchdogRecovered` flag
-    treats a hung session as the phase finishing cleanly).
-  - Cycle-budget for the review→code loop (`MAX_REVIEW_CYCLES`,
-    `incrementReviewCycles`).
-  - Fail-open semantics per phase (plan-error → still try code;
-    review-error → accept; coder-restart failure → finalize done).
-  - Per-phase session rolling (the same `a.session` gets replaced
-    by `switchToReviewer`/`switchToCoder`, not closed and reopened
-    per agent like the pipeline runner does).
+**Step 5a — DONE (2076afc).** Pipeline runner gained `on_error` +
+`cycle_back` per phase; runPipelineAgent returns a structured
+outcome { kind, reply } so the runner can dispatch. New
+`decisionFromReply` helper in persist.ts reads the reviewer's
+verdict so cycle_back can pick between accept and send_back.
+PR-review pipelines unchanged (defaults match their behavior).
+CODE_TASK_PIPELINE definition updated to express the flow in the
+new vocabulary (plan: fall_through; review: accept + cycle_back).
+A `pipeline_runner_v2` setting was added to settings.ts +
+defaults but is currently dormant — see 5b for why.
 
-A clean collapse needs the pipeline runner to learn those tricks
-first. Two-step path:
+**Step 5b — STILL OPEN.** Found out the hard way that the runner
+can reproduce the *flow* but not the *content* of code tasks
+without more work:
 
-  - Step 5a — extend `PhaseDef` with `on_error: 'fail' | 'fall_through' |
-    'fail_open'` and `cycle_with: { phase_id, max }`. Runner reads
-    these. No `runLifecycle` deletion yet; just teach the new
-    runner to handle the same edge cases.
-  - Step 5b — express `CODE_TASK_PIPELINE` with the new fields,
-    behind a feature flag (settings.pipeline_runner_v2 = true|false).
-    Run both for a release; flip the default once metrics agree.
-  - Step 5c — delete `runLifecycle` once the flag has been on by
-    default for a release.
+  - PIPELINE_AGENTS needs entries for `plan-coder` / `coder` /
+    `reviewer-coder` agents pointing at their .md prompts.
+  - `buildPipelinePhaseMessage` needs branches for the plan / code
+    / review phases. runLifecycle hand-rolls these via
+    `buildPlannerMessage`, `buildInitialMessage`, and
+    `buildReviewerMessage` — those builders pull worktree-relative
+    state, prior reviewer feedback, etc., that aren't part of the
+    current pipeline message-builder vocabulary.
+  - The system prompts are also bespoke
+    (`buildPlannerSystemPrompt`, `buildSystemPrompt`,
+    `buildReviewerSystemPrompt`); the pipeline runner uses one
+    shared shape (renderSharedPrompt + agent's role body).
+  - Worktree creation, which runLifecycle does inline before the
+    pump loop, isn't on the pipeline runner's path.
 
-This is bigger than originally sketched. Don't try to collapse it
-in one PR.
+So the actual 5b work is:
+  1. Add plan-coder / coder / reviewer-coder to PIPELINE_AGENTS,
+     with their existing role prompts.
+  2. Extend buildPipelinePhaseMessage with the plan/code/review
+     branches that today live in the per-phase builders.
+  3. Move worktree creation into the pipeline runner (or earlier
+     in startRunInternal regardless of which path is taken).
+  4. Then flip the `pipeline_runner_v2` setting to actually route
+     code tasks through.
+
+This is its own multi-commit refactor. The setting + the
+on_error/cycle_back vocabulary are in place; nothing's blocking
+it; just hasn't been done yet.
+
+**Step 5c — DELETE runLifecycle** once 5b has shipped behind the
+flag, the dual-run period has covered enough task types, and the
+flag default has been flipped on for a release.
 
 ### Step 3 — extract runner.ts — DEFERRED until after step 5
 
