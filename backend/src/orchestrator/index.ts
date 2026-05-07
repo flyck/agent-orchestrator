@@ -55,6 +55,7 @@ import {
   validateAgentOutput,
 } from "./agentValidation";
 import { decisionFromReply, persistAgentReply } from "./persist";
+import { lifecycleStep, type LifecyclePhase } from "./lifecycle-step";
 import { recordPhaseOutput } from "../db/phaseOutputs";
 import {
   buildReviewerMessage,
@@ -1111,133 +1112,105 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
 
   try {
     while (true) {
-      // Pump the current session. After this returns, a.session has
-      // either reached a terminal state or been closed externally
-      // (forceComplete / cancelRun).
       const r = await pumpUntilTerminal(a);
       lastError = r.lastError ?? lastError;
 
-      // forceComplete short-circuits, but with a nuance: if the watchdog
-      // (not the user) triggered it AND we're in a phase that has a
-      // natural successor, treat it as the phase finishing cleanly. The
-      // watchdog only fires when opencode reports finish=stop, so the
-      // work is already done — only the SSE bus missed events. Skipping
-      // review on a code-phase recovery is what the user complained
-      // about ("review step doesn't complete for self-created tasks");
-      // promoting to next phase fixes that.
-      if (a.forceCompleted === true) {
-        if (a.watchdogRecovered && a.phase === "plan") {
-          await safeClose(a.session, taskId, "plan_recovered");
-          a.forceCompleted = false;
-          a.watchdogRecovered = false;
-          try {
-            await switchToCoder(a, task);
-            continue;
-          } catch (err) {
-            log.warn("orchestrator.coder.start_failed_after_plan", {
-              taskId,
-              error: String(err),
-            });
-            finalizeTask(task, TaskStatus.Done, "ready", lastError);
-            return;
-          }
-        }
-        if (a.watchdogRecovered && a.phase === "code") {
-          await safeClose(a.session, taskId, "code_recovered");
-          a.forceCompleted = false;
-          a.watchdogRecovered = false;
-          try {
-            await switchToReviewer(a, task);
-            continue;
-          } catch (err) {
-            log.warn("orchestrator.reviewer.start_failed_after_recovery", {
-              taskId,
-              error: String(err),
-            });
-            finalizeTask(task, TaskStatus.Done, "ready", lastError);
-            return;
-          }
-        }
-        // User-triggered force-complete (or watchdog at review phase) —
-        // bail to ready as before.
-        await safeClose(a.session, taskId, "force_completed");
-        finalizeTask(task, TaskStatus.Done, "ready", lastError);
-        return;
+      // Parse the reviewer's reply once when we're in the review
+      // phase so the decision logic + the persistence both see the
+      // same parsed object.
+      let reviewDecision: ReviewDecision | null = null;
+      if (
+        a.phase === "review" &&
+        !a.forceCompleted &&
+        r.terminal === "idle"
+      ) {
+        reviewDecision = parseReviewerDecision(r.assistantText);
       }
 
-      // Iterator closed externally with no terminal event → canceled.
-      if (r.terminal === null) {
-        await safeClose(a.session, taskId, "canceled");
-        finalizeTask(task, TaskStatus.Canceled, task.current_state, lastError);
-        return;
-      }
+      const action = lifecycleStep({
+        phase: a.phase as LifecyclePhase,
+        terminal: r.terminal,
+        forceCompleted: a.forceCompleted === true,
+        watchdogRecovered: a.watchdogRecovered === true,
+        reviewerAction: reviewDecision?.action,
+        cycleCount: a.cycleCount,
+        isPrReview: a.isPrReview === true,
+      });
 
-      // Session error in any phase before review fails the whole task.
-      // Reviewer errors get downgraded to accept further down — but a
-      // session-level error means the engine itself failed, not just
-      // bad output.
-      if (r.terminal === "error" && a.phase === "plan") {
-        log.warn("orchestrator.planner.session_error_falling_through_to_code", {
-          taskId,
-        });
-        await safeClose(a.session, taskId, "plan_error");
-        // Plan failure is not fatal — the coder can still attempt the
-        // task without notes. Fall through to coder.
-        try {
-          await switchToCoder(a, task);
-          continue;
-        } catch (err) {
-          finalizeTask(task, TaskStatus.Failed, task.current_state, lastError);
-          return;
-        }
-      }
-      if (r.terminal === "error" && a.phase === "code") {
-        await safeClose(a.session, taskId, "code_error");
-        finalizeTask(task, TaskStatus.Failed, task.current_state, lastError);
-        return;
-      }
-
-      // Reviewer session error → fail-open to done. Logged so the user
-      // can see this happened.
-      if (r.terminal === "error" && a.phase === "review") {
-        log.warn("orchestrator.reviewer.session_error_treated_as_accept", { taskId });
-        await safeClose(a.session, taskId, "review_error_accept");
-        finalizeTask(task, TaskStatus.Done, "ready", lastError);
-        return;
-      }
-
-      // r.terminal === "idle" — clean finish for this phase. Branch on phase.
-      if (a.phase === "plan") {
-        await safeClose(a.session, taskId, "plan_done");
-        try {
-          await switchToCoder(a, task);
-          continue;
-        } catch (err) {
-          log.warn("orchestrator.coder.start_failed_after_plan", {
-            taskId,
-            error: String(err),
-          });
-          finalizeTask(task, TaskStatus.Done, "ready", lastError);
-          return;
-        }
-      }
-      if (a.phase === "code") {
-        await safeClose(a.session, taskId, "code_done");
-        // Persist the coder's reply so the Coder tab can show it after
-        // the reviewer takes over the active session. Pipeline runs
-        // already do this in the per-phase loop; legacy plan→code→review
-        // tasks need an explicit call here.
+      // Per-phase persistence that the action dispatcher doesn't
+      // own: the coder's reply lands in task_phase_outputs so the
+      // Coder tab survives the reviewer taking over the session;
+      // the reviewer's decision + scoring + alternatives go to the
+      // reviews / scoring / alternatives tables.
+      if (a.phase === "code" && r.terminal === "idle" && !a.forceCompleted) {
         const coderReply = (r.assistantText ?? "").trim();
         if (coderReply.length > 0) {
           recordPhaseOutput(taskId, "code", "coder", coderReply);
         }
-        // Try to switch to reviewer. On any failure, accept the coder's
-        // work and finalize done.
+      }
+      if (reviewDecision) {
         try {
-          await switchToReviewer(a, task);
-          continue; // pump the reviewer next iteration
+          appendReview({
+            task_id: taskId,
+            cycle: a.cycleCount,
+            decision: reviewDecision.action,
+            notes:
+              reviewDecision.action === ReviewDecisionAction.Accept
+                ? reviewDecision.notes ?? null
+                : reviewDecision.feedback,
+            raw_text: r.assistantText ?? null,
+            confidence: reviewDecision.confidence ?? null,
+            findings_json:
+              reviewDecision.findings && reviewDecision.findings.length > 0
+                ? JSON.stringify(reviewDecision.findings)
+                : null,
+          });
+          persistReviewSideEffects(taskId, reviewDecision, "reviewer-coder");
         } catch (err) {
-          log.warn("orchestrator.reviewer.start_failed_treated_as_accept", {
+          log.warn("orchestrator.reviewer.persist_failed", {
+            taskId,
+            error: String(err),
+          });
+        }
+      }
+
+      // Dispatch.
+      if (action.kind === "finalize") {
+        await safeClose(a.session, taskId, `lifecycle_${action.status.toLowerCase()}`);
+        const status =
+          action.status === "Failed"
+            ? TaskStatus.Failed
+            : action.status === "Canceled"
+              ? TaskStatus.Canceled
+              : TaskStatus.Done;
+        const finalState = status === TaskStatus.Canceled ? task.current_state : "ready";
+        finalizeTask(task, status, finalState, lastError);
+        return;
+      }
+
+      if (action.kind === "switch_to_coder") {
+        // Send-back from review: bump the counter + remember the feedback
+        // before re-opening the coder session.
+        if (a.phase === "review" && reviewDecision?.action === ReviewDecisionAction.SendBack) {
+          try {
+            incrementReviewCycles(taskId);
+          } catch (err) {
+            log.warn("orchestrator.reviewer.increment_failed", {
+              taskId,
+              error: String(err),
+            });
+          }
+          a.cycleCount += 1;
+          a.lastReviewerFeedback = reviewDecision.feedback;
+        }
+        await safeClose(a.session, taskId, `${a.phase}_done`);
+        a.forceCompleted = false;
+        a.watchdogRecovered = false;
+        try {
+          await switchToCoder(a, task, action.feedback ?? a.lastReviewerFeedback);
+          continue;
+        } catch (err) {
+          log.warn("orchestrator.coder.start_failed_treated_as_done", {
             taskId,
             error: String(err),
           });
@@ -1246,86 +1219,15 @@ async function runLifecycle(a: ActiveTask, task: TaskRow): Promise<void> {
         }
       }
 
-      // a.phase === "review", clean idle.
-      await safeClose(a.session, taskId, "review_done");
-      const decision = parseReviewerDecision(r.assistantText);
-
-      // Persist the verdict so the "Reviewer" tab in the detail panel can
-      // show history. Best-effort — a failed insert mustn't block the
-      // accept/send-back transition the user is waiting on.
+      // action.kind === "switch_to_reviewer"
+      await safeClose(a.session, taskId, `${a.phase}_done`);
+      a.forceCompleted = false;
+      a.watchdogRecovered = false;
       try {
-        appendReview({
-          task_id: taskId,
-          cycle: a.cycleCount,
-          decision: decision.action,
-          notes:
-            decision.action === ReviewDecisionAction.Accept
-              ? decision.notes ?? null
-              : decision.feedback,
-          raw_text: r.assistantText ?? null,
-          confidence: decision.confidence ?? null,
-          findings_json: decision.findings && decision.findings.length > 0
-            ? JSON.stringify(decision.findings)
-            : null,
-        });
-        persistReviewSideEffects(taskId, decision, "reviewer-coder");
+        await switchToReviewer(a, task);
+        continue;
       } catch (err) {
-        log.warn("orchestrator.reviewer.persist_failed", {
-          taskId,
-          error: String(err),
-        });
-      }
-
-      if (decision.action === ReviewDecisionAction.Accept) {
-        log.info("orchestrator.reviewer.accept", {
-          taskId,
-          cycleCount: a.cycleCount,
-          notes: decision.notes ? decision.notes.slice(0, 280) : undefined,
-        });
-        finalizeTask(task, TaskStatus.Done, "ready", lastError);
-        return;
-      }
-
-      // PR review: no coder to send back to. Whatever the reviewer
-      // said is the deliverable; finalize and let the user read it.
-      // The decision row + raw_text + alternatives are persisted, so
-      // "send_back" findings still surface — they just don't trigger
-      // another agent loop.
-      if (a.isPrReview) {
-        log.info("orchestrator.reviewer.pr_review_finalizing", {
-          taskId,
-          decision: decision.action,
-        });
-        finalizeTask(task, TaskStatus.Done, "ready", lastError);
-        return;
-      }
-
-      // send_back. If we've already burned the cycle budget, force accept.
-      if (a.cycleCount >= MAX_REVIEW_CYCLES) {
-        log.warn("orchestrator.reviewer.cycle_cap_hit_forcing_accept", {
-          taskId,
-          cycleCount: a.cycleCount,
-          max: MAX_REVIEW_CYCLES,
-        });
-        finalizeTask(task, TaskStatus.Done, "ready", lastError);
-        return;
-      }
-
-      // Bump counter, store feedback, restart coder with feedback as the
-      // follow-up message. On any failure starting the coder, finalize done.
-      try {
-        incrementReviewCycles(taskId);
-      } catch (err) {
-        log.warn("orchestrator.reviewer.increment_failed", { taskId, error: String(err) });
-      }
-      a.cycleCount += 1;
-      a.lastReviewerFeedback = decision.feedback;
-
-      try {
-        await switchToCoder(a, task, decision.feedback);
-        continue; // pump the new coder session
-      } catch (err) {
-        log.warn("orchestrator.coder.restart_failed_treated_as_done", {
+        log.warn("orchestrator.reviewer.start_failed_treated_as_accept", {
           taskId,
           error: String(err),
         });
