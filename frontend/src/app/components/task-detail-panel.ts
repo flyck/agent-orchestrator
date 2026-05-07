@@ -519,6 +519,20 @@ function extractMermaid(text: string): string | null {
         margin-bottom: 10px;
       }
       .direction-head h3 { margin: 0; font-family: var(--font-serif); font-size: 16px; }
+      .direction-validation-warn {
+        margin: 12px 0;
+        padding: 10px 12px;
+        background: var(--ink-amber-bg);
+        border: 1px solid var(--ink-amber);
+        border-radius: 2px;
+      }
+      .direction-validation-warn p { margin: 4px 0; }
+      .validation-errors {
+        margin: 6px 0 0 18px;
+        padding: 0;
+        font-size: 12px;
+        color: var(--ink);
+      }
       .direction-evidence {
         margin: 14px 0;
         padding: 12px 14px;
@@ -1158,6 +1172,26 @@ export class TaskDetailPanelComponent {
 
   // ─── Phase outputs / intake diagram ───────────────────────────────────
   protected readonly phaseOutputs = signal<TaskPhaseOutputRow[]>([]);
+  /** Latest phase output for a given phase_id — used to surface
+   *  validation status (e.g. "explorer reply didn't validate") in
+   *  the Direction tab. */
+  protected readonly explorePhaseOutput = computed<TaskPhaseOutputRow | null>(() => {
+    const explores = this.phaseOutputs().filter((p) => p.phase_id === "explore");
+    return explores.length > 0 ? explores[explores.length - 1]! : null;
+  });
+  protected readonly explorerValidationFailed = computed<boolean>(() => {
+    return this.explorePhaseOutput()?.validation_status === "failed";
+  });
+  protected readonly explorerValidationErrors = computed<string[]>(() => {
+    const raw = this.explorePhaseOutput()?.validation_errors_json;
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? (arr as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
   protected readonly intakeDiagram = computed<string | null>(() => {
     const intake = this.phaseOutputs().find((p) => p.phase_id === "intake");
     if (!intake) return null;

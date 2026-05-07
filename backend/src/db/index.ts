@@ -109,6 +109,12 @@ function applyMigrations(db: Database) {
   ensureColumn("tasks", "explorer_summary", "TEXT");
   ensureColumn("tasks", "explorer_verdict", "TEXT");
   ensureColumn("tasks", "explorer_architecture_mermaid", "TEXT");
+  // Per phase-output validation outcome — populated by the runner
+  // after the YAML reprompt loop exits. NULL = no schema declared
+  // for the agent (no validation), 'ok' = passed, 'failed' = still
+  // malformed after the reprompt cap. Drives UI hints.
+  ensureColumn("task_phase_outputs", "validation_status", "TEXT");
+  ensureColumn("task_phase_outputs", "validation_errors_json", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

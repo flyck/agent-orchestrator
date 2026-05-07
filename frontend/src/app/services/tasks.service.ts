@@ -447,6 +447,14 @@ export interface TaskPhaseOutputRow {
   phase_id: string;
   agent_slug: string;
   output_md: string;
+  /** null when the agent didn't declare an output schema (no
+   *  validation), 'ok' when it passed, 'failed' when malformed even
+   *  after the runner's reprompt cap was exhausted. UI surfaces a
+   *  warning pill on 'failed'. */
+  validation_status: 'ok' | 'failed' | null;
+  /** JSON-encoded string[] of validator error codes when
+   *  validation_status='failed'. */
+  validation_errors_json: string | null;
   created_at: number;
 }
 

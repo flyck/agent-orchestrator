@@ -327,6 +327,26 @@
           }
         </header>
 
+        @if (explorerValidationFailed()) {
+          <aside class="direction-validation-warn">
+            <p class="meta">explorer output didn't validate</p>
+            <p class="small">
+              The explorer's reply still didn't match the required YAML schema
+              after the runner's auto-correction retries. The Direction radar /
+              alternatives / diagram below come from whatever did parse — open
+              the <strong>Explorer</strong> tab for the raw transcript, or send
+              back to retry.
+            </p>
+            @if (explorerValidationErrors().length > 0) {
+              <ul class="validation-errors">
+                @for (err of explorerValidationErrors(); track err) {
+                  <li class="mono">{{ err }}</li>
+                }
+              </ul>
+            }
+          </aside>
+        }
+
         @if (t.explorer_summary) {
           <section class="direction-evidence">
             <h4>Explorer's summary</h4>
