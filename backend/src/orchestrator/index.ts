@@ -54,7 +54,7 @@ import {
   buildReprompt as buildAgentReprompt,
   validateAgentOutput,
 } from "./agentValidation";
-import { persistAgentReply } from "./persist";
+import { decisionFromReply, persistAgentReply } from "./persist";
 import { recordPhaseOutput } from "../db/phaseOutputs";
 import {
   buildReviewerMessage,
@@ -784,6 +784,14 @@ import {
  *
  * Returns false on session-level error.
  */
+interface PipelineAgentOutcome {
+  /** "ok" — phase ran cleanly; "error" — session-level failure;
+   *  "unknown_agent" — slug missing from PIPELINE_AGENTS. */
+  kind: "ok" | "error" | "unknown_agent";
+  /** Trimmed assistant text. Empty when error/unknown_agent. */
+  reply: string;
+}
+
 async function runPipelineAgent(
   a: ActiveTask,
   task: TaskRow,
@@ -793,13 +801,13 @@ async function runPipelineAgent(
    *  builder output. Used by the gate-sendback path so the agent
    *  re-runs with explicit "the user said this" guidance. */
   followUp: string | null = null,
-): Promise<boolean> {
+): Promise<PipelineAgentOutcome> {
   const taskId = task.id;
   const cwd = task.worktree_path ?? REPO_ROOT;
   const promptBody = PIPELINE_AGENT_PROMPTS[agentSlug];
   if (!promptBody) {
     log.warn("orchestrator.pipeline.unknown_agent", { taskId, agentSlug });
-    return false;
+    return { kind: "unknown_agent", reply: "" };
   }
   const system = `${renderSharedPrompt(taskId, cwd)}\n\n---\n\n${promptBody}`;
   let message = buildPipelinePhaseMessage(task, phase, agentSlug);
@@ -838,7 +846,7 @@ async function runPipelineAgent(
       error: String(err),
     });
     await safeClose(session, taskId, "pipeline_send_failed");
-    return false;
+    return { kind: "error", reply: "" };
   }
 
   let r = await pumpUntilTerminal(a);
@@ -892,7 +900,7 @@ async function runPipelineAgent(
 
   if (r.terminal === "error") {
     log.warn("orchestrator.pipeline.phase_error", { taskId, phaseId: phase.id, agentSlug });
-    return phase.kind === PhaseKind.Parallel; // soft-fail when one of N reviewers dies
+    return { kind: "error", reply: (r.assistantText ?? "").trim() };
   }
 
   const reply = (r.assistantText ?? "").trim();
@@ -911,7 +919,7 @@ async function runPipelineAgent(
     agentSlug,
     outputBytes: reply.length,
   });
-  return true;
+  return { kind: "ok", reply };
 }
 
 /**
@@ -934,15 +942,18 @@ async function runPipelineLifecycle(
   }
 
   const decision = resumeFrom(task, pipeline, { followUp });
-  const startIdx = decision.phaseIdx;
+  let i = decision.phaseIdx;
   // Only the FIRST agent phase after resume sees the followUp; later
   // phases use their plain builder output.
   let pendingFollowUp = decision.followUp;
+  // Per-phase cycle counter — `cycle_back: { phase_id, max }` reads
+  // from this so a stuck reviewer can't loop forever.
+  const cycleCounts = new Map<string, number>();
 
   log.info("orchestrator.pipeline.start", {
     taskId,
     pipelineId,
-    startIdx,
+    startIdx: i,
     reason: decision.reason,
     totalPhases: pipeline.phases.length,
   });
@@ -951,7 +962,7 @@ async function runPipelineLifecycle(
   if (task.awaiting_gate_id) setAwaitingGate(taskId, null);
 
   try {
-    for (let i = startIdx; i < pipeline.phases.length; i++) {
+    while (i < pipeline.phases.length) {
       const phase = pipeline.phases[i]!;
       a.phase = phase.id;
       log.info("orchestrator.pipeline.phase", {
@@ -976,20 +987,90 @@ async function runPipelineLifecycle(
       }
 
       const agents = phase.agents ?? [];
-      let allOk = true;
+      let phaseHadError = false;
+      let lastReply = "";
+      let lastAgentSlug = "";
       for (const agentSlug of agents) {
         // Splice the user's send-back feedback into the first agent
         // call we make after resume. Subsequent agent calls (e.g.
         // parallel reviewers) get their plain builder output.
         const followUpForThis = pendingFollowUp;
         pendingFollowUp = null;
-        const ok = await runPipelineAgent(a, task, phase, agentSlug, followUpForThis);
-        if (!ok) { allOk = false; break; }
+        const outcome = await runPipelineAgent(a, task, phase, agentSlug, followUpForThis);
+        lastReply = outcome.reply;
+        lastAgentSlug = agentSlug;
+        if (outcome.kind === "error") {
+          // Parallel phases soft-fail per agent (one bad reviewer
+          // doesn't sink the others); agent phases honor on_error.
+          if (phase.kind === PhaseKind.Parallel) continue;
+          phaseHadError = true;
+          break;
+        }
       }
-      if (!allOk) {
+
+      if (phaseHadError) {
+        const onError = phase.on_error ?? "fail";
+        if (onError === "fall_through") {
+          log.warn("orchestrator.pipeline.phase_error_fall_through", {
+            taskId,
+            phaseId: phase.id,
+          });
+          i += 1;
+          continue;
+        }
+        if (onError === "accept") {
+          log.warn("orchestrator.pipeline.phase_error_accepted", {
+            taskId,
+            phaseId: phase.id,
+          });
+          finalizeTask(task, TaskStatus.Done, "ready", null);
+          return;
+        }
         finalizeTask(task, TaskStatus.Failed, phase.id as TaskRow["current_state"], null);
         return;
       }
+
+      // Send-back loop. When the phase has cycle_back set and the
+      // reply parses as a send_back decision, splice the feedback
+      // into the target phase's next message and re-enter.
+      if (phase.cycle_back) {
+        const dec = decisionFromReply(lastAgentSlug, lastReply);
+        if (dec?.action === "send_back") {
+          const used = (cycleCounts.get(phase.id) ?? 0) + 1;
+          cycleCounts.set(phase.id, used);
+          if (used > phase.cycle_back.max) {
+            log.warn("orchestrator.pipeline.cycle_cap_hit", {
+              taskId,
+              phaseId: phase.id,
+              max: phase.cycle_back.max,
+            });
+            // Cap hit → treat as accept: advance.
+            i += 1;
+            continue;
+          }
+          const targetIdx = pipeline.phases.findIndex((p) => p.id === phase.cycle_back!.phase_id);
+          if (targetIdx < 0) {
+            log.warn("orchestrator.pipeline.cycle_back_phase_missing", {
+              taskId,
+              phaseId: phase.id,
+              target: phase.cycle_back.phase_id,
+            });
+            i += 1;
+            continue;
+          }
+          log.info("orchestrator.pipeline.cycle_back", {
+            taskId,
+            from: phase.id,
+            to: phase.cycle_back.phase_id,
+            cycle: used,
+          });
+          pendingFollowUp = dec.feedback ?? null;
+          i = targetIdx;
+          continue;
+        }
+      }
+
+      i += 1;
     }
     finalizeTask(task, TaskStatus.Done, "ready", null);
   } finally {

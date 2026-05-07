@@ -159,3 +159,38 @@ export function persistAgentReply(
   // No structured persistence for this agent — task_phase_outputs
   // already has the raw reply, that's enough.
 }
+
+/** Outcome of a phase's reply that the runner needs to act on.
+ *  - "accept"     → advance to the next phase.
+ *  - "send_back"  → if the phase has cycle_back set, re-enter that
+ *    phase with feedback. Otherwise behave as accept.
+ *  - null         → no actionable decision (most agents).
+ *  The `feedback` field carries the reviewer's prose to splice into
+ *  the cycled-back agent's next message. */
+export interface PhaseDecision {
+  action: "accept" | "send_back";
+  feedback?: string;
+}
+
+/** Inspect a reviewer's YAML reply and return the action + feedback
+ *  the runner should use to decide between advance and cycle-back.
+ *  Non-reviewer agents return null. Parse failure returns null too —
+ *  fail-open: silent send_back loops are worse than missing one. */
+export function decisionFromReply(
+  agentSlug: string,
+  reply: string,
+): PhaseDecision | null {
+  if (agentSlug !== "reviewer-coder") return null;
+  try {
+    const decision = parseReviewerDecision(reply);
+    if (decision.action === ReviewDecisionAction.Accept) {
+      return { action: "accept" };
+    }
+    if (decision.action === ReviewDecisionAction.SendBack) {
+      return { action: "send_back", feedback: decision.feedback };
+    }
+  } catch {
+    // fail-open
+  }
+  return null;
+}

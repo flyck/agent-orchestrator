@@ -33,6 +33,33 @@ export const PipelineId = {
 } as const;
 export type PipelineId = (typeof PipelineId)[keyof typeof PipelineId];
 
+/** What the runner does when a phase's agent returns a session-level
+ *  error. Default = "fail" (current behavior). The other modes let
+ *  pipelines model legacy runLifecycle's quirks:
+ *
+ *   - "fall_through" → log a warning, advance to the next phase as
+ *     if it had succeeded. The plan-phase used this so a hung
+ *     planner didn't block the coder.
+ *   - "accept"       → finalize the task as Done. The review-phase
+ *     used this so a reviewer engine error became an implicit
+ *     "ship it" rather than a Failed status. */
+export const PhaseOnError = {
+  Fail: "fail",
+  FallThrough: "fall_through",
+  Accept: "accept",
+} as const;
+export type PhaseOnError = (typeof PhaseOnError)[keyof typeof PhaseOnError];
+
+/** Cycle-back declaration for review-style phases. When the agent
+ *  returns a "send_back" decision and the cycle count is below `max`,
+ *  the runner re-enters the phase named in `phase_id` (with the
+ *  agent's feedback as a follow-up message). Above `max` → accept.
+ *  Today only relevant for the legacy code-task review→code loop. */
+export interface PhaseCycleBack {
+  phase_id: string;
+  max: number;
+}
+
 export interface PhaseDef {
   /** Stable ID — task.current_state aligns to this for the agent and
    *  gate kinds. Parallel phases pick an aggregate ID (e.g. "review"). */
@@ -50,6 +77,11 @@ export interface PhaseDef {
   /** Human-friendly text shown when a `gate` phase is awaiting user
    *  decision. */
   prompt?: string;
+  /** What to do when the agent's session errors. Default "fail". */
+  on_error?: PhaseOnError;
+  /** Send-back loop config. When set + the agent returned send_back,
+   *  the runner re-enters cycle_back.phase_id (capped at `max`). */
+  cycle_back?: PhaseCycleBack;
 }
 
 export interface PipelineDef {
