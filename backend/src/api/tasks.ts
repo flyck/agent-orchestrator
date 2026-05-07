@@ -27,7 +27,7 @@ import {
 import { getPipeline } from "../orchestrator/pipelines";
 import { parseExplorerOutput } from "../orchestrator/explorer";
 import { validateAgentOutput } from "../orchestrator/agentValidation";
-import { getAgentOutputSpec } from "../orchestrator/index";
+import { getAgentOutputSpec } from "../orchestrator/agentPrompts";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, listScoringSummary, upsertScoring } from "../db/scorings";

@@ -53,12 +53,9 @@ import { resumeFrom } from "./resume";
 import {
   buildReprompt as buildAgentReprompt,
   validateAgentOutput,
-  validateOutputSpec,
-  type AgentOutputSpec,
 } from "./agentValidation";
 import { persistAgentReply } from "./persist";
-import { parse as parseYaml } from "yaml";
-import { getPhaseOutput, recordPhaseOutput } from "../db/phaseOutputs";
+import { recordPhaseOutput } from "../db/phaseOutputs";
 import {
   buildReviewerMessage,
   buildReviewerSystemPrompt,
@@ -88,9 +85,8 @@ import { upsertScoring } from "../db/scorings";
 import { replaceForTask as replaceAlternatives } from "../db/alternatives";
 import { log } from "../log";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 function findRepoRoot(start: string): string | null {
   let cur = resolve(start);
@@ -773,141 +769,12 @@ function pipelineForType(type: TaskType): PipelineId | null {
 // (currently only PR-review tasks). Coexists with the legacy
 // runLifecycle below; routing happens in startRunInternal.
 
-/** Loaded role prompt + the validation spec declared in its
- *  frontmatter. `output` is null when the agent doesn't declare one
- *  (= prose-only agents, no validation, no retry). */
-interface LoadedAgentPrompt {
-  body: string;
-  output: AgentOutputSpec | null;
-}
-
-/** Read an agent .md, split frontmatter from body, and lift the
- *  `output:` field out of the frontmatter into a typed spec. */
-function loadAgentPrompt(relPath: string): LoadedAgentPrompt {
-  const path = fileURLToPath(new URL(`../../agents/builtin/${relPath}`, import.meta.url));
-  try {
-    const raw = readFileSync(path, "utf8");
-    const m = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-    if (!m) return { body: raw.trim(), output: null };
-    const [, frontmatterRaw, body] = m;
-    let output: AgentOutputSpec | null = null;
-    try {
-      const fm = parseYaml(frontmatterRaw!) as { output?: unknown };
-      output = parseOutputSpec(fm?.output);
-    } catch (err) {
-      log.warn("orchestrator.pipeline.frontmatter_parse_failed", { path, error: String(err) });
-    }
-    return { body: (body ?? "").trim(), output };
-  } catch (err) {
-    log.error("orchestrator.pipeline.prompt_read_failed", { path, error: String(err) });
-    return { body: "", output: null };
-  }
-}
-
-function parseOutputSpec(raw: unknown): AgentOutputSpec | null {
-  // Silent at load-time: a malformed spec just means the agent gets
-  // no validation. The agent editor uses validateOutputSpec directly
-  // so the user sees the structured errors before saving.
-  return validateOutputSpec(raw).spec;
-}
-
-/** Per-agent prompt bodies + output specs used by the pipeline runner.
- *  Loaded once at module init; restart the backend to pick up edits. */
-const PIPELINE_AGENTS: Record<string, LoadedAgentPrompt> = {
-  "pr-spec-intake":         loadAgentPrompt("review/pr-spec-intake.md"),
-  "solution-explorer":      loadAgentPrompt("review/solution-explorer.md"),
-  "reviewer-coder":         loadAgentPrompt("review/reviewer-coder.md"),
-  "review-security":        loadAgentPrompt("review/reviewer-security.md"),
-  "reviewer-performance":   loadAgentPrompt("review/reviewer-performance.md"),
-  "reviewer-architecture":  loadAgentPrompt("review/reviewer-architecture.md"),
-  "synthesizer":            loadAgentPrompt("review/synthesizer.md"),
-};
-
-/** Back-compat alias — string-only view of the loaded agents. The
- *  runner reads bodies through this map, output specs through
- *  PIPELINE_AGENTS directly. */
-const PIPELINE_AGENT_PROMPTS: Record<string, string> = Object.fromEntries(
-  Object.entries(PIPELINE_AGENTS).map(([slug, loaded]) => [slug, loaded.body]),
-);
-
-/** Lookup the output spec for an agent slug. Used by the generic
- *  verify endpoint to validate against the same schema the runner
- *  uses post-reply. Returns null when the agent has no spec. */
-export function getAgentOutputSpec(slug: string): AgentOutputSpec | null {
-  return PIPELINE_AGENTS[slug]?.output ?? null;
-}
-
-/** Build the user message for one (phase, agent) pair. Earlier phases'
- *  outputs are pulled from task_phase_outputs and stitched in. */
-function buildPipelinePhaseMessage(
-  task: TaskRow,
-  phase: PhaseDef,
-  agentSlug: string,
-): string {
-  const taskId = task.id;
-  const prInput = task.input_payload;
-
-  if (phase.id === "intake") return prInput;
-
-  if (phase.id === "explore") {
-    const intake = getPhaseOutput(taskId, "intake");
-    return [
-      "# Spec (from pr-spec-intake)",
-      "",
-      intake?.output_md ?? "_(intake produced no spec — fall back to the PR body below)_",
-      "",
-      "---",
-      "",
-      "# PR + diff",
-      "",
-      prInput,
-    ].join("\n");
-  }
-
-  if (phase.id === "deep-review") {
-    const intake = getPhaseOutput(taskId, "intake");
-    const explore = getPhaseOutput(taskId, "explore");
-    const focusByAgent: Record<string, string> = {
-      "review-security": "security",
-      "reviewer-performance": "performance",
-      "reviewer-architecture": "architecture",
-      "reviewer-coder": "bugs and correctness",
-    };
-    const focus = focusByAgent[agentSlug] ?? agentSlug;
-    return [
-      `# Your specialty: ${focus}`,
-      "",
-      "Read the spec, then the diff. Output findings in the YAML shape your role prompt specifies. High signal only.",
-      "",
-      "---",
-      "",
-      "# Spec (from pr-spec-intake)",
-      "",
-      intake?.output_md ?? "_(no spec captured)_",
-      "",
-      "# Solution explorer's verdict",
-      "",
-      explore?.output_md ?? "_(no explorer output)_",
-      "",
-      "---",
-      "",
-      "# PR + diff",
-      "",
-      prInput,
-    ].join("\n");
-  }
-
-  if (phase.id === "synthesis") {
-    const out = getPhaseOutput(taskId, "deep-review");
-    return [
-      "# Reviewer outputs to synthesize",
-      "",
-      out?.output_md ?? "_(no reviewer outputs captured)_",
-    ].join("\n");
-  }
-
-  return prInput;
-}
+// Prompt bodies + per-phase message-building live in ./agentPrompts.
+import {
+  PIPELINE_AGENTS,
+  PIPELINE_AGENT_PROMPTS,
+  buildPipelinePhaseMessage,
+} from "./agentPrompts";
 
 /**
  * Run one agent in one phase. Opens a fresh engine session, sends the
