@@ -20,69 +20,21 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   bitbucket: 'Bitbucket',
 };
 
-/**
- * PR-review pipeline phases (Design A). Mirrors the order in
- * `orchestrator/pipelines.ts:PR_REVIEW_GATED_PIPELINE`. Kept as its
- * own const here so the Review page is independent of the home
- * (code-task) pipeline list.
- */
-export const REVIEW_PIPELINE_STATES = [
-  'intake',
-  'explore',
-  'direction-gate',
-  'deep-review',
-  'synthesis',
-  'ready',
-] as const;
-export type ReviewPipelineState = (typeof REVIEW_PIPELINE_STATES)[number];
+// Pipeline-column logic + types lives in ./review-card so unit tests
+// can import without dragging Angular's @Component decorator + this
+// page's services. Re-export to keep existing import paths working.
+import {
+  REVIEW_PIPELINE_STATES,
+  STATE_LABELS,
+  STATE_ROLE,
+  toCard,
+  relativeTsIso as relativeTsIsoPure,
+  type ReviewCard,
+  type ReviewPipelineState,
+} from './review-card';
+export { REVIEW_PIPELINE_STATES, type ReviewPipelineState, type ReviewCard, toCard };
 
-const STATE_LABELS: Record<ReviewPipelineState, string> = {
-  intake: 'Intake',
-  explore: 'Explore',
-  'direction-gate': 'Direction',
-  'deep-review': 'Deep Review',
-  synthesis: 'Synthesis',
-  ready: 'Ready',
-};
-
-/** Engineer (human) on gates + ready; robot (agent) on the rest. */
-const STATE_ROLE: Record<ReviewPipelineState, 'human' | 'agent'> = {
-  intake: 'agent',
-  explore: 'agent',
-  'direction-gate': 'human',
-  'deep-review': 'agent',
-  synthesis: 'agent',
-  ready: 'human',
-};
-
-interface ReviewCard {
-  raw: Task;
-  state: ReviewPipelineState;
-  status: 'open' | 'closed';
-}
-
-/**
- * Map a task's raw current_state into a column on the Review page.
- * Anything that isn't one of the pipeline phases (legacy review-tasks
- * created before Phase 16) maps to 'ready' so old rows still appear
- * in the History at least, and don't visually pollute the new columns.
- */
-function toCard(t: Task): ReviewCard {
-  const closed = t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
-  const raw = (t.current_state ?? 'intake') as string;
-  let state: ReviewPipelineState = (REVIEW_PIPELINE_STATES as readonly string[]).includes(raw)
-    ? (raw as ReviewPipelineState)
-    : 'ready';
-  if (closed && state !== 'ready') state = 'ready';
-  return { raw: t, state, status: closed ? 'closed' : 'open' };
-}
-
-/** PR timestamps come as ISO strings, not ms. Convert before passing to
- *  the shared relativeTs helper. */
-function relativeTsIso(iso: string): string {
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? relativeTs(ms) : '—';
-}
+const relativeTsIso = (iso: string) => relativeTsIsoPure(iso, relativeTs);
 
 @Component({
   selector: 'app-review-page',

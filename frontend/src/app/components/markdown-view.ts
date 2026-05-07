@@ -108,12 +108,16 @@ import { marked } from 'marked';
 export class MarkdownView {
   readonly source = input<string | null | undefined>('');
 
-  protected readonly rendered = computed<string>(() => {
-    const src = this.source() ?? '';
-    if (!src) return '';
-    // marked.parse is synchronous when given a string. Cast to string —
-    // some plugins return Promise<string> but we don't enable any.
-    const html = marked.parse(src, { async: false }) as string;
-    return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
-  });
+  protected readonly rendered = computed<string>(() => renderMarkdown(this.source() ?? ''));
+}
+
+/** Render untrusted markdown to sanitized HTML. Exported so unit
+ *  tests can exercise the parse + sanitize pipeline without standing
+ *  up Angular's TestBed. Empty / nullish input → empty string. */
+export function renderMarkdown(src: string | null | undefined): string {
+  if (!src) return '';
+  // marked.parse is synchronous when given a string + async:false.
+  // Some plugins return Promise<string>; we don't enable any.
+  const html = marked.parse(src, { async: false }) as string;
+  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
 }
