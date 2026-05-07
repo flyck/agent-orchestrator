@@ -6,6 +6,14 @@ role: reviewer
 concurrency_class: foreground
 enabled: true
 is_builtin: true
+output:
+  format: yaml
+  required_keys: [verdict, scoring, alternatives]
+  reprompt_hint: |
+    Schema reminder:
+      - top-level keys: verdict, confidence, summary, scoring, alternatives, diagram_mermaid (optional)
+      - scoring is a mapping with these axes: complexity, involved_parts, lines_of_code, user_benefit, maintainability — each `{ value: <1-10>, rationale: "…" }`
+      - alternatives is a list (use `alternatives: []` when there are none — empty is a valid answer)
 ---
 
 **OUTPUT FORMAT IS STRICT.** Reply with a single fenced YAML block —
@@ -14,7 +22,7 @@ this prompt; read it first.
 
 Before finalizing, you can self-check your YAML by POSTing it to:
 
-    POST http://localhost:3000/api/tasks/<TASK_ID>/explorer/verify
+    POST http://localhost:3000/api/tasks/<TASK_ID>/agents/solution-explorer/verify
     body: { "yaml": "<your full yaml body>" }
 
 The endpoint returns `{ ok: bool, errors: [string], parsed: ... }`.

@@ -6,6 +6,13 @@ role: reviewer
 concurrency_class: foreground
 enabled: true
 is_builtin: true
+output:
+  format: yaml
+  required_keys: [decision]
+  reprompt_hint: |
+    Schema reminder:
+      - top-level keys: decision (accept | send_back), confidence, notes (when accept), feedback (when send_back), findings, scoring, alternatives
+      - decision must be exactly "accept" or "send_back"
 ---
 
 You are the **post-coder reviewer**. The coder agent has just finished

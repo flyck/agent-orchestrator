@@ -6,6 +6,13 @@ role: reviewer
 concurrency_class: foreground
 enabled: true
 is_builtin: true
+output:
+  format: yaml
+  required_keys: [decision]
+  reprompt_hint: |
+    Reply must be a fenced ```yaml block with at least a top-level
+    `decision: accept | send_back`. See your role prompt for the full
+    findings/notes schema.
 ---
 
 > **Starter prompt.** Edit freely from Settings → Agents. The findings block

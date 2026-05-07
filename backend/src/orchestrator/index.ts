@@ -51,6 +51,12 @@ import {
   type PipelineDef,
 } from "./pipelines";
 import { resumeFrom } from "./resume";
+import {
+  buildReprompt as buildAgentReprompt,
+  validateAgentOutput,
+  type AgentOutputSpec,
+} from "./agentValidation";
+import { parse as parseYaml } from "yaml";
 import { getPhaseOutput, recordPhaseOutput } from "../db/phaseOutputs";
 import {
   buildReviewerMessage,
@@ -767,42 +773,52 @@ function pipelineForType(type: TaskType): PipelineId | null {
 // (currently only PR-review tasks). Coexists with the legacy
 // runLifecycle below; routing happens in startRunInternal.
 
-/** Strip frontmatter and load an agent's role prompt. Same shape as
- *  loadReviewerPrompt / loadPlannerPrompt; duplicated to avoid an
- *  import cycle. */
-function loadAgentPrompt(relPath: string): string {
+/** Loaded role prompt + the validation spec declared in its
+ *  frontmatter. `output` is null when the agent doesn't declare one
+ *  (= prose-only agents, no validation, no retry). */
+interface LoadedAgentPrompt {
+  body: string;
+  output: AgentOutputSpec | null;
+}
+
+/** Read an agent .md, split frontmatter from body, and lift the
+ *  `output:` field out of the frontmatter into a typed spec. */
+function loadAgentPrompt(relPath: string): LoadedAgentPrompt {
   const path = fileURLToPath(new URL(`../../agents/builtin/${relPath}`, import.meta.url));
   try {
     const raw = readFileSync(path, "utf8");
-    const m = raw.match(/^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/);
-    return (m?.[1] ?? raw).trim();
+    const m = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+    if (!m) return { body: raw.trim(), output: null };
+    const [, frontmatterRaw, body] = m;
+    let output: AgentOutputSpec | null = null;
+    try {
+      const fm = parseYaml(frontmatterRaw!) as { output?: unknown };
+      output = parseOutputSpec(fm?.output);
+    } catch (err) {
+      log.warn("orchestrator.pipeline.frontmatter_parse_failed", { path, error: String(err) });
+    }
+    return { body: (body ?? "").trim(), output };
   } catch (err) {
     log.error("orchestrator.pipeline.prompt_read_failed", { path, error: String(err) });
-    return "";
+    return { body: "", output: null };
   }
 }
 
-/** Sent in the same session when the explorer's first reply isn't
- *  parseable YAML. Short and direct — the agent already has the full
- *  role prompt; this is just a course-correction nudge. */
-const EXPLORER_REPROMPT = [
-  "Your last reply was not a valid fenced YAML block in the shape this role requires.",
-  "",
-  "Re-emit your analysis now as a single ```yaml ... ``` block following the schema in your role prompt.",
-  "",
-  "Hard requirements:",
-  "- The reply must contain ONE fenced ```yaml block. Nothing before it, nothing after it.",
-  "- Top-level keys: `verdict`, `confidence`, `summary`, `scoring`, `alternatives` (use `alternatives: []` when none).",
-  "- `scoring` must include all five axes: complexity, involved_parts, lines_of_code, user_benefit, maintainability — each `{ value: <1-10>, rationale: \"…\" }`.",
-  "",
-  "Tip: before sending, you can verify your YAML with:",
-  "  curl -sS -X POST http://localhost:3000/api/tasks/{{TASK_ID}}/explorer/verify -H 'content-type: application/json' -d '{\"yaml\": \"<your yaml body here, escaped>\"}'",
-  "It returns { ok: bool, errors: [...] } so you can fix mistakes before finalizing.",
-].join("\n");
+function parseOutputSpec(raw: unknown): AgentOutputSpec | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const fmt = o["format"];
+  if (fmt !== "yaml" && fmt !== "text") return null;
+  const required_keys = Array.isArray(o["required_keys"])
+    ? (o["required_keys"] as unknown[]).filter((k): k is string => typeof k === "string")
+    : undefined;
+  const reprompt_hint = typeof o["reprompt_hint"] === "string" ? (o["reprompt_hint"] as string) : undefined;
+  return { format: fmt, required_keys, reprompt_hint };
+}
 
-/** Per-agent prompt bodies used by the pipeline runner. Loaded once at
- *  module init; restart the backend to pick up edits. */
-const PIPELINE_AGENT_PROMPTS: Record<string, string> = {
+/** Per-agent prompt bodies + output specs used by the pipeline runner.
+ *  Loaded once at module init; restart the backend to pick up edits. */
+const PIPELINE_AGENTS: Record<string, LoadedAgentPrompt> = {
   "pr-spec-intake":         loadAgentPrompt("review/pr-spec-intake.md"),
   "solution-explorer":      loadAgentPrompt("review/solution-explorer.md"),
   "reviewer-coder":         loadAgentPrompt("review/reviewer-coder.md"),
@@ -811,6 +827,20 @@ const PIPELINE_AGENT_PROMPTS: Record<string, string> = {
   "reviewer-architecture":  loadAgentPrompt("review/reviewer-architecture.md"),
   "synthesizer":            loadAgentPrompt("review/synthesizer.md"),
 };
+
+/** Back-compat alias — string-only view of the loaded agents. The
+ *  runner reads bodies through this map, output specs through
+ *  PIPELINE_AGENTS directly. */
+const PIPELINE_AGENT_PROMPTS: Record<string, string> = Object.fromEntries(
+  Object.entries(PIPELINE_AGENTS).map(([slug, loaded]) => [slug, loaded.body]),
+);
+
+/** Lookup the output spec for an agent slug. Used by the generic
+ *  verify endpoint to validate against the same schema the runner
+ *  uses post-reply. Returns null when the agent has no spec. */
+export function getAgentOutputSpec(slug: string): AgentOutputSpec | null {
+  return PIPELINE_AGENTS[slug]?.output ?? null;
+}
 
 /** Build the user message for one (phase, agent) pair. Earlier phases'
  *  outputs are pulled from task_phase_outputs and stitched in. */
@@ -951,30 +981,33 @@ async function runPipelineAgent(
 
   let r = await pumpUntilTerminal(a);
 
-  // Solution-explorer YAML re-prompt. If the reply doesn't parse as
-  // the expected fenced YAML, send a follow-up in the same session
-  // asking for a clean re-emission. Cap retries so a stubborn agent
-  // can't loop forever — after the cap, we accept the malformed reply
-  // and move on (the explorer post-step logs the parse failure).
-  if (
-    agentSlug === "solution-explorer" &&
-    phase.id === "explore" &&
-    r.terminal !== "error"
-  ) {
+  // Generic output-validation re-prompt. Any agent whose .md
+  // frontmatter declares `output: { format: yaml, required_keys: […] }`
+  // gets one or two retries when the reply doesn't validate. Agents
+  // without an output spec (or with `format: text`) skip the loop.
+  const outputSpec = PIPELINE_AGENTS[agentSlug]?.output ?? null;
+  if (outputSpec && outputSpec.format === "yaml" && r.terminal !== "error") {
     const MAX_REPROMPTS = 2;
     for (let attempt = 0; attempt < MAX_REPROMPTS; attempt++) {
       const reply = (r.assistantText ?? "").trim();
-      if (parseExplorerOutput(reply)) break;
-      log.warn("orchestrator.pipeline.explorer_reprompt", {
+      const v = validateAgentOutput(reply, outputSpec);
+      if (v.ok) break;
+      log.warn("orchestrator.pipeline.agent_reprompt", {
         taskId,
+        agentSlug,
         attempt: attempt + 1,
+        errors: v.errors,
         replyHead: reply.slice(0, 200),
       });
+      const reprompt = buildAgentReprompt(outputSpec, v.errors)
+        .replaceAll("{{TASK_ID}}", taskId)
+        .replaceAll("{{AGENT_SLUG}}", agentSlug);
       try {
-        await session.send(EXPLORER_REPROMPT.replaceAll("{{TASK_ID}}", taskId), { system });
+        await session.send(reprompt, { system });
       } catch (err) {
-        log.warn("orchestrator.pipeline.explorer_reprompt_send_failed", {
+        log.warn("orchestrator.pipeline.agent_reprompt_send_failed", {
           taskId,
+          agentSlug,
           error: String(err),
         });
         break;

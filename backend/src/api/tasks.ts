@@ -26,6 +26,8 @@ import {
 } from "../db/tasks";
 import { getPipeline } from "../orchestrator/pipelines";
 import { parseExplorerOutput } from "../orchestrator/explorer";
+import { validateAgentOutput } from "../orchestrator/agentValidation";
+import { getAgentOutputSpec } from "../orchestrator/index";
 import { ActivityActor, ActivityKind, recordActivity } from "../db/activities";
 import { listSpecRevisions } from "../db/specRevisions";
 import { listScoring, listScoringSummary, upsertScoring } from "../db/scorings";
@@ -725,53 +727,51 @@ tasks.post("/:id/cancel", async (c) => {
 });
 
 /**
- * YAML self-check for the solution-explorer. The agent posts what it's
- * about to emit; we run it through the same parser the orchestrator
- * uses post-reply and report what came out. The agent can call this as
- * many times as it wants before finishing — strictly cheaper than
- * sending a malformed final answer that triggers a re-prompt round-
- * trip.
+ * Generic YAML self-check for any agent that declares an `output:`
+ * spec in its prompt frontmatter. The agent posts what it's about to
+ * emit; we run the same validator the runner runs after pumping and
+ * return a structured error list so the agent can fix-and-retry
+ * before finalizing.
  *
  * Body: { yaml: string } — the full YAML body, with or without the
  *   ```yaml fence wrapper.
- * Returns: { ok: bool, parsed: { ... } | null, errors: string[] } —
- *   ok is true when scoring is present and alternatives is an array
- *   (even if empty); the parsed shape mirrors what would land in the
- *   DB.
+ * Returns: { ok, parsed, errors } — ok=true when the body parses
+ *   and carries every required_keys entry per the agent's spec.
+ *
+ * Agents without an output spec (`format: text` or no frontmatter
+ * block) get a 400 — there's no schema to validate against.
  */
-const explorerVerifySchema = z.object({
+const agentVerifySchema = z.object({
   yaml: z.string().min(1).max(40_000),
 });
-tasks.post("/:id/explorer/verify", async (c) => {
+tasks.post("/:id/agents/:slug/verify", async (c) => {
+  const slug = c.req.param("slug");
+  const spec = getAgentOutputSpec(slug);
+  if (!spec) {
+    return c.json(
+      {
+        error: "no_output_spec",
+        message: `Agent '${slug}' has no output: spec in its frontmatter — nothing to verify against.`,
+      },
+      400,
+    );
+  }
+  if (spec.format !== "yaml") {
+    return c.json(
+      {
+        error: "unsupported_format",
+        message: `Agent '${slug}' declares format='${spec.format}'; verify is YAML-only.`,
+      },
+      400,
+    );
+  }
   const body = await c.req.json().catch(() => null);
-  const parsed = explorerVerifySchema.safeParse(body);
+  const parsed = agentVerifySchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
   }
-  const out = parseExplorerOutput(parsed.data.yaml);
-  const errors: string[] = [];
-  if (!out) {
-    errors.push("yaml_unparseable: the body could not be parsed as YAML or contained no recognizable scoring/alternatives object.");
-  } else {
-    if (!out.scoring) {
-      errors.push("scoring_missing: top-level `scoring:` block with the five-axis radar (complexity, involved_parts, lines_of_code, user_benefit, maintainability) is required.");
-    } else {
-      const required = ["complexity", "involved_parts", "lines_of_code", "user_benefit", "maintainability"];
-      const missing = required.filter((k) => !(k in out.scoring!.scores));
-      if (missing.length > 0) {
-        errors.push(`scoring_axis_missing: ${missing.join(", ")}`);
-      }
-    }
-    if (out.alternatives === undefined) {
-      errors.push("alternatives_missing: top-level `alternatives:` field is required (use [] when there are none — empty is a valid answer).");
-    }
-  }
-  const ok = errors.length === 0 && out !== null;
-  return c.json({
-    ok,
-    parsed: out,
-    errors,
-  });
+  const v = validateAgentOutput(parsed.data.yaml, spec);
+  return c.json({ ok: v.ok, parsed: v.parsed, errors: v.errors });
 });
 
 /**
