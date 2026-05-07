@@ -33,6 +33,7 @@ jobs:
         run: bunx tsc --noEmit
       - name: Test
         run: bun test
+        # ↑ backend uses bun's built-in test runner.
 
   frontend:
     name: Frontend — typecheck + vitest
@@ -50,4 +51,6 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit -p tsconfig.json
       - name: Test
-        run: bun run test:unit
+        # ↑ frontend uses vitest (jsdom). bun's runner doesn't read
+        # vitest.config.ts so we go through bun run → vitest.
+        run: bun run test
