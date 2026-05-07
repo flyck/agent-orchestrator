@@ -464,6 +464,14 @@
           @if (scoringVisible()) {
             <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
           }
+          @if (t.explorer_architecture_mermaid) {
+            <div class="alt-diagram">
+              <p class="meta">implementation architecture</p>
+              <app-mermaid-diagram
+                [source]="t.explorer_architecture_mermaid"
+                [darkMode]="darkMode()" />
+            </div>
+          }
         } @else {
           @let alt = alternatives()[altTabIndex()];
           @if (alt) {
