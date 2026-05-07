@@ -11,6 +11,8 @@
  * field.
  */
 
+import { log } from "../log";
+
 const BB_BASE = "https://api.bitbucket.org";
 
 export class BitbucketError extends Error {
@@ -336,7 +338,9 @@ export async function listPullRequests(
       ? `state="OPEN" AND reviewers.uuid="${myUuid}"`
       : null;
 
-  const perRepo = await mapWithConcurrency(repos, 6, async (full) => {
+  let rateLimited = false;
+  const perRepo = await mapWithConcurrency(repos, 4, async (full) => {
+    if (rateLimited) return [] as BitbucketPull[]; // short-circuit further fan-out
     let workspace: string;
     let slug: string;
     try {
@@ -357,16 +361,19 @@ export async function listPullRequests(
       );
       const out: BitbucketPull[] = [];
       for (const pr of data.values ?? []) {
-        // Server already pre-filtered, but recompute awaiting_me so the
-        // approved/changes_requested cases are surfaced in the UI even
-        // when the q-filter let them through.
         const awaiting = isAwaitingMe(pr, myUuid);
         if (filter === BitbucketPullFilter.AwaitingMe && !awaiting) continue;
         out.push(toBitbucketPull(full, pr, awaiting));
       }
       return out;
     } catch (err) {
-      console.warn("[bitbucket] list pulls failed", full, err);
+      const status = err instanceof BitbucketError ? err.status : 0;
+      if (status === 429) {
+        rateLimited = true;
+        log.warn("bitbucket.list_pulls.rate_limited", { repo: full });
+      } else {
+        log.warn("bitbucket.list_pulls.failed", { repo: full, status });
+      }
       return [] as BitbucketPull[];
     }
   });
