@@ -312,31 +312,46 @@
       </section>
     }
 
-    <!-- ═══ Direction tab ════════════════════════════════════════════
-         Visible only when the task is paused at the direction gate.
-         The user picks one of three actions; we route to /gate/approve
-         or /continue depending on the choice. The Explorer tab above
-         carries the actual evidence (summary / alternatives / scoring
-         / diagram) — this tab is purely the decision surface. -->
+    <!-- Direction tab — visible only when paused at the gate. Surfaces
+         the explorer's evidence (radar, alternatives, diagrams) inline
+         so the user can decide without tab-hopping. -->
     @if (detailTab() === 'direction') {
       <section class="direction-section">
         <header class="direction-head">
           <h3>Direction decision</h3>
           <span class="meta">paused at <code>direction-gate</code></span>
         </header>
-        <p class="muted small">
-          Read the <strong>Explorer</strong> tab above for the implementation
-          summary, alternative options, scoring, and the architecture diagram.
-          Then pick one of the actions below. Sending back re-runs the explorer
-          with your feedback; accepting moves the pipeline to the deep-review
-          phase.
-        </p>
 
-        @if (alternatives().length === 0) {
+        @if (scoringVisible()) {
+          <section class="direction-evidence">
+            <h4>Implementation — explorer's radar</h4>
+            <app-scoring-radar [scoring]="scoring()" [darkMode]="darkMode()" />
+          </section>
+        }
+
+        @if (alternatives().length > 0) {
+          <section class="direction-evidence">
+            <h4>Alternatives the explorer surfaced</h4>
+            <ul class="alt-list">
+              @for (alt of alternatives(); track alt.id) {
+                <li class="alt-item" [attr.data-verdict]="alt.verdict">
+                  <header class="alt-item-head">
+                    <span class="alt-item-label">{{ alt.label }}</span>
+                    <span class="verdict-pill" [attr.data-verdict]="alt.verdict">
+                      {{ alt.verdict }}
+                    </span>
+                  </header>
+                  <p class="alt-item-desc">{{ alt.description }}</p>
+                </li>
+              }
+            </ul>
+          </section>
+        } @else {
           <p class="muted small">
-            <em>No alternatives were proposed by the explorer for this task —
-            the only meaningful choices are accept the implementation as-is
-            or send back with feedback.</em>
+            <em>The explorer didn't surface any alternatives — meaning either
+            the implementation is the obvious shape, or the explorer judged the
+            design space too narrow. Open the <strong>Explorer</strong> tab to
+            read its full reasoning.</em>
           </p>
         }
 

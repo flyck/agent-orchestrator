@@ -519,6 +519,29 @@ function extractMermaid(text: string): string | null {
         margin-bottom: 10px;
       }
       .direction-head h3 { margin: 0; font-family: var(--font-serif); font-size: 16px; }
+      .direction-evidence {
+        margin: 14px 0;
+        padding: 12px 14px;
+        border: 1px solid var(--rule);
+        background: var(--paper-soft);
+      }
+      .direction-evidence h4 {
+        margin: 0 0 8px;
+        font-family: var(--font-serif);
+        font-size: 14px;
+      }
+      .alt-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+      .alt-item {
+        border-left: 3px solid var(--rule-strong);
+        background: var(--paper);
+        padding: 8px 12px;
+      }
+      .alt-item[data-verdict='better'] { border-left-color: #4F7048; }
+      .alt-item[data-verdict='worse']  { border-left-color: var(--ink-red); }
+      .alt-item[data-verdict='equal']  { border-left-color: var(--ink-muted); }
+      .alt-item-head { display: flex; align-items: baseline; gap: 10px; }
+      .alt-item-label { font-family: var(--font-serif); font-size: 14px; flex: 1; }
+      .alt-item-desc { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
       .direction-row { margin: 12px 0; }
       .direction-label {
         display: flex;
