@@ -249,7 +249,8 @@
               <div class="agent-editor">
                 @if (agentEditorLoading()) {
                   <p class="muted small">loading source…</p>
-                } @else if (agentEditorError()) {
+                } @else if (agentEditorError() && !agentDraftBody() && !agentDraftFrontmatter()) {
+                  <!-- Couldn't load the source — nothing to edit. -->
                   <p class="error small">{{ agentEditorError() }}</p>
                 } @else {
                   <div class="agent-editor-split">
@@ -283,6 +284,15 @@
                       </span>
                     }
                   </div>
+                  @if (agentEditorIssues().length > 0) {
+                    <ul class="agent-editor-issues">
+                      @for (msg of agentEditorIssues(); track msg) {
+                        <li class="error mono">{{ msg }}</li>
+                      }
+                    </ul>
+                  } @else if (agentEditorError() && !agentEditorIssues().length) {
+                    <p class="error small">{{ agentEditorError() }}</p>
+                  }
                 }
               </div>
             }

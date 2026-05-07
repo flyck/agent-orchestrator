@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { listAgents, getAgentById } from "../db/agents";
+import { validateOutputSpec } from "../orchestrator/agentValidation";
 import { log } from "../log";
 
 export const agents = new Hono();
@@ -61,6 +63,45 @@ agents.put("/:id/source", async (c) => {
   }
   const fm = parsed.data.frontmatter.trim();
   const md = parsed.data.body.replace(/^\s+/, "");
+
+  // Pre-save validation. The pipeline runner caches prompts at module
+  // init, so a malformed frontmatter that "successfully" wrote would
+  // only surface as silent no-validation behavior on next restart.
+  // Catch it here:
+  //   1. Frontmatter must be parseable YAML.
+  //   2. If `output:` is present, validateOutputSpec must accept it.
+  if (fm) {
+    let parsedFm: unknown;
+    try {
+      parsedFm = parseYaml(fm);
+    } catch (err) {
+      return c.json(
+        {
+          error: "frontmatter_yaml_invalid",
+          message: `Frontmatter is not valid YAML: ${err instanceof Error ? err.message : String(err)}`,
+        },
+        400,
+      );
+    }
+    if (parsedFm && typeof parsedFm === "object" && !Array.isArray(parsedFm)) {
+      const fmObj = parsedFm as Record<string, unknown>;
+      if (fmObj["output"] !== undefined) {
+        const v = validateOutputSpec(fmObj["output"]);
+        if (v.errors.length > 0) {
+          return c.json(
+            {
+              error: "output_spec_invalid",
+              message:
+                "Frontmatter `output:` block has issues — fix and resubmit.",
+              issues: v.errors,
+            },
+            400,
+          );
+        }
+      }
+    }
+  }
+
   const recomposed = fm ? `---\n${fm}\n---\n\n${md}` : md;
   try {
     writeFileSync(row.file_path, recomposed, "utf8");

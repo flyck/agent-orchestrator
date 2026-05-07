@@ -53,6 +53,7 @@ import { resumeFrom } from "./resume";
 import {
   buildReprompt as buildAgentReprompt,
   validateAgentOutput,
+  validateOutputSpec,
   type AgentOutputSpec,
 } from "./agentValidation";
 import { persistAgentReply } from "./persist";
@@ -804,15 +805,10 @@ function loadAgentPrompt(relPath: string): LoadedAgentPrompt {
 }
 
 function parseOutputSpec(raw: unknown): AgentOutputSpec | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const fmt = o["format"];
-  if (fmt !== "yaml" && fmt !== "text") return null;
-  const required_keys = Array.isArray(o["required_keys"])
-    ? (o["required_keys"] as unknown[]).filter((k): k is string => typeof k === "string")
-    : undefined;
-  const reprompt_hint = typeof o["reprompt_hint"] === "string" ? (o["reprompt_hint"] as string) : undefined;
-  return { format: fmt, required_keys, reprompt_hint };
+  // Silent at load-time: a malformed spec just means the agent gets
+  // no validation. The agent editor uses validateOutputSpec directly
+  // so the user sees the structured errors before saving.
+  return validateOutputSpec(raw).spec;
 }
 
 /** Per-agent prompt bodies + output specs used by the pipeline runner.

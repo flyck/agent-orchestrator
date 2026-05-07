@@ -195,6 +195,80 @@ function checkMermaid(src: string): string | null {
 }
 
 /**
+ * Validate-and-narrow a raw frontmatter `output:` value into a typed
+ * AgentOutputSpec, returning structured errors when it's malformed.
+ * Used both at agent-load time (silently — a bad spec means no
+ * validation runs) and at save-time in the agent editor (errors
+ * surfaced to the user before the file is written).
+ *
+ * Returns:
+ *   - `{ spec: AgentOutputSpec, errors: [] }` on success
+ *   - `{ spec: null, errors: [string] }` when the shape is wrong
+ *   - `{ spec: null, errors: [] }` when the field is absent (no spec
+ *     declared = no validation, distinct from malformed)
+ */
+export function validateOutputSpec(
+  raw: unknown,
+): { spec: AgentOutputSpec | null; errors: string[] } {
+  if (raw === undefined || raw === null) return { spec: null, errors: [] };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { spec: null, errors: ["output_not_object: `output:` must be a mapping (key: value), not a list or scalar."] };
+  }
+  const o = raw as Record<string, unknown>;
+  const errors: string[] = [];
+
+  const fmt = o["format"];
+  if (fmt !== "yaml" && fmt !== "text") {
+    errors.push("format_invalid: `output.format` must be 'yaml' or 'text'.");
+  }
+
+  let required_keys: string[] | undefined;
+  if (o["required_keys"] !== undefined) {
+    if (!Array.isArray(o["required_keys"])) {
+      errors.push("required_keys_not_array: `output.required_keys` must be a list of strings.");
+    } else {
+      const arr = o["required_keys"] as unknown[];
+      const bad = arr.filter((k) => typeof k !== "string");
+      if (bad.length > 0) {
+        errors.push(`required_keys_non_string: every entry in required_keys must be a string (${bad.length} non-string entries).`);
+      }
+      required_keys = arr.filter((k): k is string => typeof k === "string");
+    }
+  }
+
+  let mermaid_keys: string[] | undefined;
+  if (o["mermaid_keys"] !== undefined) {
+    if (!Array.isArray(o["mermaid_keys"])) {
+      errors.push("mermaid_keys_not_array: `output.mermaid_keys` must be a list of path strings (e.g. 'diagram_mermaid' or 'alternatives[].diagram_mermaid').");
+    } else {
+      const arr = o["mermaid_keys"] as unknown[];
+      const bad = arr.filter((k) => typeof k !== "string");
+      if (bad.length > 0) {
+        errors.push("mermaid_keys_non_string: every entry in mermaid_keys must be a string path.");
+      }
+      mermaid_keys = arr.filter((k): k is string => typeof k === "string");
+      // Validate path syntax: `key` or `key[].subkey`.
+      const badPaths = mermaid_keys.filter((p) => !/^[A-Za-z_][\w-]*(\[\])?(\.[A-Za-z_][\w-]*)?$/.test(p));
+      if (badPaths.length > 0) {
+        errors.push(`mermaid_keys_bad_path: ${badPaths.join(", ")} — paths must match \`key\` or \`key[].subkey\`.`);
+      }
+    }
+  }
+
+  const reprompt_hint = typeof o["reprompt_hint"] === "string" ? (o["reprompt_hint"] as string) : undefined;
+  if (o["reprompt_hint"] !== undefined && typeof o["reprompt_hint"] !== "string") {
+    errors.push("reprompt_hint_not_string: `output.reprompt_hint` must be a string.");
+  }
+
+  if (errors.length > 0) return { spec: null, errors };
+  if (fmt !== "yaml" && fmt !== "text") return { spec: null, errors };
+  return {
+    spec: { format: fmt, required_keys, mermaid_keys, reprompt_hint },
+    errors: [],
+  };
+}
+
+/**
  * Build the generic reprompt body. Composed of:
  *   - a fixed "your last reply didn't validate" header,
  *   - the structured error list (so the agent sees exactly what failed),

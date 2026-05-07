@@ -87,6 +87,10 @@ export class SettingsPage {
   protected readonly agentDraftBody = signal<string>('');
   protected readonly agentEditorLoading = signal<boolean>(false);
   protected readonly agentEditorError = signal<string | null>(null);
+  /** Structured validator errors from the backend's pre-save check —
+   *  shown as a bullet list so the user sees exactly which keys are
+   *  malformed in the frontmatter. */
+  protected readonly agentEditorIssues = signal<string[]>([]);
   protected readonly agentEditorSaving = signal<boolean>(false);
   protected readonly agentEditorSavedAt = signal<number | null>(null);
 
@@ -99,6 +103,7 @@ export class SettingsPage {
     this.agentDraftFrontmatter.set('');
     this.agentDraftBody.set('');
     this.agentEditorError.set(null);
+    this.agentEditorIssues.set([]);
     this.agentEditorSavedAt.set(null);
     this.agentEditorLoading.set(true);
     this.agentsApi.getSource(id).subscribe({
@@ -118,6 +123,7 @@ export class SettingsPage {
     if (this.agentEditorSaving()) return;
     this.agentEditorSaving.set(true);
     this.agentEditorError.set(null);
+    this.agentEditorIssues.set([]);
     this.agentsApi
       .saveSource(id, {
         frontmatter: this.agentDraftFrontmatter(),
@@ -131,6 +137,10 @@ export class SettingsPage {
         error: (e) => {
           this.agentEditorSaving.set(false);
           this.agentEditorError.set(e?.error?.message ?? e?.message ?? String(e));
+          const issues = e?.error?.issues;
+          if (Array.isArray(issues)) {
+            this.agentEditorIssues.set(issues.filter((s) => typeof s === 'string'));
+          }
         },
       });
   }

@@ -207,3 +207,14 @@ input[disabled] {
 }
 .agent-editor-actions .small { font-size: 12px; }
 .agent-editor .error { color: var(--ink-red); }
+.agent-editor-issues {
+  margin: 10px 0 0;
+  padding: 8px 12px 8px 28px;
+  background: var(--ink-amber-bg);
+  border: 1px solid var(--ink-amber);
+  border-radius: 2px;
+  font-size: 12px;
+  list-style: disc;
+  color: var(--ink);
+  li { margin: 2px 0; }
+}
