@@ -28,6 +28,14 @@ export interface AgentOutputSpec {
   format: "yaml" | "text";
   required_keys?: string[];
   reprompt_hint?: string;
+  /** Paths into the parsed YAML object whose string values should be
+   *  validated as Mermaid. Two path forms supported:
+   *    - `key`             — top-level scalar string at obj.key
+   *    - `key[].subkey`    — list at obj.key, validate subkey on each
+   *  Failures append `mermaid_invalid: <path>: <reason>` to errors.
+   *  Keys that are missing from the parsed object are skipped (use
+   *  `required_keys` to make them required). */
+  mermaid_keys?: string[];
 }
 
 export interface ValidationResult {
@@ -92,12 +100,98 @@ export function validateAgentOutput(
   }
 
   const errors: string[] = [];
+  const obj = parsed as Record<string, unknown>;
   for (const key of spec.required_keys ?? []) {
-    if (!(key in (parsed as Record<string, unknown>))) {
+    if (!(key in obj)) {
       errors.push(`required_key_missing: ${key}`);
     }
   }
+  for (const path of spec.mermaid_keys ?? []) {
+    for (const { fullPath, source } of resolveMermaidPaths(obj, path)) {
+      const issue = checkMermaid(source);
+      if (issue) {
+        errors.push(`mermaid_invalid: ${fullPath}: ${issue}`);
+      }
+    }
+  }
   return { ok: errors.length === 0, errors, parsed };
+}
+
+/** Walk a `key` or `key[].subkey` path, returning every string value
+ *  found. Missing keys + non-string values are silently skipped — the
+ *  intent is "validate every mermaid string we find," not "require
+ *  these paths to exist" (use required_keys for required-ness). */
+function resolveMermaidPaths(
+  obj: Record<string, unknown>,
+  path: string,
+): Array<{ fullPath: string; source: string }> {
+  const out: Array<{ fullPath: string; source: string }> = [];
+  const m = path.match(/^([^\[\]]+)(\[\])?(?:\.(.+))?$/);
+  if (!m) return out;
+  const [, head, isArray, tail] = m;
+  const node = obj[head!];
+  if (node === undefined || node === null) return out;
+  if (isArray) {
+    if (!Array.isArray(node)) return out;
+    node.forEach((item, i) => {
+      if (!item || typeof item !== "object") return;
+      const sub = (item as Record<string, unknown>)[tail!];
+      if (typeof sub === "string") {
+        out.push({ fullPath: `${head}[${i}].${tail}`, source: sub });
+      }
+    });
+    return out;
+  }
+  if (typeof node === "string") out.push({ fullPath: head!, source: node });
+  return out;
+}
+
+/** Heuristic Mermaid syntax check. The full mermaid parser is
+ *  browser-coupled; the standalone @mermaid-js/parser doesn't ship
+ *  flowchart yet. So we look for the most common mistakes the explorer
+ *  agent actually makes:
+ *    - missing diagram-type header
+ *    - node labels containing `:`, `(`, `)`, `{`, or `}` without
+ *      double-quote wrapping (these break the lexer when bare)
+ *    - obviously truncated input (unbalanced quotes / brackets)
+ *  Returns null when nothing obvious is wrong, or a short error reason
+ *  when one trip-wire fires. */
+const MERMAID_HEADERS = [
+  "flowchart", "graph", "sequenceDiagram", "classDiagram",
+  "stateDiagram", "erDiagram", "journey", "gantt", "pie",
+  "mindmap", "timeline", "quadrantChart", "C4Context",
+  "C4Container", "C4Component",
+];
+function checkMermaid(src: string): string | null {
+  const trimmed = src.trim();
+  if (!trimmed) return "empty";
+  const firstLine = trimmed.split(/\r?\n/, 1)[0]!.trim();
+  if (!MERMAID_HEADERS.some((h) => firstLine.startsWith(h))) {
+    return `missing_header: first line "${firstLine.slice(0, 40)}" doesn't start with a known diagram type (e.g. flowchart, sequenceDiagram)`;
+  }
+  // Unquoted node labels with risky chars. Match patterns like:
+  //   NodeId[label with : or ( or )]
+  //   NodeId(label …)
+  // Skip when the label is wrapped in double quotes.
+  const labelPattern = /\b([A-Za-z_][\w-]*)\s*[\[\(\{]([^\]\)\}\n"]*[:()\{\},][^\]\)\}\n"]*)[\]\)\}]/g;
+  const offending: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = labelPattern.exec(trimmed)) !== null) {
+    const inner = m[2]!.trim();
+    if (inner.startsWith('"') && inner.endsWith('"')) continue;
+    offending.push(`${m[1]}[${inner.slice(0, 40)}]`);
+    if (offending.length >= 3) break;
+  }
+  if (offending.length > 0) {
+    return `unquoted_label_chars: ${offending.join(", ")} — wrap node labels containing : ( ) { } , in double quotes`;
+  }
+  // Balanced quotes/brackets — counts only, doesn't track nesting.
+  const dq = (trimmed.match(/"/g) ?? []).length;
+  if (dq % 2 !== 0) return "unbalanced_quotes: odd number of double-quote characters";
+  const open = (trimmed.match(/[\[\(\{]/g) ?? []).length;
+  const close = (trimmed.match(/[\]\)\}]/g) ?? []).length;
+  if (open !== close) return `unbalanced_brackets: ${open} opening vs ${close} closing`;
+  return null;
 }
 
 /**

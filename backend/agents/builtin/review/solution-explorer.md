@@ -9,11 +9,13 @@ is_builtin: true
 output:
   format: yaml
   required_keys: [verdict, scoring, alternatives]
+  mermaid_keys: [diagram_mermaid, "alternatives[].diagram_mermaid"]
   reprompt_hint: |
     Schema reminder:
       - top-level keys: verdict, confidence, summary, scoring, alternatives, diagram_mermaid (optional)
       - scoring is a mapping with these axes: complexity, involved_parts, lines_of_code, user_benefit, maintainability — each `{ value: <1-10>, rationale: "…" }`
       - alternatives is a list (use `alternatives: []` when there are none — empty is a valid answer)
+      - any diagram_mermaid value must start with a diagram-type header (e.g. `flowchart LR`); wrap node labels containing `:` `(` `)` `{` `}` `,` in double quotes (`Node["label"]`).
 ---
 
 **OUTPUT FORMAT IS STRICT.** Reply with a single fenced YAML block —
