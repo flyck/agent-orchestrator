@@ -61,7 +61,7 @@ const REVIEWER_PROMPT = loadReviewerPrompt();
  * gracefully if git fails — the reviewer still gets the spec and can
  * ask for files via its bash tool.
  */
-function captureDiff(worktreePath: string, baseRef: string): string {
+export function captureDiff(worktreePath: string, baseRef: string): string {
   const sections: string[] = [];
 
   // 1. Committed delta against the base ref (in case the coder somehow

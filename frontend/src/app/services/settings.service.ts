@@ -24,6 +24,9 @@ export interface Settings {
   pr_review_poll_interval_minutes: number;
   suggestions_enabled: boolean;
   git_repos_dir: string;
+  /** Experimental: route code tasks through the v2 pipeline runner
+   *  instead of the legacy runLifecycle. Default false. */
+  pipeline_runner_v2: boolean;
 }
 
 @Injectable({ providedIn: 'root' })

@@ -17,6 +17,7 @@ import { getPhaseOutput } from "../db/phaseOutputs";
 import type { TaskRow } from "../db/tasks";
 import { type PhaseDef } from "./pipelines";
 import { validateOutputSpec, type AgentOutputSpec } from "./agentValidation";
+import { captureDiff } from "./reviewer";
 import { log } from "../log";
 
 /** Loaded role prompt + the validation spec declared in its
@@ -58,6 +59,11 @@ export function loadAgentPrompt(relPath: string): LoadedAgentPrompt {
 /** Per-agent prompt bodies + output specs used by the pipeline runner.
  *  Loaded once at module init; restart the backend to pick up edits. */
 export const PIPELINE_AGENTS: Record<string, LoadedAgentPrompt> = {
+  // Code-task pipeline agents (gated behind the pipeline_runner_v2
+  // setting until the v2 runner is the default for code tasks).
+  "plan-coder":             loadAgentPrompt("plan/planner.md"),
+  "coder":                  loadAgentPrompt("code/coder.md"),
+  // PR-review pipeline agents.
   "pr-spec-intake":         loadAgentPrompt("review/pr-spec-intake.md"),
   "solution-explorer":      loadAgentPrompt("review/solution-explorer.md"),
   "reviewer-coder":         loadAgentPrompt("review/reviewer-coder.md"),
@@ -81,6 +87,15 @@ export function getAgentOutputSpec(slug: string): AgentOutputSpec | null {
   return PIPELINE_AGENTS[slug]?.output ?? null;
 }
 
+/** Optional context the runner threads in for code-task phases.
+ *  cycleCount lets the review phase show "this is cycle 2 of 3"
+ *  history; priorReviewerFeedback lets it remind the reviewer what
+ *  they said last time so they can verify the coder addressed it. */
+export interface PhaseMessageContext {
+  cycleCount?: number;
+  priorReviewerFeedback?: string;
+}
+
 /** Build the user message for one (phase, agent) pair. Earlier
  *  phases' outputs are pulled from task_phase_outputs and stitched
  *  in. Returns the raw input_payload for unknown phases. */
@@ -88,10 +103,71 @@ export function buildPipelinePhaseMessage(
   task: TaskRow,
   phase: PhaseDef,
   agentSlug: string,
+  ctx: PhaseMessageContext = {},
 ): string {
   const taskId = task.id;
   const prInput = task.input_payload;
 
+  // ─── Code-task phases ─────────────────────────────────────────────
+  if (phase.id === "plan") {
+    return [
+      "# Spec",
+      "",
+      "```markdown",
+      task.input_payload,
+      "```",
+      "",
+      "# Your task",
+      "",
+      `Explore the worktree. Map the files the coder will need to read and the files likely to change. Write \`.agent-notes/${taskId}.md\` with the sections from your role prompt, then reply with the YAML summary block specified in your prompt — nothing else.`,
+    ].join("\n");
+  }
+
+  if (phase.id === "code") {
+    return [
+      `# Task: ${task.title}`,
+      "",
+      task.input_payload,
+      "",
+      "Begin.",
+    ].join("\n");
+  }
+
+  if (phase.id === "review") {
+    const diff = task.worktree_path
+      ? captureDiff(task.worktree_path, task.worktree_base_ref ?? "HEAD")
+      : "_(no worktree — diff unavailable)_";
+    const cycleCount = ctx.cycleCount ?? 0;
+    const historyBlock =
+      cycleCount > 0
+        ? `\n\n# Review history\n\nThis is review cycle **${cycleCount + 1}**. Previous feedback was:\n\n> ${
+            (ctx.priorReviewerFeedback ?? "(none recorded)")
+              .split("\n")
+              .map((l) => l.trim())
+              .filter(Boolean)
+              .join("\n> ")
+          }\n\nDid the coder address it? If not, send back again. If they addressed it but introduced new problems, send back with the new problems. Otherwise accept.`
+        : "";
+    return [
+      "# Review request",
+      "",
+      "# Spec",
+      "",
+      "```markdown",
+      task.input_payload,
+      "```",
+      "",
+      "# Coder's diff",
+      "",
+      diff + historyBlock,
+      "",
+      "# Your task",
+      "",
+      "Decide: `accept` or `send_back`. Reply with the YAML block specified in your role prompt — nothing else.",
+    ].join("\n");
+  }
+
+  // ─── PR-review pipeline phases ────────────────────────────────────
   if (phase.id === "intake") return prInput;
 
   if (phase.id === "explore") {

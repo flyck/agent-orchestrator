@@ -116,6 +116,28 @@
 
   <section class="block">
     <header class="block-head">
+      <h2>Experimental</h2>
+      <p class="meta">opt-in flags for in-progress refactors</p>
+    </header>
+
+    <div class="grid">
+      <label class="check">
+        <input type="checkbox"
+               [ngModel]="s.pipeline_runner_v2"
+               (ngModelChange)="setDraft('pipeline_runner_v2', $event)" />
+        <span>
+          Pipeline runner v2 for code tasks
+          <em class="meta small">— routes feature/bugfix/arch_compare through the
+          same pipeline runner that already handles PR-review tasks. Plan/code/review
+          phases declared in CODE_TASK_PIPELINE; legacy runLifecycle untouched when
+          off. Restart the backend after toggling.</em>
+        </span>
+      </label>
+    </div>
+  </section>
+
+  <section class="block">
+    <header class="block-head">
       <h2>Worktrees &amp; IDE</h2>
       <p class="meta">where agent changes live</p>
     </header>

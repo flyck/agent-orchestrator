@@ -164,38 +164,38 @@ new vocabulary (plan: fall_through; review: accept + cycle_back).
 A `pipeline_runner_v2` setting was added to settings.ts +
 defaults but is currently dormant — see 5b for why.
 
-**Step 5b — STILL OPEN.** Found out the hard way that the runner
-can reproduce the *flow* but not the *content* of code tasks
-without more work:
+**Step 5b — DONE.** All four sub-tasks landed in one commit:
 
-  - PIPELINE_AGENTS needs entries for `plan-coder` / `coder` /
-    `reviewer-coder` agents pointing at their .md prompts.
-  - `buildPipelinePhaseMessage` needs branches for the plan / code
-    / review phases. runLifecycle hand-rolls these via
-    `buildPlannerMessage`, `buildInitialMessage`, and
-    `buildReviewerMessage` — those builders pull worktree-relative
-    state, prior reviewer feedback, etc., that aren't part of the
-    current pipeline message-builder vocabulary.
-  - The system prompts are also bespoke
-    (`buildPlannerSystemPrompt`, `buildSystemPrompt`,
-    `buildReviewerSystemPrompt`); the pipeline runner uses one
-    shared shape (renderSharedPrompt + agent's role body).
-  - Worktree creation, which runLifecycle does inline before the
-    pump loop, isn't on the pipeline runner's path.
+  1. PIPELINE_AGENTS now carries plan-coder, coder, reviewer-coder
+     entries. Created `agents/builtin/code/coder.md` (extracted from
+     `buildSystemPrompt`'s template literal — runtime cwd/taskId
+     interpolation moves to the runner's existing `renderSharedPrompt`
+     prepend, so the .md is static like every other agent).
+     plan-coder gained an `output:` frontmatter so its YAML summary
+     gets validated.
+  2. buildPipelinePhaseMessage gained plan / code / review branches,
+     mirroring buildPlannerMessage / buildInitialMessage /
+     buildReviewerMessage. The review branch threads cycleCount +
+     priorReviewerFeedback through a new PhaseMessageContext so the
+     "did the coder address it?" history block survives.
+  3. Worktree creation gate changed from `!usePipeline` to
+     `taskType === Coding` — both legacy and v2 code-task paths now
+     produce a worktree, neither path produces one for PR-review.
+  4. pipelineForType now consults the `pipeline_runner_v2` setting
+     for Coding tasks. Off → null → runLifecycle. On →
+     PipelineId.CodeTask → pipeline runner. PR-review unchanged.
 
-So the actual 5b work is:
-  1. Add plan-coder / coder / reviewer-coder to PIPELINE_AGENTS,
-     with their existing role prompts.
-  2. Extend buildPipelinePhaseMessage with the plan/code/review
-     branches that today live in the per-phase builders.
-  3. Move worktree creation into the pipeline runner (or earlier
-     in startRunInternal regardless of which path is taken).
-  4. Then flip the `pipeline_runner_v2` setting to actually route
-     code tasks through.
+Bonus fix: the pipeline runner used to system-prompt agents without
+ambientContext (skills + repo-context) — fine for PR-review where
+cwd is the orchestrator's own checkout, wrong for code tasks where
+cwd is the user's worktree. Runner now appends ambientContext when
+task.worktree_path is set.
 
-This is its own multi-commit refactor. The setting + the
-on_error/cycle_back vocabulary are in place; nothing's blocking
-it; just hasn't been done yet.
+A Settings → Experimental section exposes the toggle so the user
+can flip without editing the DB. The settings API zod schema +
+frontend Settings type both gained the field.
+
+Restart the backend to pick up the new agents in PIPELINE_AGENTS.
 
 **Step 5c — DELETE runLifecycle** once 5b has shipped behind the
 flag, the dual-run period has covered enough task types, and the

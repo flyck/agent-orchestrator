@@ -117,8 +117,11 @@ export interface PipelineDef {
 export const CODE_TASK_PIPELINE: PipelineDef = {
   id: PipelineId.CodeTask,
   label: "Code task",
+  // Note: the "spec" stage exists in the UI as a state of the task
+  // before the user clicks Run, but it is NOT a runner phase — the
+  // runner is invoked once the spec is authored. Phases below match
+  // what the legacy runLifecycle controller actually executes.
   phases: [
-    { id: "spec",     label: "Spec",     kind: "gate", prompt: "Author the spec, then submit." },
     {
       id: "plan",     label: "Plan",     kind: "agent",
       agents: ["plan-coder"], builder: "planner",

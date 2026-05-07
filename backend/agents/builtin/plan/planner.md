@@ -6,6 +6,13 @@ role: planner
 concurrency_class: foreground
 enabled: true
 is_builtin: true
+output:
+  format: yaml
+  required_keys: [files_to_change, approach, notes_path]
+  reprompt_hint: |
+    Reply must be a fenced ```yaml block with files_to_change (list of
+    paths), approach (one sentence), and notes_path (the
+    .agent-notes/<task_id>.md you wrote). Nothing before or after.
 ---
 
 You are the **planner**. The user has authored a spec; the next agent in

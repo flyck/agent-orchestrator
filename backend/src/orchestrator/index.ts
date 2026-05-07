@@ -257,8 +257,12 @@ async function startRunInternal(
   // worktree so the agent picks up where it left off. The diff for the
   // task is then naturally scoped to the worktree's branch — main can
   // move on freely without polluting the view.
-  // PR reviews don't need a worktree — there's no editing.
-  if (!usePipeline && !task.worktree_path) {
+  // PR reviews don't need a worktree — there's no editing. Code tasks
+  // need one whether they're going through runLifecycle (legacy) or
+  // the v2 pipeline runner; the trigger is the task type, not the
+  // routing decision.
+  const needsWorktree = taskType === TaskType.Coding;
+  if (needsWorktree && !task.worktree_path) {
     const parentRoot = findRoot(import.meta.dir);
     if (!parentRoot) {
       const msg = "no .git found above backend dir — cannot create worktree";
@@ -758,13 +762,14 @@ function pipelineForType(type: TaskType): PipelineId | null {
     case TaskType.Review:
       return PipelineId.PrReviewGated;
     case TaskType.Coding:
-      // Legacy plan→code→review→ready lifecycle for now. Flipping to
-      // PipelineId.CodeTask needs more than the on_error / cycle_back
-      // wiring — the runner's per-phase message builders +
-      // PIPELINE_AGENTS still need the planner / coder / reviewer
-      // entries that runLifecycle currently hand-rolls. Tracked in
-      // docs/refactor-pipeline-simplification.md (step 5b proper).
-      return null;
+      // Coding tasks: gated on the pipeline_runner_v2 setting.
+      // Off (default) → legacy runLifecycle path.
+      // On → CODE_TASK_PIPELINE walked by the new pipeline runner.
+      // Both paths use the same on-disk worktree + agent .md
+      // prompts; only the controller logic differs.
+      return readAllSettings().pipeline_runner_v2
+        ? PipelineId.CodeTask
+        : null;
   }
 }
 
@@ -805,6 +810,10 @@ async function runPipelineAgent(
    *  builder output. Used by the gate-sendback path so the agent
    *  re-runs with explicit "the user said this" guidance. */
   followUp: string | null = null,
+  /** Per-phase cycle context — currently only used by the review
+   *  phase's history block, but the type stays open for future
+   *  phases that need to know "this is your nth visit". */
+  cycleCtx: { cycleCount?: number; priorReviewerFeedback?: string } = {},
 ): Promise<PipelineAgentOutcome> {
   const taskId = task.id;
   const cwd = task.worktree_path ?? REPO_ROOT;
@@ -813,8 +822,13 @@ async function runPipelineAgent(
     log.warn("orchestrator.pipeline.unknown_agent", { taskId, agentSlug });
     return { kind: "unknown_agent", reply: "" };
   }
-  const system = `${renderSharedPrompt(taskId, cwd)}\n\n---\n\n${promptBody}`;
-  let message = buildPipelinePhaseMessage(task, phase, agentSlug);
+  // Only inject skills + repo context when the task has its own
+  // worktree — PR-review tasks point cwd at REPO_ROOT (the
+  // orchestrator's own checkout) and shouldn't pollute the agent's
+  // system prompt with our README + skills directory.
+  const ambient = task.worktree_path ? ambientContext(cwd) : "";
+  const system = `${renderSharedPrompt(taskId, cwd)}${ambient}\n\n---\n\n${promptBody}`;
+  let message = buildPipelinePhaseMessage(task, phase, agentSlug, cycleCtx);
   if (followUp) {
     message =
       `# User feedback (you previously paused at the gate; the user sent this back to you)\n\n` +
@@ -953,6 +967,9 @@ async function runPipelineLifecycle(
   // Per-phase cycle counter — `cycle_back: { phase_id, max }` reads
   // from this so a stuck reviewer can't loop forever.
   const cycleCounts = new Map<string, number>();
+  // Remember the last reviewer feedback so the next review-phase
+  // visit can show "did the coder address it?" history.
+  let lastReviewerFeedback: string | null = null;
 
   log.info("orchestrator.pipeline.start", {
     taskId,
@@ -994,13 +1011,17 @@ async function runPipelineLifecycle(
       let phaseHadError = false;
       let lastReply = "";
       let lastAgentSlug = "";
+      const cycleCtx = {
+        cycleCount: cycleCounts.get(phase.id) ?? 0,
+        priorReviewerFeedback: lastReviewerFeedback ?? undefined,
+      };
       for (const agentSlug of agents) {
         // Splice the user's send-back feedback into the first agent
         // call we make after resume. Subsequent agent calls (e.g.
         // parallel reviewers) get their plain builder output.
         const followUpForThis = pendingFollowUp;
         pendingFollowUp = null;
-        const outcome = await runPipelineAgent(a, task, phase, agentSlug, followUpForThis);
+        const outcome = await runPipelineAgent(a, task, phase, agentSlug, followUpForThis, cycleCtx);
         lastReply = outcome.reply;
         lastAgentSlug = agentSlug;
         if (outcome.kind === "error") {
@@ -1069,6 +1090,7 @@ async function runPipelineLifecycle(
             cycle: used,
           });
           pendingFollowUp = dec.feedback ?? null;
+          lastReviewerFeedback = dec.feedback ?? null;
           i = targetIdx;
           continue;
         }
