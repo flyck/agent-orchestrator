@@ -24,7 +24,11 @@ export interface ExplorerOutput {
    *  (per-alternative diagrams live on each alt). Reused by the
    *  Review tab's mermaid panel when no alt is selected. */
   diagramMermaid?: string;
-  verdict?: "ship" | "rework" | "direction_unclear";
+  /** Free-form short label. Prompt suggests {ship, rework,
+   *  direction_unclear} but agents pick their own vocabulary; we
+   *  pass through whatever they said and let the UI style what it
+   *  recognizes. */
+  verdict?: string;
   summary?: string;
 }
 
@@ -71,11 +75,11 @@ export function parseExplorerOutput(rawText: string): ExplorerOutput | null {
 
   const diagramMermaid =
     typeof obj["diagram_mermaid"] === "string" ? (obj["diagram_mermaid"] as string) : undefined;
-  const verdictRaw = String(obj["verdict"] ?? "").toLowerCase().trim();
-  const verdict =
-    verdictRaw === "ship" || verdictRaw === "rework" || verdictRaw === "direction_unclear"
-      ? (verdictRaw as ExplorerOutput["verdict"])
-      : undefined;
+  // Verdict accepts the prompt's enum {ship, rework, direction_unclear}
+  // but also free-form labels the agent picks (e.g. "needs_changes",
+  // "approve") — surface whatever it said, capped to keep storage tight.
+  const verdictRaw = String(obj["verdict"] ?? "").trim().slice(0, 40);
+  const verdict = verdictRaw ? (verdictRaw as ExplorerOutput["verdict"]) : undefined;
   const summary = typeof obj["summary"] === "string" ? (obj["summary"] as string).trim() : undefined;
 
   return { scoring, alternatives, diagramMermaid, verdict, summary };
