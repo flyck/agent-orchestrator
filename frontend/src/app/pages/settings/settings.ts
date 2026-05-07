@@ -77,6 +77,64 @@ export class SettingsPage {
   // Local edit buffer; commits on blur / Save button.
   protected readonly draft = signal<Partial<Settings>>({});
 
+  // ─── Agent editor (inline expand) ────────────────────────────────
+  // Open agent id, with split source loaded into frontmatter + body
+  // drafts. The editor saves to disk via PUT /api/agents/:id/source;
+  // the backend warns the user a restart is needed for the runtime
+  // to pick up the new prompt.
+  protected readonly editingAgentId = signal<string | null>(null);
+  protected readonly agentDraftFrontmatter = signal<string>('');
+  protected readonly agentDraftBody = signal<string>('');
+  protected readonly agentEditorLoading = signal<boolean>(false);
+  protected readonly agentEditorError = signal<string | null>(null);
+  protected readonly agentEditorSaving = signal<boolean>(false);
+  protected readonly agentEditorSavedAt = signal<number | null>(null);
+
+  toggleAgentEditor(id: string): void {
+    if (this.editingAgentId() === id) {
+      this.editingAgentId.set(null);
+      return;
+    }
+    this.editingAgentId.set(id);
+    this.agentDraftFrontmatter.set('');
+    this.agentDraftBody.set('');
+    this.agentEditorError.set(null);
+    this.agentEditorSavedAt.set(null);
+    this.agentEditorLoading.set(true);
+    this.agentsApi.getSource(id).subscribe({
+      next: (s) => {
+        this.agentDraftFrontmatter.set(s.frontmatter);
+        this.agentDraftBody.set(s.body);
+        this.agentEditorLoading.set(false);
+      },
+      error: (e) => {
+        this.agentEditorLoading.set(false);
+        this.agentEditorError.set(e?.error?.message ?? e?.message ?? String(e));
+      },
+    });
+  }
+
+  saveAgentSource(id: string): void {
+    if (this.agentEditorSaving()) return;
+    this.agentEditorSaving.set(true);
+    this.agentEditorError.set(null);
+    this.agentsApi
+      .saveSource(id, {
+        frontmatter: this.agentDraftFrontmatter(),
+        body: this.agentDraftBody(),
+      })
+      .subscribe({
+        next: () => {
+          this.agentEditorSaving.set(false);
+          this.agentEditorSavedAt.set(Date.now());
+        },
+        error: (e) => {
+          this.agentEditorSaving.set(false);
+          this.agentEditorError.set(e?.error?.message ?? e?.message ?? String(e));
+        },
+      });
+  }
+
   protected readonly merged = computed<Settings | null>(() => {
     const s = this.settings();
     if (!s) return null;
