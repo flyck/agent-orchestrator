@@ -19,6 +19,8 @@ import { parseExplorerOutput } from "./explorer";
 import {
   parseReviewerDecision,
   ReviewDecisionAction,
+  type RadarAlternative,
+  type RadarScoring,
 } from "./reviewer";
 import { log } from "../log";
 
@@ -29,8 +31,44 @@ const REVIEWER_SLUGS = new Set([
   "reviewer-architecture",
 ]);
 
-/** Side-effect for the reviewer YAML in the deep-review phase: write a
- *  task_reviews row + per-alt scoring/alternatives via persistReviewSideEffects. */
+/** Persist a radar (scoring + alternatives) batch to the DB. Both
+ *  reviewer and explorer agents emit this shape; collapsing the
+ *  per-agent code keeps the two persist branches narrow. */
+function persistRadar(
+  taskId: string,
+  setBy: string,
+  scoring: RadarScoring | undefined,
+  alternatives: RadarAlternative[] | undefined,
+): void {
+  if (scoring) {
+    upsertScoring(taskId, {
+      scores: scoring.scores,
+      rationale: scoring.rationale,
+      set_by: setBy,
+    });
+  }
+  // alternatives === undefined → leave prior rows alone (agent didn't
+  // include the field). Empty array → wipe — that's an explicit "no
+  // alternatives" answer the prompt allows.
+  if (alternatives !== undefined) {
+    replaceAlternatives(taskId, {
+      alternatives: alternatives.map((a) => ({
+        label: a.label,
+        description: a.description,
+        scores: a.scores,
+        rationales: a.rationales,
+        verdict: a.verdict,
+        rationale: a.rationale ?? null,
+        diagram_mermaid:
+          (a as { diagram_mermaid?: string }).diagram_mermaid ?? null,
+      })),
+      set_by: setBy,
+    });
+  }
+}
+
+/** Side-effect for the reviewer YAML in the deep-review phase:
+ *  appends a task_reviews row and persists scoring + alternatives. */
 function persistReviewer(taskId: string, agentSlug: string, reply: string): void {
   try {
     const decision = parseReviewerDecision(reply);
@@ -55,26 +93,7 @@ function persistReviewer(taskId: string, agentSlug: string, reply: string): void
           ? JSON.stringify(decision.findings)
           : null,
     });
-    if (decision.scoring) {
-      upsertScoring(taskId, {
-        scores: decision.scoring.scores,
-        rationale: decision.scoring.rationale,
-        set_by: agentSlug,
-      });
-    }
-    if (decision.alternatives !== undefined) {
-      replaceAlternatives(taskId, {
-        alternatives: decision.alternatives.map((a) => ({
-          label: a.label,
-          description: a.description,
-          scores: a.scores,
-          rationales: a.rationales,
-          verdict: a.verdict,
-          rationale: a.rationale ?? null,
-        })),
-        set_by: agentSlug,
-      });
-    }
+    persistRadar(taskId, agentSlug, decision.scoring, decision.alternatives);
   } catch (err) {
     log.warn("orchestrator.persist.reviewer_failed", {
       taskId,
@@ -84,8 +103,8 @@ function persistReviewer(taskId: string, agentSlug: string, reply: string): void
   }
 }
 
-/** Side-effect for the explorer YAML in the explore phase: write
- *  scoring + alternatives + the explorer-summary fields on the task row. */
+/** Side-effect for the explorer YAML in the explore phase: writes
+ *  scoring + alternatives + the explorer-summary fields on the task. */
 function persistExplorer(taskId: string, reply: string): void {
   try {
     const out = parseExplorerOutput(reply);
@@ -96,28 +115,7 @@ function persistExplorer(taskId: string, reply: string): void {
       });
       return;
     }
-    if (out.scoring) {
-      upsertScoring(taskId, {
-        scores: out.scoring.scores,
-        rationale: out.scoring.rationale,
-        set_by: "solution-explorer",
-      });
-    }
-    if (out.alternatives !== undefined) {
-      replaceAlternatives(taskId, {
-        alternatives: out.alternatives.map((a) => ({
-          label: a.label,
-          description: a.description,
-          scores: a.scores,
-          rationales: a.rationales,
-          verdict: a.verdict,
-          rationale: a.rationale ?? null,
-          diagram_mermaid:
-            (a as { diagram_mermaid?: string }).diagram_mermaid ?? null,
-        })),
-        set_by: "solution-explorer",
-      });
-    }
+    persistRadar(taskId, "solution-explorer", out.scoring, out.alternatives);
     setExplorerOutput(taskId, {
       summary: out.summary ?? null,
       verdict: out.verdict ?? null,

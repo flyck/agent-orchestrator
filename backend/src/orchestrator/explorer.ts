@@ -10,16 +10,16 @@
 
 import { parse as parseYaml } from "yaml";
 import {
-  parseReviewerAlternatives,
-  parseReviewerScoring,
-  type ReviewAlternative,
-  type ReviewScoring,
+  parseRadarAlternatives,
+  parseRadarScoring,
+  type RadarAlternative,
+  type RadarScoring,
 } from "./reviewer";
 import { log } from "../log";
 
 export interface ExplorerOutput {
-  scoring?: ReviewScoring;
-  alternatives?: ReviewAlternative[];
+  scoring?: RadarScoring;
+  alternatives?: RadarAlternative[];
   /** Top-level architecture diagram for the shipped implementation
    *  (per-alternative diagrams live on each alt). Reused by the
    *  Review tab's mermaid panel when no alt is selected. */
@@ -53,12 +53,12 @@ export function parseExplorerOutput(rawText: string): ExplorerOutput | null {
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as Record<string, unknown>;
 
-  const scoring = parseReviewerScoring(obj["scoring"]);
+  const scoring = parseRadarScoring(obj["scoring"]);
   // The explorer prompt also defines per-alternative diagram_mermaid;
-  // the existing parseReviewerAlternatives ignores that field. Read it
+  // the existing parseRadarAlternatives ignores that field. Read it
   // here from the raw object to thread through.
-  const altsBase = parseReviewerAlternatives(obj["alternatives"]);
-  let alternatives: ReviewAlternative[] | undefined;
+  const altsBase = parseRadarAlternatives(obj["alternatives"]);
+  let alternatives: RadarAlternative[] | undefined;
   if (altsBase !== undefined) {
     const rawAlts = Array.isArray(obj["alternatives"]) ? obj["alternatives"] : [];
     alternatives = altsBase.map((alt, i) => {
@@ -69,7 +69,7 @@ export function parseExplorerOutput(rawText: string): ExplorerOutput | null {
         // Tack the diagram on as an optional field; replaceForTask reads
         // it through the AlternativeInput shape (see db/alternatives.ts).
         ...(dm ? { diagram_mermaid: dm } : {}),
-      } as ReviewAlternative & { diagram_mermaid?: string };
+      } as RadarAlternative & { diagram_mermaid?: string };
     });
   }
 

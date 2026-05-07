@@ -228,17 +228,19 @@ export interface ReviewFinding {
   detail: string;
 }
 
-/** Scoring extracted from the reviewer's YAML — same shape `upsertScoring`
- *  takes, ready to forward to the DB without further reshaping. */
-export interface ReviewScoring {
+/** Five-axis radar scoring extracted from any agent's YAML — same
+ *  shape `upsertScoring` takes, ready to forward to the DB without
+ *  further reshaping. Reviewer + solution-explorer both emit this. */
+export interface RadarScoring {
   scores: Record<string, number>;
   rationale?: Record<string, string | null>;
 }
 
-/** A single alternative-solution suggestion from the reviewer's YAML.
- *  Mirrors `AlternativeInput` from db/alternatives so the orchestrator
- *  can hand it straight to `replaceForTask`. */
-export interface ReviewAlternative {
+/** A single alternative-solution suggestion from any agent's YAML —
+ *  mirrors `AlternativeInput` from db/alternatives so the orchestrator
+ *  can hand it straight to `replaceForTask`. Reviewer + solution-
+ *  explorer both emit this shape. */
+export interface RadarAlternative {
   label: string;
   description: string;
   scores: Record<string, number>;
@@ -251,11 +253,11 @@ interface ReviewDecisionExtras {
   confidence?: Confidence;
   findings?: ReviewFinding[];
   /** Five-axis radar scoring. Persisted via upsertScoring when present. */
-  scoring?: ReviewScoring;
+  scoring?: RadarScoring;
   /** Alternative solutions. Persisted via replaceForTask when present
    *  (including the empty-array case, which intentionally wipes stale
    *  rows from earlier passes). */
-  alternatives?: ReviewAlternative[];
+  alternatives?: RadarAlternative[];
 }
 
 export type ReviewDecision =
@@ -301,11 +303,11 @@ function clampScore(n: number): number {
   return Math.max(1, Math.min(10, Math.round(n)));
 }
 
-/** Parse the reviewer's `scoring:` block into the shape upsertScoring
- *  takes. Returns undefined when the field is missing or shaped wrong;
- *  the caller skips the upsert in that case rather than writing
- *  garbage. */
-export function parseReviewerScoring(raw: unknown): ReviewScoring | undefined {
+/** Parse a `scoring:` block (reviewer or explorer) into the shape
+ *  upsertScoring takes. Returns undefined when the field is missing
+ *  or shaped wrong; the caller skips the upsert in that case rather
+ *  than writing garbage. */
+export function parseRadarScoring(raw: unknown): RadarScoring | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const scores: Record<string, number> = {};
   const rationale: Record<string, string | null> = {};
@@ -321,14 +323,14 @@ export function parseReviewerScoring(raw: unknown): ReviewScoring | undefined {
 
 const ALTERNATIVE_VERDICTS = new Set(["better", "equal", "worse"]);
 
-/** Parse the reviewer's `alternatives:` list. Returns [] for an
- *  empty/missing list (the caller still calls replaceForTask, which
- *  wipes stale rows from a prior pass). Returns undefined if the
- *  field is shaped wrong (caller leaves prior rows alone). */
-export function parseReviewerAlternatives(raw: unknown): ReviewAlternative[] | undefined {
+/** Parse an `alternatives:` list (reviewer or explorer). Returns []
+ *  for an empty/missing list (the caller still calls replaceForTask,
+ *  which wipes stale rows from a prior pass). Returns undefined if
+ *  the field is shaped wrong (caller leaves prior rows alone). */
+export function parseRadarAlternatives(raw: unknown): RadarAlternative[] | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!Array.isArray(raw)) return undefined;
-  const out: ReviewAlternative[] = [];
+  const out: RadarAlternative[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
@@ -345,7 +347,7 @@ export function parseReviewerAlternatives(raw: unknown): ReviewAlternative[] | u
       | "better"
       | "equal"
       | "worse";
-    const scoring = parseReviewerScoring(o["scoring"]);
+    const scoring = parseRadarScoring(o["scoring"]);
     out.push({
       label,
       description,
@@ -421,8 +423,8 @@ export function parseReviewerDecision(rawText: string): ReviewDecision {
   const decision = String(obj["decision"] ?? "").toLowerCase().trim();
   const confidence = parseConfidence(obj["confidence"]);
   const findings = parseFindings(obj["findings"]);
-  const scoring = parseReviewerScoring(obj["scoring"]);
-  const alternatives = parseReviewerAlternatives(obj["alternatives"]);
+  const scoring = parseRadarScoring(obj["scoring"]);
+  const alternatives = parseRadarAlternatives(obj["alternatives"]);
 
   if (decision === ReviewDecisionAction.SendBack) {
     const feedback = typeof obj["feedback"] === "string" ? obj["feedback"].trim() : "";
