@@ -278,12 +278,18 @@
                       {{ agentEditorSaving() ? 'saving…' : 'save' }}
                     </button>
                     <button type="button" (click)="toggleAgentEditor(a.id)">close</button>
-                    @if (agentEditorSavedAt()) {
-                      <span class="meta small">
-                        saved · restart the backend for the new prompt to take effect.
-                      </span>
-                    }
                   </div>
+                  @if (agentEditorSavedAt()) {
+                    <aside class="agent-editor-saved">
+                      <p class="meta">saved to disk</p>
+                      <p class="small">
+                        The pipeline runner caches agent prompts at module init —
+                        <strong>restart the backend</strong> for the change to take
+                        effect on the next run. Tasks that are already in-flight
+                        keep using the cached version.
+                      </p>
+                    </aside>
+                  }
                   @if (agentEditorIssues().length > 0) {
                     <ul class="agent-editor-issues">
                       @for (msg of agentEditorIssues(); track msg) {

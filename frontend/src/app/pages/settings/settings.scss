@@ -218,3 +218,13 @@ input[disabled] {
   color: var(--ink);
   li { margin: 2px 0; }
 }
+.agent-editor-saved {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  background: var(--paper);
+  border: 1px solid var(--state-ready-edge, var(--rule-strong));
+  border-left-width: 3px;
+  border-radius: 2px;
+  p { margin: 2px 0; }
+  .meta { color: var(--state-ready-edge, var(--ink)); }
+}
