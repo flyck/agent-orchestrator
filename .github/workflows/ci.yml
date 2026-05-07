@@ -1,0 +1,53 @@
+# Run typecheck + unit tests on every push and pull request. Both
+# backend and frontend share the Bun runtime; we install once per job
+# so the cache hit is straightforward.
+#
+# What's NOT here yet (deliberate):
+#   - ng test (Karma) — needs a Chromium runner; vitest covers the
+#     pure-logic specs we actually maintain. Add later if/when there
+#     are component/template tests worth gating on.
+#   - lint — no eslint config in-repo; tsc + tests are the bar today.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend — typecheck + bun test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc --noEmit
+      - name: Test
+        run: bun test
+
+  frontend:
+    name: Frontend — typecheck + vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc --noEmit -p tsconfig.json
+      - name: Test
+        run: bun run test:unit
