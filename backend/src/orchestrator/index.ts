@@ -22,6 +22,7 @@ import {
   getTask,
   incrementReviewCycles,
   setAwaitingGate,
+  setExplorerOutput,
   setLastSessionId,
   setLatestInputTokens,
   setTaskBaseRef,
@@ -1061,6 +1062,14 @@ async function runPipelineAgent(
             set_by: "solution-explorer",
           });
         }
+        // Persist the structured fields the Direction tab renders
+        // alongside the radar. summary doubles as "why no alternatives"
+        // when the list is empty.
+        setExplorerOutput(taskId, {
+          summary: out.summary ?? null,
+          verdict: out.verdict ?? null,
+          architecture_mermaid: out.diagramMermaid ?? null,
+        });
         log.info("orchestrator.pipeline.explorer_persisted", {
           taskId,
           hasScoring: !!out.scoring,

@@ -104,6 +104,11 @@ function applyMigrations(db: Database) {
   // Agent-compiled Conventional Commits message generated when the task
   // reaches Ready. The user can edit it before clicking finalize.
   ensureColumn("tasks", "proposed_commit_message", "TEXT");
+  // Solution-explorer's structured reply, surfaced in the Direction
+  // tab so the user can decide without reading the raw transcript.
+  ensureColumn("tasks", "explorer_summary", "TEXT");
+  ensureColumn("tasks", "explorer_verdict", "TEXT");
+  ensureColumn("tasks", "explorer_architecture_mermaid", "TEXT");
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {

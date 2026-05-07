@@ -144,6 +144,11 @@ export interface Task {
   /** Agent-compiled Conventional Commits message generated when the task
    *  reaches Ready. null until generation completes. */
   proposed_commit_message: string | null;
+  /** Solution-explorer's structured fields, populated when the explore
+   *  phase finishes with parseable YAML. Surface in the Direction tab. */
+  explorer_summary: string | null;
+  explorer_verdict: string | null;
+  explorer_architecture_mermaid: string | null;
   created_at: number;
   updated_at: number;
 }

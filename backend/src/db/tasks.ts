@@ -161,6 +161,10 @@ export interface TaskRow {
    *  task transitions to Ready. The user can edit before finalize.
    *  null until generation succeeds; finalize falls back to the title. */
   proposed_commit_message: string | null;
+  /** Solution-explorer's structured fields surfaced in the Direction tab. */
+  explorer_summary: string | null;
+  explorer_verdict: string | null;
+  explorer_architecture_mermaid: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -490,6 +494,40 @@ export function setProposedCommitMessage(
   handle
     .prepare("UPDATE tasks SET proposed_commit_message = ?, updated_at = ? WHERE id = ?")
     .run(message, Date.now(), id);
+  return getTask(id, handle);
+}
+
+/** Persist the solution-explorer's structured fields. Called from the
+ *  orchestrator when the explorer YAML parses. Any null arg leaves the
+ *  prior value intact (so a partial parse doesn't wipe a previous field). */
+export function setExplorerOutput(
+  id: string,
+  fields: {
+    summary?: string | null;
+    verdict?: string | null;
+    architecture_mermaid?: string | null;
+  },
+  handle: Database = db(),
+): TaskRow | null {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.summary !== undefined) {
+    sets.push("explorer_summary = ?");
+    vals.push(fields.summary);
+  }
+  if (fields.verdict !== undefined) {
+    sets.push("explorer_verdict = ?");
+    vals.push(fields.verdict);
+  }
+  if (fields.architecture_mermaid !== undefined) {
+    sets.push("explorer_architecture_mermaid = ?");
+    vals.push(fields.architecture_mermaid);
+  }
+  if (sets.length === 0) return getTask(id, handle);
+  sets.push("updated_at = ?");
+  vals.push(Date.now());
+  vals.push(id);
+  handle.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...vals as (string | number | null)[]);
   return getTask(id, handle);
 }
 

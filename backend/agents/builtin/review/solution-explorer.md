@@ -105,6 +105,12 @@ scoring:
   lines_of_code:   { value: <1-10>, rationale: "one short sentence" }
   user_benefit:    { value: <1-10>, rationale: "one short sentence" }
   maintainability: { value: <1-10>, rationale: "one short sentence" }
+diagram_mermaid: |
+  <Mermaid `flowchart LR` source showing the IMPLEMENTATION's shape:
+   the new modules / functions / data flows the diff introduces, with
+   real names. Same node-quoting + classDef rules as alternative
+   diagrams (see below). Drop the field when the diff is too small
+   to map (e.g. doc-only or a one-line config tweak).>
 alternatives:
   - title: <short label, e.g. "Use a Map instead of array scan">
     description: |

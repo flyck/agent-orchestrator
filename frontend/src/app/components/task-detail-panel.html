@@ -320,7 +320,28 @@
         <header class="direction-head">
           <h3>Direction decision</h3>
           <span class="meta">paused at <code>direction-gate</code></span>
+          @if (t.explorer_verdict) {
+            <span class="verdict-pill" [attr.data-verdict]="t.explorer_verdict">
+              {{ t.explorer_verdict }}
+            </span>
+          }
         </header>
+
+        @if (t.explorer_summary) {
+          <section class="direction-evidence">
+            <h4>Explorer's summary</h4>
+            <app-markdown-view [source]="t.explorer_summary" />
+          </section>
+        }
+
+        @if (t.explorer_architecture_mermaid) {
+          <section class="direction-evidence">
+            <h4>Implementation architecture</h4>
+            <app-mermaid-diagram
+              [source]="t.explorer_architecture_mermaid"
+              [darkMode]="darkMode()" />
+          </section>
+        }
 
         @if (scoringVisible()) {
           <section class="direction-evidence">
