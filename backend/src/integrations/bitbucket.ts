@@ -20,10 +20,33 @@ export class BitbucketError extends Error {
     public readonly status: number,
     public readonly path: string,
     public readonly body: string,
+    /** epoch-ms after which retrying should be safe; only set on 429
+     *  responses that include Retry-After. */
+    public readonly retryAfterMs?: number,
   ) {
     super(`bitbucket ${path} → ${status}: ${body.slice(0, 240)}`);
     this.name = "BitbucketError";
   }
+}
+
+/** Module-level rate-limit gate. When set, every bbFetch short-
+ *  circuits to a synthetic 429 until the deadline passes — protects
+ *  the upstream from a fan-out that's already known to be over quota. */
+let rateLimitedUntil = 0;
+
+function parseRetryAfter(headerValue: string | null, now: number): number {
+  if (!headerValue) return now + 30_000; // sane default
+  const trimmed = headerValue.trim();
+  // RFC 7231: either delta-seconds or HTTP-date.
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return now + Math.min(seconds, 300) * 1000;
+  }
+  const ts = Date.parse(trimmed);
+  if (Number.isFinite(ts) && ts > now) {
+    return Math.min(ts, now + 300_000);
+  }
+  return now + 30_000;
 }
 
 function basicHeader(username: string, appPassword: string): string {
@@ -35,13 +58,31 @@ async function bbFetch(
   username: string,
   appPassword: string,
 ): Promise<Response> {
-  return fetch(`${BB_BASE}${path}`, {
+  const now = Date.now();
+  if (rateLimitedUntil > now) {
+    // Synthesize a 429 so the caller's existing 429-handling path runs
+    // without burning an actual request against the per-resource quota.
+    return new Response("rate limited (cached, until " + new Date(rateLimitedUntil).toISOString() + ")", {
+      status: 429,
+      headers: { "retry-after": String(Math.ceil((rateLimitedUntil - now) / 1000)) },
+    });
+  }
+  const res = await fetch(`${BB_BASE}${path}`, {
     headers: {
       authorization: basicHeader(username, appPassword),
       accept: "application/json",
       "user-agent": "agent-orchestrator",
     },
   });
+  if (res.status === 429) {
+    const until = parseRetryAfter(res.headers.get("retry-after"), Date.now());
+    rateLimitedUntil = Math.max(rateLimitedUntil, until);
+    log.warn("bitbucket.rate_limit.armed", {
+      until_iso: new Date(rateLimitedUntil).toISOString(),
+      retry_after: res.headers.get("retry-after"),
+    });
+  }
+  return res;
 }
 
 async function bbJson<T>(
@@ -50,7 +91,11 @@ async function bbJson<T>(
   appPassword: string,
 ): Promise<T> {
   const res = await bbFetch(path, username, appPassword);
-  if (!res.ok) throw new BitbucketError(res.status, path, await res.text());
+  if (!res.ok) {
+    const retryAfter =
+      res.status === 429 ? parseRetryAfter(res.headers.get("retry-after"), Date.now()) : undefined;
+    throw new BitbucketError(res.status, path, await res.text(), retryAfter);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -60,7 +105,11 @@ async function bbText(
   appPassword: string,
 ): Promise<string> {
   const res = await bbFetch(path, username, appPassword);
-  if (!res.ok) throw new BitbucketError(res.status, path, await res.text());
+  if (!res.ok) {
+    const retryAfter =
+      res.status === 429 ? parseRetryAfter(res.headers.get("retry-after"), Date.now()) : undefined;
+    throw new BitbucketError(res.status, path, await res.text(), retryAfter);
+  }
   return res.text();
 }
 
