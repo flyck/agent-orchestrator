@@ -119,51 +119,83 @@ orchestrator/
 
 ## Migration steps (one PR each)
 
-### Step 1 — extract resume.ts (small, mechanical)
+### Step 1 — extract resume.ts (small, mechanical) — DONE (1d829b9)
 
-Move the `startIdx` IIFE from `runPipelineLifecycle` into a pure
-function `resumeFrom(task, opts) → ResumeDecision`. No behavior change.
+`resumeFrom(task, pipeline, opts) → ResumeDecision` lives in
+`orchestrator/resume.ts`. Returns `{ phaseIdx, reason, followUp }`;
+the `reason` tag (approve/sendback/fresh) flows into the runner's
+log so we can tell at a glance why a run started where it did.
 
-```ts
-type ResumeDecision = { phaseIdx: number; followUp: string | null };
-function resumeFrom(task: TaskRow, pipeline: PipelineDef, opts: { followUp?: string }): ResumeDecision;
-```
+### Step 2 — persist.ts + explorer parser — DONE (bd146c3, 0139805)
 
-### Step 2 — extract persist.ts and explorer.ts parser
+`orchestrator/persist.ts` owns the YAML→DB write paths via a single
+`persistAgentReply(taskId, agentSlug, phaseId, reply)` dispatch.
+`orchestrator/explorer.ts` owns the explorer YAML parser (sister to
+`reviewer.ts`'s existing parser). The `runPipelineAgent` post-pump
+section shrinks to one call. The reviewer-side helpers
+(`parseReviewerScoring` etc.) were NOT renamed to
+`parseRadarScoring` — kept the existing names since the diff felt
+out of scope; rename can land later if/when a third agent uses the
+same shape.
 
-Move `persistReviewSideEffects` to its new home. Add
-`parseExplorerOutput` that calls the existing `parseReviewerScoring`
-and `parseReviewerAlternatives` (rename to
-`parseRadarScoring`/`parseRadarAlternatives` — they were never
-reviewer-specific). Wire `runPipelineAgent` to call the right parser
-based on `agentSlug`.
+### Step 4 — extract agentPrompts.ts — DONE (94fd451)
 
-This unlocks the explorer-YAML→DB path that's been silently broken.
+`orchestrator/agentPrompts.ts` owns `loadAgentPrompt`,
+`PIPELINE_AGENTS`, `PIPELINE_AGENT_PROMPTS`, `getAgentOutputSpec`,
+and `buildPipelinePhaseMessage`. Pure data + pure functions, no
+runtime coupling. `index.ts` lost ~140 LOC. Did NOT do the proposed
+"phase.builder dispatch table" rewrite — the existing if-tree in
+`buildPipelinePhaseMessage` is fine for the four phases that exist;
+table dispatch would just be a different shape of branch. Land
+that if a fifth phase appears.
 
-### Step 3 — extract runner.ts
+### Step 5 — collapse runLifecycle into CODE_TASK_PIPELINE — NOT YET
 
-Move `runPipelineLifecycle` and `runPipelineAgent` to
-`pipeline/runner.ts`. Inject the engine + DB writers as parameters
-rather than module imports — makes the runner testable in isolation.
+Investigated and DEFERRED. The pipeline runner today walks distinct
+phases with distinct sessions per agent; `runLifecycle` does
+something genuinely different that the pipeline runner can't do
+yet:
 
-### Step 4 — extract messageBuilders.ts
+  - Watchdog-triggered phase advancement (`watchdogRecovered` flag
+    treats a hung session as the phase finishing cleanly).
+  - Cycle-budget for the review→code loop (`MAX_REVIEW_CYCLES`,
+    `incrementReviewCycles`).
+  - Fail-open semantics per phase (plan-error → still try code;
+    review-error → accept; coder-restart failure → finalize done).
+  - Per-phase session rolling (the same `a.session` gets replaced
+    by `switchToReviewer`/`switchToCoder`, not closed and reopened
+    per agent like the pipeline runner does).
 
-`buildPipelinePhaseMessage` becomes a tiny dispatch table keyed on
-`phase.builder`. Each builder is a pure function of `(task, phase,
-priorOutputs)` returning the user message. New phases add a row, no
-runner edits.
+A clean collapse needs the pipeline runner to learn those tricks
+first. Two-step path:
 
-### Step 5 — collapse runLifecycle into CODE_TASK_PIPELINE
+  - Step 5a — extend `PhaseDef` with `on_error: 'fail' | 'fall_through' |
+    'fail_open'` and `cycle_with: { phase_id, max }`. Runner reads
+    these. No `runLifecycle` deletion yet; just teach the new
+    runner to handle the same edge cases.
+  - Step 5b — express `CODE_TASK_PIPELINE` with the new fields,
+    behind a feature flag (settings.pipeline_runner_v2 = true|false).
+    Run both for a release; flip the default once metrics agree.
+  - Step 5c — delete `runLifecycle` once the flag has been on by
+    default for a release.
 
-Express the legacy plan→code→review→ready→finalize lifecycle as the
-existing `CODE_TASK_PIPELINE` and walk it with the same runner. Delete
-`runLifecycle`. This is the biggest LOC win and the riskiest step;
-gate it behind a feature flag for a release.
+This is bigger than originally sketched. Don't try to collapse it
+in one PR.
 
-### Step 6 — strip legacy comments
+### Step 3 — extract runner.ts — DEFERRED until after step 5
 
-After the above, the explanatory comments justifying the quirks
-become obsolete because the quirks are gone. Sweep them.
+Originally planned before step 5; reordering. Extracting the runner
+without first unifying the two lifecycles means the new runner
+module immediately has to host BOTH `runLifecycle` and
+`runPipelineLifecycle` plus their helpers (`switchToCoder`,
+`switchToReviewer`), which is most of `index.ts`. Better to unify
+first, then extract the unified runner.
+
+### Step 6 — strip legacy comments — DEFERRED
+
+Tied to Step 5 — many of the comments explain `runLifecycle`'s
+quirks, which only become safe to delete once the lifecycle
+collapses.
 
 ## What NOT to do
 
