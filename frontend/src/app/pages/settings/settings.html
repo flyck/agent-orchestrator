@@ -46,6 +46,19 @@
       </label>
 
       <label>
+        <span class="label">Per-session budget (USD)</span>
+        <input type="number" min="0" step="0.5" placeholder="—"
+               [ngModel]="s.max_session_budget_usd"
+               (ngModelChange)="setDraft('max_session_budget_usd', $event)" />
+        <span class="hint">
+          Hard cap per agent session. <strong>Claude only</strong> —
+          passed as <code>--max-budget-usd</code>. opencode has no
+          equivalent flag and ignores this. Default $5. Leave blank to
+          disable. Sessions killed by the cap are counted in the navbar.
+        </span>
+      </label>
+
+      <label>
         <span class="label">Manual coding nudge after N tasks</span>
         <input type="number" min="0"
                [ngModel]="s.manual_coding_nudge_after_n_tasks"

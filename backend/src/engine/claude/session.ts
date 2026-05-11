@@ -17,6 +17,7 @@ import type {
 } from "../types";
 import { EventQueue } from "../eventQueue";
 import { makeState, normalize, type NormalizerState } from "./events";
+import { incrementSessionsOverBudget } from "../../db/settings";
 
 export interface ClaudeSessionInternal {
   id: string;
@@ -24,6 +25,9 @@ export interface ClaudeSessionInternal {
   defaultModel: ModelRef;
   cwd: string;
   bin: string;
+  /** Per-session USD cap; mapped to `--max-budget-usd`. Null/undefined skips
+   *  the flag. The CLI rejects values <= 0, so we filter that upstream. */
+  budgetUsd?: number | null;
 }
 
 type Proc = ReturnType<typeof Bun.spawn>;
@@ -35,6 +39,9 @@ export class ClaudeSession implements EngineSession {
   private stdoutBuf = "";
   private closed = false;
   private readonly encoder = new TextEncoder();
+  /** Bump the lifetime sessions_over_budget counter at most once per
+   *  session, even if multiple budget-exceeded events leak through. */
+  private budgetCounted = false;
 
   constructor(private readonly internal: ClaudeSessionInternal) {}
 
@@ -64,6 +71,13 @@ export class ClaudeSession implements EngineSession {
     ];
     if (this.internal.defaultSystem) {
       args.push("--append-system-prompt", this.internal.defaultSystem);
+    }
+    if (
+      typeof this.internal.budgetUsd === "number" &&
+      Number.isFinite(this.internal.budgetUsd) &&
+      this.internal.budgetUsd > 0
+    ) {
+      args.push("--max-budget-usd", String(this.internal.budgetUsd));
     }
     this.proc = Bun.spawn({
       cmd: [this.internal.bin, ...args],
@@ -176,6 +190,27 @@ export class ClaudeSession implements EngineSession {
             this.state,
             this.internal.id,
           )) {
+            // Persist budget-exceeded count exactly once per session.
+            // Adapter-level is the single source of truth — every
+            // consumer (orchestrator pump, scoring, commitMessage, …)
+            // gets a consistent count without each call site
+            // re-implementing detection.
+            if (
+              !this.budgetCounted &&
+              ev.type === "session.error" &&
+              typeof ev.raw === "object" &&
+              ev.raw !== null &&
+              (ev.raw as { budget_exceeded?: boolean }).budget_exceeded === true
+            ) {
+              this.budgetCounted = true;
+              try {
+                incrementSessionsOverBudget();
+              } catch (err) {
+                console.warn(
+                  `[claude:${this.internal.id.slice(0, 8)}] failed to persist sessions_over_budget: ${String(err)}`,
+                );
+              }
+            }
             this.queue.push(ev);
           }
         }
@@ -232,6 +267,7 @@ export interface CreateClaudeSessionSpec {
   defaultModel: ModelRef;
   cwd: string;
   bin: string;
+  budgetUsd?: number | null;
 }
 
 export function createClaudeSession(spec: CreateClaudeSessionSpec): ClaudeSession {
@@ -242,6 +278,7 @@ export function createClaudeSession(spec: CreateClaudeSessionSpec): ClaudeSessio
     defaultModel: spec.defaultModel,
     cwd: spec.cwd,
     bin: spec.bin,
+    budgetUsd: spec.budgetUsd,
   });
   // Lazy-start: subprocess is spawned on first send(). Saves the cost of
   // spawning processes for sessions that get opened then immediately

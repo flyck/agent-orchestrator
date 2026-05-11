@@ -6,6 +6,12 @@ export interface Settings {
   max_parallel_tasks: number;
   max_agents_per_task: number;
   daily_token_budget_usd: number | null;
+  /** Per-session USD cap. Wired into Claude as --max-budget-usd; opencode
+   *  has no equivalent flag and ignores it. null disables. */
+  max_session_budget_usd: number | null;
+  /** Lifetime count of sessions terminated by the per-session budget cap.
+   *  Read-only from the UI; backend bumps it from the Claude adapter. */
+  sessions_over_budget: number;
   max_parallel_background_agents: number;
   max_background_runs_per_day: number | null;
   background_token_budget_usd_per_day: number | null;

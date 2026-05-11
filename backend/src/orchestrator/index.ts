@@ -501,9 +501,18 @@ async function pumpUntilTerminal(a: ActiveTask): Promise<PumpResult> {
       if (ev.type === "session.error") {
         terminal = "error";
         lastError = ev.raw;
+        // session.error payloads with budget_exceeded:true are counted at
+        // the adapter level (engine/claude/session.ts) so all callers —
+        // orchestrator, scoring, commitMessage, contextLabel — share one
+        // counter. We just surface it in the log line for context.
+        const budgetHit =
+          typeof ev.raw === "object" &&
+          ev.raw !== null &&
+          (ev.raw as { budget_exceeded?: boolean }).budget_exceeded === true;
         log.error("orchestrator.run.session_error_payload", {
           taskId,
           payload: JSON.stringify(ev.raw).slice(0, 1500),
+          budget_exceeded: budgetHit,
         });
       }
       if (ev.type === "session.idle") terminal = "idle";

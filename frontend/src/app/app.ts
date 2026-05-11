@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { catchError, of, timer, switchMap } from 'rxjs';
 import { BugReportButton } from './components/bug-report-button';
 import { TasksService, type ContextSwitchRow } from './services/tasks.service';
+import { SettingsService, type Settings } from './services/settings.service';
 import { formatTs } from './util/time';
 
 interface HealthResponse {
@@ -38,6 +39,7 @@ const TABS: { path: string; label: string }[] = [
 export class App {
   private http = inject(HttpClient);
   private tasksApi = inject(TasksService);
+  private settingsApi = inject(SettingsService);
   protected readonly tabs = TABS;
 
   // Poll backend health every 5s. If the backend is down, .ok stays false.
@@ -52,6 +54,11 @@ export class App {
   protected readonly ctxClearing = signal(false);
   protected readonly ctxSaving = signal(false);
   protected manualContextDraft = '';
+
+  // Lifetime count of sessions terminated by the per-session USD cap.
+  // Polled from /api/settings so a freshly-bumped count appears within a
+  // poll cycle without any SSE plumbing.
+  protected readonly settings = signal<Settings | null>(null);
 
   constructor() {
     timer(0, 5000)
@@ -83,6 +90,13 @@ export class App {
         ),
       )
       .subscribe((r) => this.currentContext.set(r.current));
+
+    // Poll settings every 20s for navbar-displayed counters
+    // (sessions_over_budget). Cheap to read; matches the cadence of the
+    // other status pills without flooding the API.
+    timer(0, 20_000)
+      .pipe(switchMap(() => this.settingsApi.get().pipe(catchError(() => of(null)))))
+      .subscribe((s) => this.settings.set(s));
   }
 
   protected clearContext(): void {

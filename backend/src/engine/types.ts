@@ -65,6 +65,13 @@ export interface OpenSessionSpec {
   model?: ModelRef;
   /** Optional restricted tool set (engine-specific names). */
   tools?: string[];
+  /**
+   * Hard per-session USD cap. Claude maps this to `--max-budget-usd` and
+   * terminates with a `result/error_max_budget_usd` event when the cap is
+   * hit. OpenCode has no equivalent flag — adapters that can't enforce
+   * log a warning and otherwise ignore.
+   */
+  budgetUsd?: number | null;
 }
 
 export interface SendMessageOptions {

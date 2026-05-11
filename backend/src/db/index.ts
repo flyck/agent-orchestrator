@@ -122,6 +122,14 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   max_parallel_tasks: "2",
   max_agents_per_task: "3",
   daily_token_budget_usd: "",
+  // Per-session USD cap passed to the Claude CLI as --max-budget-usd.
+  // Default $5; "" disables. OpenCode does not enforce this — surfaced
+  // in the UI as Claude-only. Sessions that hit the cap increment
+  // sessions_over_budget below.
+  max_session_budget_usd: "5",
+  // Lifetime counter of sessions that terminated because they hit the
+  // per-session USD budget. Surfaced in the navbar.
+  sessions_over_budget: "0",
   // Background queue
   max_parallel_background_agents: "1",
   max_background_runs_per_day: "",

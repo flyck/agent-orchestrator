@@ -6,6 +6,7 @@ const patchSchema = z.object({
   max_parallel_tasks: z.number().int().min(1).max(16).optional(),
   max_agents_per_task: z.number().int().min(1).max(16).optional(),
   daily_token_budget_usd: z.number().nonnegative().nullable().optional(),
+  max_session_budget_usd: z.number().nonnegative().nullable().optional(),
   max_parallel_background_agents: z.number().int().min(1).max(8).optional(),
   max_background_runs_per_day: z.number().int().nonnegative().nullable().optional(),
   background_token_budget_usd_per_day: z.number().nonnegative().nullable().optional(),

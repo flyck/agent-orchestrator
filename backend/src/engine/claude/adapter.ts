@@ -14,6 +14,8 @@ import type {
 import { probeClaudeBinary, type ClaudeBinaryInfo } from "./binary";
 import { createClaudeSession } from "./session";
 import { readTranscript } from "./transcript";
+import { readAllSettings } from "../../db/settings";
+import { log } from "../../log";
 
 export interface ClaudeCodeAdapterOptions {
   defaultModel: ModelRef;
@@ -36,12 +38,30 @@ export class ClaudeCodeAdapter implements EngineAdapter {
 
   async openSession(spec: OpenSessionSpec): Promise<EngineSession> {
     const cwd = spec.cwd ?? process.cwd();
+    // Per-session USD cap: explicit value on the spec wins; otherwise fall
+    // back to settings.max_session_budget_usd. Read on every call so
+    // changes in Settings take effect without a backend restart.
+    let budgetUsd: number | null | undefined = spec.budgetUsd;
+    if (budgetUsd === undefined) {
+      try {
+        const s = readAllSettings();
+        budgetUsd = s.max_session_budget_usd;
+      } catch (err) {
+        log.warn("claude.openSession.budget_lookup_failed", { error: String(err) });
+        budgetUsd = null;
+      }
+    }
+    if (typeof budgetUsd === "number" && (!Number.isFinite(budgetUsd) || budgetUsd <= 0)) {
+      log.warn("claude.openSession.budget_invalid", { value: budgetUsd });
+      budgetUsd = null;
+    }
     return createClaudeSession({
       title: spec.title,
       defaultSystem: "",
       defaultModel: spec.model ?? this.defaultModel,
       cwd,
       bin: this.binary.bin,
+      budgetUsd: budgetUsd ?? null,
     });
   }
 

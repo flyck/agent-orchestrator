@@ -7,6 +7,7 @@ import type {
 import { startOpenCodeServer, type OpenCodeServerHandle, type OpenCodeServerOptions } from "./server";
 import { EventBus } from "./eventBus";
 import { createSession } from "./session";
+import { log } from "../../log";
 
 export interface OpenCodeAdapterOptions extends OpenCodeServerOptions {
   /** Default model used when openSession() doesn't specify one. */
@@ -30,7 +31,18 @@ export class OpenCodeAdapter implements EngineAdapter {
     return new OpenCodeAdapter(server, bus, opts.defaultModel);
   }
 
+  /** Logged once per process when a budget is requested. opencode has no
+   *  flag for this; we don't want to silently drop the setting. */
+  private budgetWarned = false;
+
   async openSession(spec: OpenSessionSpec): Promise<EngineSession> {
+    if (typeof spec.budgetUsd === "number" && spec.budgetUsd > 0 && !this.budgetWarned) {
+      log.warn("opencode.openSession.budget_not_enforced", {
+        requested: spec.budgetUsd,
+        note: "opencode has no --max-budget-usd equivalent; setting is honored by the Claude engine only",
+      });
+      this.budgetWarned = true;
+    }
     return createSession(
       this.server.client,
       {

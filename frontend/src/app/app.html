@@ -73,6 +73,12 @@
           }
         }
       }
+      @let st = settings();
+      @if (st && st.sessions_over_budget > 0) {
+        <span class="dot errored"
+              title="Sessions killed by the per-session USD cap (Claude only). Adjust in Settings."></span>
+        <span class="meta">over budget: {{ st.sessions_over_budget }}</span>
+      }
     </div>
   </header>
 

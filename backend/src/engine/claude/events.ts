@@ -130,6 +130,13 @@ export function normalize(
     }
     case "result": {
       const isErr = raw.is_error === true;
+      // Claude reports the per-session budget cap as
+      //   subtype: "error_max_budget_usd", is_error: true,
+      //   errors: ["Reached maximum budget ($X)"]
+      // We bubble a stable `budget_exceeded: true` on the session.error
+      // payload so the orchestrator can count it without string-matching.
+      const budgetExceeded =
+        isErr && (raw as { subtype?: string }).subtype === "error_max_budget_usd";
       const finalUsage = raw.usage ?? {};
       if (typeof finalUsage.input_tokens === "number")
         state.inputTokens = finalUsage.input_tokens;
@@ -169,7 +176,7 @@ export function normalize(
         type: isErr ? "session.error" : "session.idle",
         ts,
         sessionId,
-        raw,
+        raw: budgetExceeded ? { ...raw, budget_exceeded: true } : raw,
       });
       // Reset turn-scoped state. The model id stays — same model for the next turn.
       state.textBuffer = "";

@@ -5,6 +5,11 @@ export interface Settings {
   max_parallel_tasks: number;
   max_agents_per_task: number;
   daily_token_budget_usd: number | null;
+  /** Per-session USD cap; passed to Claude as --max-budget-usd. null disables.
+   *  OpenCode does not enforce this (no equivalent flag). */
+  max_session_budget_usd: number | null;
+  /** Lifetime count of sessions terminated by the per-session budget cap. */
+  sessions_over_budget: number;
   max_parallel_background_agents: number;
   max_background_runs_per_day: number | null;
   background_token_budget_usd_per_day: number | null;
@@ -42,10 +47,12 @@ const NUMBER_KEYS = new Set<keyof Settings>([
   "readme_token_budget",
   "backlog_token_budget",
   "pr_review_poll_interval_minutes",
+  "sessions_over_budget",
 ]);
 
 const NULLABLE_NUMBER_KEYS = new Set<keyof Settings>([
   "daily_token_budget_usd",
+  "max_session_budget_usd",
   "max_background_runs_per_day",
   "background_token_budget_usd_per_day",
 ]);
@@ -90,6 +97,21 @@ export function incrementCompletedSinceNudge(handle: Database = db()): number {
   handle
     .prepare("UPDATE settings SET value = ? WHERE key = ?")
     .run(String(next), "completed_since_last_nudge");
+  return next;
+}
+
+/** Bump the lifetime counter of sessions terminated by hitting the
+ *  per-session USD budget cap. Returns the new value. */
+export function incrementSessionsOverBudget(handle: Database = db()): number {
+  const row = handle
+    .query<{ value: string }, [string]>("SELECT value FROM settings WHERE key = ?")
+    .get("sessions_over_budget");
+  const next = (row?.value ? Number(row.value) : 0) + 1;
+  handle
+    .prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .run("sessions_over_budget", String(next));
   return next;
 }
 
