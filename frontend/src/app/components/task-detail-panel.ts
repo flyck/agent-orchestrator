@@ -211,6 +211,18 @@ function extractMermaid(text: string): string | null {
         opacity: 0.5;
         cursor: default;
       }
+      .detail-done-btn {
+        color: #2e8b57;
+        border-color: #2e8b57;
+      }
+      .detail-done-btn:hover {
+        background: #2e8b57;
+        color: var(--paper);
+      }
+      .detail-done-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
       .attention-block {
         background: var(--ink-amber-bg);
         border: 1px solid var(--ink-amber);
@@ -830,6 +842,7 @@ export class TaskDetailPanelComponent {
   protected readonly taskLoading = signal(false);
   protected readonly taskError = signal<string | null>(null);
   protected readonly deleting = signal(false);
+  protected readonly finishing = signal(false);
 
   protected readonly terminalStatuses = new Set(["done", "failed", "canceled"]);
 
@@ -1550,6 +1563,26 @@ export class TaskDetailPanelComponent {
       },
       error: (e) => {
         this.deleting.set(false);
+        this.taskError.set(e?.error?.message ?? e?.message ?? String(e));
+      },
+    });
+  }
+
+  protected finishReviewTask(): void {
+    const t = this.task();
+    if (!t || t.workspace !== "review") return;
+    this.finishing.set(true);
+    // Re-use abandon — stamps abandoned_at, which the Review-page
+    // classifier reads to move the card from Ready to History. The
+    // task row + transcripts stay (vs Delete) so the user can revisit.
+    this.tasksApi.abandon(t.id).subscribe({
+      next: () => {
+        this.finishing.set(false);
+        this.taskChanged.emit();
+        this.close.emit();
+      },
+      error: (e) => {
+        this.finishing.set(false);
         this.taskError.set(e?.error?.message ?? e?.message ?? String(e));
       },
     });

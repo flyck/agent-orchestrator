@@ -29,6 +29,15 @@
         <h2>{{ t.title }}</h2>
       </div>
       <div class="detail-head-actions">
+        @if (t.workspace === 'review' && t.abandoned_at === null && t.current_state === 'ready') {
+          <button type="button"
+                  class="detail-close-btn detail-done-btn"
+                  [disabled]="finishing()"
+                  (click)="finishReviewTask()"
+                  title="Mark this review as done — moves the task to the History section">
+            {{ finishing() ? 'marking…' : 'Mark done' }}
+          </button>
+        }
         @if (t.workspace === 'review') {
           <button type="button"
                   class="detail-close-btn detail-delete-btn"

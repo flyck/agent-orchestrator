@@ -14,6 +14,7 @@ function makeTask(over: Partial<Task> = {}): Task {
     workspace: 'review',
     status: 'running',
     current_state: 'intake',
+    abandoned_at: null,
     title: 't',
     updated_at: 0,
     created_at: 0,
@@ -40,20 +41,26 @@ describe('toCard — pipeline-column mapping', () => {
     expect(out.status).toBe('open');
   });
 
-  test('closed states bucket as "closed"', () => {
-    for (const status of ['done', 'failed', 'canceled'] as const) {
+  test('status=done alone still counts as open (Ready column) until user dismisses', () => {
+    const out = toCard(makeTask({ status: 'done', current_state: 'ready' }));
+    expect(out.status).toBe('open');
+    expect(out.state).toBe('ready');
+  });
+
+  test('failed / canceled go straight to closed (History) since there is no usable result', () => {
+    for (const status of ['failed', 'canceled'] as const) {
       const out = toCard(makeTask({ status, current_state: 'intake' }));
       expect(out.status).toBe('closed');
     }
   });
 
-  test('closed task with non-ready state → state forced to "ready"', () => {
-    const out = toCard(makeTask({ status: 'done', current_state: 'explore' }));
-    expect(out.state).toBe('ready');
+  test('abandoned_at set → closed (user dismissed via Mark done)', () => {
+    const out = toCard(makeTask({ status: 'done', current_state: 'ready', abandoned_at: 123 }));
+    expect(out.status).toBe('closed');
   });
 
-  test('closed task already in "ready" stays "ready"', () => {
-    const out = toCard(makeTask({ status: 'done', current_state: 'ready' }));
+  test('user-dismissed task with non-ready state → state forced to "ready"', () => {
+    const out = toCard(makeTask({ status: 'done', current_state: 'explore', abandoned_at: 1 }));
     expect(out.state).toBe('ready');
   });
 });

@@ -214,6 +214,40 @@ export function setTaskMetadata(
     .run(JSON.stringify(meta), Date.now(), id);
 }
 
+/** Return the set of `${repo}#${number}` keys for review-workspace tasks
+ *  that should hide their PR from the "awaiting me" list — i.e. the
+ *  agent is still working and the user hasn't seen the findings yet.
+ *
+ *  A task reaches `current_state='ready'` once the reviewer agent has
+ *  posted its findings and is waiting for the user to act on the PR.
+ *  At that point the PR re-appears in awaiting_me so the user has a
+ *  one-click path back to it. Hitting "Finish" (status='done') or
+ *  "Delete" / abandon then takes it out of the awaiting list again.
+ *
+ *  Reads both metadata shapes (.pr from the generic endpoint, .github
+ *  from the older poller path) so providers stay interchangeable. */
+export function listActivePrTaskKeys(handle: Database = db()): Set<string> {
+  const rows = handle
+    .query<{ metadata_json: string | null }, never[]>(
+      `SELECT metadata_json FROM tasks
+       WHERE workspace = 'review'
+         AND status != 'done'
+         AND (current_state IS NULL OR current_state != 'ready')
+         AND abandoned_at IS NULL
+         AND metadata_json IS NOT NULL`,
+    )
+    .all();
+  const out = new Set<string>();
+  for (const r of rows) {
+    const meta = parseTaskMetadata(r.metadata_json);
+    const coord = meta.pr ?? meta.github;
+    if (coord?.repo && typeof coord.number === "number") {
+      out.add(`${coord.repo}#${coord.number}`);
+    }
+  }
+  return out;
+}
+
 export interface CreateTaskInput {
   workspace: TaskWorkspace;
   queue?: TaskQueue;

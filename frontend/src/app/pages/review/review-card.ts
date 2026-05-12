@@ -49,13 +49,23 @@ export interface ReviewCard {
 
 /**
  * Map a task's raw current_state into a column on the Review page.
- * Anything that isn't one of the pipeline phases (legacy review-tasks
- * created before Phase 16) maps to 'ready' so old rows still appear
- * in the History at least, and don't visually pollute the new columns.
+ *
+ * Review tasks auto-finalize to status='done' the moment the reviewer
+ * agent posts its findings — but the user hasn't actually seen them
+ * yet at that point, so we keep the task in the Ready column of the
+ * pipeline (status='open' to this UI) until the user explicitly
+ * dismisses it via "Mark done", which stamps abandoned_at. failed /
+ * canceled tasks go straight to History since the agent didn't
+ * produce a usable result.
+ *
+ * Anything with a current_state that isn't one of the pipeline phases
+ * (legacy review-tasks created before Phase 16) maps to 'ready' so
+ * old rows still appear in History.
  */
 export function toCard(t: Task): ReviewCard {
-  const closed =
-    t.status === 'done' || t.status === 'failed' || t.status === 'canceled';
+  const userDismissed = t.abandoned_at !== null;
+  const hardFailed = t.status === 'failed' || t.status === 'canceled';
+  const closed = userDismissed || hardFailed;
   const raw = (t.current_state ?? 'intake') as string;
   let state: ReviewPipelineState = (
     REVIEW_PIPELINE_STATES as readonly string[]

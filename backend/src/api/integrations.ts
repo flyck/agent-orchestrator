@@ -42,6 +42,7 @@ import {
 import {
   createTask,
   getTask,
+  listActivePrTaskKeys,
   parseTaskMetadata,
   setTaskMetadata,
   type TaskRow,
@@ -352,6 +353,9 @@ integrations.get("/prs", async (c) => {
 
   // 60s TTL cache — collapses repeated Review-page polls into one
   // upstream fetch. ?fresh=1 bypasses the cache (refresh button).
+  // The active-review-task filter runs after the cache read so newly
+  // created / deleted review tasks take effect on the next poll
+  // without needing to invalidate the upstream cache.
   const fresh = c.req.query("fresh") === "1";
   const key = prCacheKey(provider.id, filter, watched);
   if (!fresh) {
@@ -360,7 +364,7 @@ integrations.get("/prs", async (c) => {
       return c.json({
         source: provider.id,
         filter,
-        prs: hit.prs,
+        prs: hideActivePrs(hit.prs, filter),
         cached: true,
         cached_age_ms: Date.now() - hit.cachedAt,
       });
@@ -371,7 +375,12 @@ integrations.get("/prs", async (c) => {
     const prs = await provider.listPullRequests(filter);
     setPrCache(key, prs);
     markSynced(provider.id);
-    return c.json({ source: provider.id, filter, prs, cached: false });
+    return c.json({
+      source: provider.id,
+      filter,
+      prs: hideActivePrs(prs, filter),
+      cached: false,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     markError(provider.id, message);
@@ -379,6 +388,19 @@ integrations.get("/prs", async (c) => {
     return c.json({ error: "provider_request_failed", source: provider.id, message }, 502);
   }
 });
+
+/** Drop PRs from the awaiting_me list when an active review task already
+ *  exists for them. Pure pass-through for all_open so the user can still
+ *  see the rest of the open-PR landscape. */
+function hideActivePrs(
+  prs: NormalizedPull[],
+  filter: ProviderPullFilter,
+): NormalizedPull[] {
+  if (filter !== ProviderPullFilter.AwaitingMe) return prs;
+  const active = listActivePrTaskKeys();
+  if (active.size === 0) return prs;
+  return prs.filter((p) => !active.has(`${p.repo}#${p.number}`));
+}
 
 /**
  * Spawn a review task from any provider's PR. The repo path is the
