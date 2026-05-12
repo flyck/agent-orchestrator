@@ -215,6 +215,41 @@ const relativeTsIso = (iso: string) => relativeTsIsoPure(iso, relativeTs);
                           (click)="reviewPr(pr)">
                     {{ busyOn() === pr.repo + '#' + pr.number ? 'starting…' : 'review' }}
                   </button>
+                  <div class="pr-avatars" aria-label="Reviewers">
+                    @if (pr.author_avatar || pr.author) {
+                      <span class="avatar avatar-author"
+                            [title]="pr.author + ' (author)'">
+                        @if (pr.author_avatar) {
+                          <img [src]="pr.author_avatar" [alt]="pr.author" loading="lazy" />
+                        } @else {
+                          <span class="avatar-fallback">{{ initials(pr.author) }}</span>
+                        }
+                      </span>
+                    }
+                    @for (rv of pr.reviewers; track rv.id) {
+                      <span class="avatar"
+                            [class.state-approved]="rv.state === 'approved'"
+                            [class.state-changes]="rv.state === 'changes_requested'"
+                            [title]="rv.name + ' · ' + reviewerStateLabel(rv.state)">
+                        @if (rv.avatar_url) {
+                          <img [src]="rv.avatar_url" [alt]="rv.name" loading="lazy" />
+                        } @else {
+                          <span class="avatar-fallback">{{ initials(rv.name) }}</span>
+                        }
+                        @if (rv.state === 'approved') {
+                          <svg class="state-overlay overlay-approved" viewBox="0 0 12 12" aria-hidden="true">
+                            <circle cx="6" cy="6" r="6" />
+                            <path d="M3.5 6.2 L5.2 7.9 L8.6 4.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                          </svg>
+                        } @else if (rv.state === 'changes_requested') {
+                          <svg class="state-overlay overlay-changes" viewBox="0 0 12 12" aria-hidden="true">
+                            <circle cx="6" cy="6" r="6" />
+                            <path d="M3.5 6 H8.5" stroke="#fff" stroke-width="1.6" stroke-linecap="round" />
+                          </svg>
+                        }
+                      </span>
+                    }
+                  </div>
                 </div>
               </li>
             }
@@ -466,7 +501,61 @@ const relativeTsIso = (iso: string) => relativeTsIsoPure(iso, relativeTs);
         max-height: 80px;
         overflow: hidden;
       }
-      .pr-actions { margin-top: 8px; }
+      .pr-actions {
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .pr-avatars {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .avatar {
+        position: relative;
+        display: inline-flex;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        overflow: visible;
+        background: var(--paper-soft);
+        border: 1px solid var(--rule);
+        flex: 0 0 auto;
+      }
+      .avatar img {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        object-fit: cover;
+        display: block;
+      }
+      .avatar-fallback {
+        width: 100%;
+        height: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-family: var(--font-mono);
+        color: var(--ink-muted);
+        text-transform: uppercase;
+      }
+      .avatar-author {
+        border-color: var(--rule-strong);
+        border-style: dashed;
+      }
+      .state-overlay {
+        position: absolute;
+        width: 11px;
+        height: 11px;
+        right: -2px;
+        bottom: -2px;
+        border-radius: 50%;
+      }
+      .overlay-approved circle { fill: #2e8b57; }
+      .overlay-changes  circle { fill: var(--ink-red, #b34c4c); }
       .badge {
         font-size: 10.5px;
         letter-spacing: 0.06em;
@@ -713,5 +802,18 @@ export class ReviewPage implements OnDestroy {
 
   truncateBody(s: string): string {
     return s.length > 240 ? `${s.slice(0, 240)}…` : s;
+  }
+
+  initials(name: string): string {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0]!.slice(0, 2);
+    return (parts[0]![0]! + parts[parts.length - 1]![0]!);
+  }
+
+  reviewerStateLabel(s: 'pending' | 'approved' | 'changes_requested'): string {
+    if (s === 'approved') return 'approved';
+    if (s === 'changes_requested') return 'changes requested';
+    return 'awaiting';
   }
 }

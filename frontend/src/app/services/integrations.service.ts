@@ -83,6 +83,14 @@ export interface NormalizedPr {
   updated_at: string;
   created_at: string;
   awaiting_me: boolean;
+  reviewers: PrReviewer[];
+}
+
+export interface PrReviewer {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  state: 'pending' | 'approved' | 'changes_requested';
 }
 
 export const PrFilter = {

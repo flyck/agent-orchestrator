@@ -96,7 +96,7 @@ export interface GithubPull {
   head: { ref: string; sha: string };
   updated_at: string;
   created_at: string;
-  requested_reviewers?: Array<{ login: string }>;
+  requested_reviewers?: Array<{ login: string; avatar_url?: string }>;
   merged_at?: string | null;
   /** repo ref so callers can group / link without a second lookup. */
   repository_url?: string;

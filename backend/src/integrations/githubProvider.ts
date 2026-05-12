@@ -41,6 +41,19 @@ function toRepo(r: {
 }
 
 function toPull(pr: GithubPull): NormalizedPull {
+  // GitHub's listing payload only carries the pending reviewers
+  // (`requested_reviewers`); once they review, GitHub removes them from
+  // this array and the state moves to a /reviews entry. We don't fan out
+  // to /reviews on every listing, so for now every entry here is
+  // 'pending'. Approved/changes_requested reviewers are not surfaced
+  // until we add that follow-up call. github.com/{login}.png is a
+  // documented stable fallback for the avatar.
+  const reviewers = (pr.requested_reviewers ?? []).map((r) => ({
+    id: r.login,
+    name: r.login,
+    avatar_url: r.avatar_url ?? `https://github.com/${r.login}.png`,
+    state: "pending" as const,
+  }));
   return {
     source: "github",
     repo: pr.repo_full_name ?? "",
@@ -56,6 +69,7 @@ function toPull(pr: GithubPull): NormalizedPull {
     updated_at: pr.updated_at,
     created_at: pr.created_at,
     awaiting_me: pr.awaiting_me ?? false,
+    reviewers,
   };
 }
 

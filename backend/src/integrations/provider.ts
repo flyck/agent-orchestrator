@@ -71,6 +71,25 @@ export interface NormalizedPull {
   /** True when the authed user is a requested reviewer who hasn't yet
    *  approved or requested changes. */
   awaiting_me: boolean;
+  /** Reviewers on the PR with their current review state. The frontend
+   *  renders an avatar row with state overlays (✓ for approved, etc.).
+   *  GitHub's listing only exposes pending reviewers without a separate
+   *  /reviews call, so for GH every entry here is currently 'pending'.
+   *  Bitbucket fills the full state from the participants payload. */
+  reviewers: PullReviewer[];
+}
+
+export interface PullReviewer {
+  /** Stable provider id — Bitbucket UUID or GitHub login. Used as the
+   *  list key on the frontend and as the cache key for avatar lookups. */
+  id: string;
+  /** Display name shown in the tooltip. */
+  name: string;
+  /** Avatar URL when the provider exposes one. The browser HTTP cache
+   *  handles repeat loads; Atlassian's avatar CDN sets long max-age
+   *  headers and the URLs embed the user UUID so they're stable. */
+  avatar_url: string | null;
+  state: "pending" | "approved" | "changes_requested";
 }
 
 export type ProviderId = "github" | "bitbucket";

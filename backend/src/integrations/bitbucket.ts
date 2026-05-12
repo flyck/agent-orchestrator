@@ -314,15 +314,28 @@ export interface BitbucketPullRaw {
   description: string | null;
   state: "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED";
   draft?: boolean;
-  author: { display_name?: string; uuid?: string; nickname?: string };
+  author: {
+    display_name?: string;
+    uuid?: string;
+    nickname?: string;
+    links?: { avatar?: { href?: string } };
+  };
   source: { branch: { name: string }; commit?: { hash: string } };
   destination: { branch: { name: string }; commit?: { hash: string } };
   links?: { html?: { href?: string } };
   updated_on: string;
   created_on: string;
-  reviewers?: Array<{ uuid?: string; display_name?: string }>;
+  reviewers?: Array<{
+    uuid?: string;
+    display_name?: string;
+    links?: { avatar?: { href?: string } };
+  }>;
   participants?: Array<{
-    user?: { uuid?: string; display_name?: string };
+    user?: {
+      uuid?: string;
+      display_name?: string;
+      links?: { avatar?: { href?: string } };
+    };
     role: "PARTICIPANT" | "REVIEWER";
     approved?: boolean;
     state?: "approved" | "changes_requested" | null;
@@ -348,6 +361,13 @@ export interface BitbucketPull {
   /** Set client-side: true when the authed user is a requested
    *  reviewer who hasn't approved or requested changes yet. */
   awaiting_me: boolean;
+  author_avatar: string | null;
+  reviewers: Array<{
+    id: string;
+    name: string;
+    avatar_url: string | null;
+    state: "pending" | "approved" | "changes_requested";
+  }>;
 }
 
 export const BitbucketPullFilter = {
@@ -403,8 +423,13 @@ export async function listPullRequests(
       // The listing endpoint omits reviewers/participants by default —
       // without them, isAwaitingMe() can't see that we're a reviewer and
       // wrongly drops PRs that the server-side q-filter correctly returned.
-      // The +values.X syntax adds otherwise-omitted fields to the slim shape.
-      params.set("fields", "+values.reviewers,+values.participants");
+      // The +values.X syntax adds otherwise-omitted fields to the slim
+      // shape. Avatar links are nested under links.avatar so we request
+      // them explicitly too — they ride on the same response, no extra call.
+      params.set(
+        "fields",
+        "+values.reviewers,+values.participants,+values.author.links.avatar,+values.reviewers.links.avatar,+values.participants.user.links.avatar",
+      );
       const url = `/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
         slug,
       )}/pullrequests?${params.toString()}`;
@@ -489,7 +514,36 @@ function toBitbucketPull(
     updated_at: pr.updated_on,
     created_at: pr.created_on,
     awaiting_me: awaitingMe,
+    author_avatar: pr.author?.links?.avatar?.href ?? null,
+    reviewers: buildReviewers(pr),
   };
+}
+
+/** Merge the reviewers + participants arrays into a single per-user
+ *  list with state. Bitbucket splits them: `reviewers` lists who was
+ *  requested (and exposes avatars), `participants` carries per-user
+ *  approval state. A reviewer who hasn't weighed in yet usually has
+ *  no participants entry, so we default to 'pending'. */
+function buildReviewers(pr: BitbucketPullRaw): BitbucketPull["reviewers"] {
+  const stateByUuid = new Map<string, "approved" | "changes_requested">();
+  for (const p of pr.participants ?? []) {
+    const uuid = p.user?.uuid;
+    if (!uuid || p.role !== "REVIEWER") continue;
+    if (p.approved || p.state === "approved") stateByUuid.set(uuid, "approved");
+    else if (p.state === "changes_requested") stateByUuid.set(uuid, "changes_requested");
+  }
+  const out: BitbucketPull["reviewers"] = [];
+  for (const r of pr.reviewers ?? []) {
+    const uuid = r.uuid;
+    if (!uuid) continue;
+    out.push({
+      id: uuid,
+      name: r.display_name ?? "unknown",
+      avatar_url: r.links?.avatar?.href ?? null,
+      state: stateByUuid.get(uuid) ?? "pending",
+    });
+  }
+  return out;
 }
 
 function splitRepo(repo: string): { workspace: string; slug: string } {

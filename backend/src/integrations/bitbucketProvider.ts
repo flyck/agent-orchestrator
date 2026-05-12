@@ -36,14 +36,25 @@ function toNormalizedPullFromRaw(
 ): NormalizedPull {
   const isReviewer = (pr.reviewers ?? []).some((r) => r.uuid === myUuid);
   let awaiting = !!myUuid && isReviewer;
-  if (awaiting) {
-    const me = (pr.participants ?? []).find(
-      (p) => p.user?.uuid === myUuid && p.role === "REVIEWER",
-    );
-    if (me?.approved || me?.state === "approved" || me?.state === "changes_requested") {
-      awaiting = false;
-    }
+  const stateByUuid = new Map<string, "approved" | "changes_requested">();
+  for (const p of pr.participants ?? []) {
+    const uuid = p.user?.uuid;
+    if (!uuid || p.role !== "REVIEWER") continue;
+    if (p.approved || p.state === "approved") stateByUuid.set(uuid, "approved");
+    else if (p.state === "changes_requested") stateByUuid.set(uuid, "changes_requested");
   }
+  if (awaiting) {
+    const myState = myUuid ? stateByUuid.get(myUuid) : undefined;
+    if (myState) awaiting = false;
+  }
+  const reviewers = (pr.reviewers ?? [])
+    .filter((r) => !!r.uuid)
+    .map((r) => ({
+      id: r.uuid!,
+      name: r.display_name ?? "unknown",
+      avatar_url: r.links?.avatar?.href ?? null,
+      state: stateByUuid.get(r.uuid!) ?? ("pending" as const),
+    }));
   return {
     source: "bitbucket",
     repo,
@@ -53,7 +64,7 @@ function toNormalizedPullFromRaw(
       pr.links?.html?.href ??
       `https://bitbucket.org/${repo}/pull-requests/${pr.id}`,
     author: pr.author?.display_name ?? pr.author?.nickname ?? "unknown",
-    author_avatar: null,
+    author_avatar: pr.author?.links?.avatar?.href ?? null,
     body: (pr.description ?? "").slice(0, 800),
     base_ref: pr.destination?.branch?.name ?? "",
     head_ref: pr.source?.branch?.name ?? "",
@@ -61,6 +72,7 @@ function toNormalizedPullFromRaw(
     updated_at: pr.updated_on,
     created_at: pr.created_on,
     awaiting_me: awaiting,
+    reviewers,
   };
 }
 
@@ -155,7 +167,7 @@ export function makeBitbucketProvider(): PrSourceProvider {
         title: p.title,
         url: p.url,
         author: p.author,
-        author_avatar: null,
+        author_avatar: p.author_avatar,
         body: p.body,
         base_ref: p.base_ref,
         head_ref: p.head_ref,
@@ -163,6 +175,7 @@ export function makeBitbucketProvider(): PrSourceProvider {
         updated_at: p.updated_at,
         created_at: p.created_at,
         awaiting_me: p.awaiting_me,
+        reviewers: p.reviewers,
       }));
     },
 
