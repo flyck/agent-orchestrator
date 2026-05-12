@@ -194,6 +194,23 @@ function extractMermaid(text: string): string | null {
         color: var(--ink);
         border-color: var(--ink);
       }
+      .detail-head-actions {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+      }
+      .detail-delete-btn {
+        color: var(--ink-red, #b34c4c);
+        border-color: var(--ink-red, #b34c4c);
+      }
+      .detail-delete-btn:hover {
+        background: var(--ink-red, #b34c4c);
+        color: var(--paper);
+      }
+      .detail-delete-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
       .attention-block {
         background: var(--ink-amber-bg);
         border: 1px solid var(--ink-amber);
@@ -812,6 +829,7 @@ export class TaskDetailPanelComponent {
   protected readonly task = signal<Task | null>(null);
   protected readonly taskLoading = signal(false);
   protected readonly taskError = signal<string | null>(null);
+  protected readonly deleting = signal(false);
 
   protected readonly terminalStatuses = new Set(["done", "failed", "canceled"]);
 
@@ -1515,5 +1533,25 @@ export class TaskDetailPanelComponent {
     this.destroy$.next();
     this.destroy$.complete();
     this.closeStream();
+  }
+
+  protected deleteReviewTask(): void {
+    const t = this.task();
+    if (!t || t.workspace !== "review") return;
+    if (!confirm(`Delete review task "${t.title}"?\nThis removes the task and all its agent transcripts so the next review starts fresh.`)) {
+      return;
+    }
+    this.deleting.set(true);
+    this.tasksApi.delete(t.id).subscribe({
+      next: () => {
+        this.deleting.set(false);
+        this.taskChanged.emit();
+        this.close.emit();
+      },
+      error: (e) => {
+        this.deleting.set(false);
+        this.taskError.set(e?.error?.message ?? e?.message ?? String(e));
+      },
+    });
   }
 }

@@ -477,6 +477,8 @@ const relativeTsIso = (iso: string) => relativeTsIsoPure(iso, relativeTs);
         border: 1px solid var(--rule);
         background: var(--paper);
         padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
       }
       .pr-card.faded { opacity: 0.65; }
       .pr-head {
@@ -502,7 +504,8 @@ const relativeTsIso = (iso: string) => relativeTsIsoPure(iso, relativeTs);
         overflow: hidden;
       }
       .pr-actions {
-        margin-top: 8px;
+        margin-top: auto;
+        padding-top: 8px;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -543,8 +546,12 @@ const relativeTsIso = (iso: string) => relativeTsIsoPure(iso, relativeTs);
         text-transform: uppercase;
       }
       .avatar-author {
-        border-color: var(--rule-strong);
-        border-style: dashed;
+        width: 30px;
+        height: 30px;
+        border-width: 3px;
+        border-style: solid;
+        border-color: var(--ink);
+        margin-right: 4px;
       }
       .state-overlay {
         position: absolute;

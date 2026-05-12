@@ -28,9 +28,19 @@
         </p>
         <h2>{{ t.title }}</h2>
       </div>
-      <button type="button" class="detail-close-btn" (click)="close.emit()">
-        Close
-      </button>
+      <div class="detail-head-actions">
+        @if (t.workspace === 'review') {
+          <button type="button"
+                  class="detail-close-btn detail-delete-btn"
+                  [disabled]="deleting()"
+                  (click)="deleteReviewTask()">
+            {{ deleting() ? 'deleting…' : 'Delete' }}
+          </button>
+        }
+        <button type="button" class="detail-close-btn" (click)="close.emit()">
+          Close
+        </button>
+      </div>
     </header>
 
     @if (t.needs_feedback === 1) {
