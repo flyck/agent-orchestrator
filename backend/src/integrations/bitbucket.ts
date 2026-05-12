@@ -400,6 +400,11 @@ export async function listPullRequests(
     try {
       const params = new URLSearchParams({ state: "OPEN", pagelen: "50" });
       if (qFilter) params.set("q", qFilter);
+      // The listing endpoint omits reviewers/participants by default —
+      // without them, isAwaitingMe() can't see that we're a reviewer and
+      // wrongly drops PRs that the server-side q-filter correctly returned.
+      // The +values.X syntax adds otherwise-omitted fields to the slim shape.
+      params.set("fields", "+values.reviewers,+values.participants");
       const url = `/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
         slug,
       )}/pullrequests?${params.toString()}`;
