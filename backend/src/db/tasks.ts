@@ -518,6 +518,17 @@ export function markAbandoned(id: string, handle: Database = db()): TaskRow | nu
   return getTask(id, handle);
 }
 
+/** Clear abandoned_at — used when a user re-engages with a previously
+ *  dismissed task (e.g. sending back a review with doubts on a task
+ *  whose Ready stage they had stamped "Mark done"). */
+export function clearAbandoned(id: string, handle: Database = db()): TaskRow | null {
+  const now = Date.now();
+  handle
+    .prepare("UPDATE tasks SET abandoned_at = NULL, updated_at = ? WHERE id = ?")
+    .run(now, id);
+  return getTask(id, handle);
+}
+
 /** Persist (or clear) the agent-compiled commit message. The user may
  *  later edit this through the finalize UI; that path uses the same setter. */
 export function setProposedCommitMessage(

@@ -93,7 +93,14 @@ export type TaskState =
   | 'review'
   | 'build'
   | 'ready'
-  | 'finalize';
+  | 'finalize'
+  // PR-review pipeline phases (Phase 16). Stored verbatim in
+  // tasks.current_state so review cards can route off the same column.
+  | 'intake'
+  | 'explore'
+  | 'direction-gate'
+  | 'deep-review'
+  | 'synthesis';
 
 export interface Task {
   id: string;
@@ -149,8 +156,54 @@ export interface Task {
   explorer_summary: string | null;
   explorer_verdict: string | null;
   explorer_architecture_mermaid: string | null;
+  /** Task-type-specific metadata as a JSON blob. PR-review tasks stash
+   *  the PR coordinates here ({ pr: { source, repo, number, base_ref,
+   *  head_ref, html_url } } for the generic flow, or { github: {...} }
+   *  for tasks created by the legacy poller). Parse client-side. */
+  metadata_json: string | null;
   created_at: number;
   updated_at: number;
+}
+
+/** Parsed metadata helper — null for non-review tasks or unparseable
+ *  blobs. Use to surface the PR link / coordinates from a Task row. */
+export interface TaskPrCoordinates {
+  source: 'github' | 'bitbucket';
+  repo: string;
+  number: number;
+  html_url: string | null;
+  base_ref?: string;
+  head_ref?: string;
+}
+
+export function parseTaskPrMeta(t: Task): TaskPrCoordinates | null {
+  if (!t.metadata_json) return null;
+  try {
+    const parsed = JSON.parse(t.metadata_json);
+    if (parsed?.pr?.repo && typeof parsed.pr.number === 'number') {
+      return {
+        source: parsed.pr.source === 'bitbucket' ? 'bitbucket' : 'github',
+        repo: parsed.pr.repo,
+        number: parsed.pr.number,
+        html_url: parsed.pr.html_url ?? null,
+        base_ref: parsed.pr.base_ref,
+        head_ref: parsed.pr.head_ref,
+      };
+    }
+    if (parsed?.github?.repo && typeof parsed.github.number === 'number') {
+      return {
+        source: 'github',
+        repo: parsed.github.repo,
+        number: parsed.github.number,
+        html_url: parsed.github.html_url ?? null,
+        base_ref: parsed.github.base_ref,
+        head_ref: parsed.github.head_ref,
+      };
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
 }
 
 export interface CreateTaskInput {
@@ -234,6 +287,21 @@ export class TasksService {
    *  user dealt with the work outside the orchestrator. */
   finish(id: string): Observable<Task> {
     return this.http.post<Task>(`/api/tasks/${id}/finish`, {});
+  }
+
+  /** Send a review task back from Ready to the synthesizer with doubts
+   *  the user wants the agent to reconsider. Only works for review-
+   *  workspace tasks at current_state='ready'. The doubts ship as a
+   *  followUp string the synthesizer consumes on its re-run. */
+  sendBackReviewWithDoubts(
+    id: string,
+    doubts: Array<{ finding_id: string; title: string; severity?: string; reason: string }>,
+    extra_note: string,
+  ): Observable<{ task_id: string; session_id?: string; queued?: boolean }> {
+    return this.http.post<{ task_id: string; session_id?: string; queued?: boolean }>(
+      `/api/tasks/${id}/review/send-back-with-doubts`,
+      { doubts, extra_note },
+    );
   }
 
   /** Approve a paused pipeline gate so the runner advances to the next

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+  clearAbandoned,
   createTask,
   clearNeedsFeedback,
   deleteTask,
@@ -895,6 +896,121 @@ tasks.post("/:id/finish", async (c) => {
   log.info("api.tasks.finished", { id });
   return c.json(updated);
 });
+
+/**
+ * Send a review task back from Ready to the synthesizer with user
+ * doubts attached. Specific to PR-review tasks at current_state='ready'
+ * that have auto-finalized (status='done'). Distinct from /gate/sendback
+ * which expects a paused gate — Ready in PR-review is terminal, not a
+ * gate pause.
+ *
+ * Flow:
+ *   - Clear status='done' → 'running' and current_state='ready' → 'synthesis'
+ *     so resumeFrom() picks the synthesis phase via the sendback branch.
+ *   - Clear abandoned_at if the user had stamped "Mark done".
+ *   - Bump user_sendbacks for metrics.
+ *   - Kick startRun with the doubts rendered as a followUp string;
+ *     resumeFrom + the synthesizer agent splice it into the next message.
+ *
+ * The synthesizer agent prompt already documents a `prompted-by-user`
+ * tag convention — so when this followUp arrives, the agent can flag
+ * the affected findings appropriately on the re-run.
+ */
+const doubtSchema = z.object({
+  finding_id: z.string().min(1).max(120),
+  title: z.string().min(1).max(280),
+  severity: z.string().max(20).optional(),
+  reason: z.string().max(2_000),
+});
+const sendBackWithDoubtsSchema = z.object({
+  doubts: z.array(doubtSchema).min(1).max(50),
+  extra_note: z.string().max(8_000).optional().default(""),
+});
+tasks.post("/:id/review/send-back-with-doubts", async (c) => {
+  const id = c.var.task.id;
+  const t = c.var.task;
+  if (t.workspace !== "review") {
+    return c.json({ error: "not_a_review_task" }, 400);
+  }
+  if (t.current_state !== "ready") {
+    return c.json(
+      { error: "not_at_ready", message: "Task isn't at the Ready stage." },
+      400,
+    );
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = sendBackWithDoubtsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+
+  // Make sure any prior session is closed before we restart.
+  try {
+    await cancelRun(id);
+  } catch {
+    /* already idle */
+  }
+
+  if (t.abandoned_at !== null) {
+    clearAbandoned(id);
+  }
+  // Rewind: synthesis is an agent phase, so resumeFrom() with a
+  // followUp string will pick it up via its sendback branch.
+  updateTaskStatus(id, "running" as const, "synthesis");
+  incrementUserSendbacks(id);
+
+  const followUp = renderDoubtsFollowUp(parsed.data.doubts, parsed.data.extra_note);
+  log.info("api.tasks.review_send_back_with_doubts", {
+    id,
+    doubtCount: parsed.data.doubts.length,
+    hasExtra: !!parsed.data.extra_note,
+  });
+
+  try {
+    const r = await startRun(id, { followUp });
+    if (!r) {
+      return c.json({ task_id: id, queued: true });
+    }
+    return c.json({ task_id: id, session_id: r.sessionId });
+  } catch (err) {
+    log.error("api.tasks.review_send_back_failed", { id, error: String(err) });
+    return c.json({ error: "resume_failed", message: String(err) }, 500);
+  }
+});
+
+function renderDoubtsFollowUp(
+  doubts: Array<{ finding_id: string; title: string; severity?: string; reason: string }>,
+  extra: string,
+): string {
+  const lines: string[] = [
+    "The user reviewed your synthesized findings and wants you to reconsider some of them.",
+    "Re-run the synthesis with the following doubts taken into account. Tag affected findings with",
+    "`prompted-by-user` per your output contract, and revisit severity/confidence when the user's",
+    "reasoning warrants it. You may keep findings the user didn't doubt, but apply the user's",
+    "framing where it lands.",
+    "",
+    "## Doubted findings",
+    "",
+  ];
+  for (const d of doubts) {
+    const sev = d.severity ? ` [${d.severity}]` : "";
+    lines.push(`- **${d.title}**${sev} (id: \`${d.finding_id}\`)`);
+    if (d.reason && d.reason.trim()) {
+      for (const line of d.reason.trim().split("\n")) {
+        lines.push(`  ${line}`);
+      }
+    } else {
+      lines.push("  _(no reason supplied — user just flagged this as worth re-examining)_");
+    }
+  }
+  if (extra && extra.trim()) {
+    lines.push("");
+    lines.push("## Additional steering");
+    lines.push("");
+    lines.push(extra.trim());
+  }
+  return lines.join("\n");
+}
 
 /**
  * Abandon a task — user gives up but wants to keep the record.

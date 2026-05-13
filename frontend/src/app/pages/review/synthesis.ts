@@ -67,22 +67,27 @@ function toFindings(raw: unknown, bucket: 'ranked' | 'noise'): SynthesisFinding[
     const item = raw[i];
     if (!item || typeof item !== 'object') continue;
     const o = item as Record<string, unknown>;
-    const id = typeof o.id === 'string' && o.id.length > 0
-      ? o.id
-      : `${bucket}-${i}`; // fall back so per-row keys stay stable when the agent forgot to emit one
+    const rawId = o['id'];
+    const id =
+      typeof rawId === 'string' && rawId.length > 0
+        ? rawId
+        : `${bucket}-${i}`; // fall back so per-row keys stay stable when the agent forgot to emit one
+    const confirmedBy = o['confirmed_by'];
+    const tagsRaw = o['tags'];
+    const dissent = o['dissent'];
     out.push({
       id,
-      severity: normSeverity(o.severity),
-      confidence: normConfidence(o.confidence),
-      location: typeof o.location === 'string' ? o.location : '',
-      title: typeof o.title === 'string' ? o.title : '(untitled)',
-      detail: typeof o.detail === 'string' ? o.detail : '',
-      confirmed_by: Array.isArray(o.confirmed_by)
-        ? o.confirmed_by.filter((s): s is string => typeof s === 'string')
+      severity: normSeverity(o['severity']),
+      confidence: normConfidence(o['confidence']),
+      location: typeof o['location'] === 'string' ? (o['location'] as string) : '',
+      title: typeof o['title'] === 'string' ? (o['title'] as string) : '(untitled)',
+      detail: typeof o['detail'] === 'string' ? (o['detail'] as string) : '',
+      confirmed_by: Array.isArray(confirmedBy)
+        ? confirmedBy.filter((s): s is string => typeof s === 'string')
         : [],
-      dissent: typeof o.dissent === 'string' && o.dissent.trim() ? o.dissent : null,
-      tags: Array.isArray(o.tags)
-        ? o.tags.filter((s): s is string => typeof s === 'string')
+      dissent: typeof dissent === 'string' && dissent.trim() ? dissent : null,
+      tags: Array.isArray(tagsRaw)
+        ? tagsRaw.filter((s): s is string => typeof s === 'string')
         : [],
       bucket,
     });
@@ -97,9 +102,9 @@ function toObservations(raw: unknown): SynthesizerObservation[] {
     if (!item || typeof item !== 'object') continue;
     const o = item as Record<string, unknown>;
     out.push({
-      title: typeof o.title === 'string' ? o.title : '(untitled)',
-      detail: typeof o.detail === 'string' ? o.detail : '',
-      reasoning: typeof o.reasoning === 'string' ? o.reasoning : '',
+      title: typeof o['title'] === 'string' ? (o['title'] as string) : '(untitled)',
+      detail: typeof o['detail'] === 'string' ? (o['detail'] as string) : '',
+      reasoning: typeof o['reasoning'] === 'string' ? (o['reasoning'] as string) : '',
     });
   }
   return out;

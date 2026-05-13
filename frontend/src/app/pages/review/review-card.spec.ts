@@ -36,7 +36,7 @@ describe('toCard — pipeline-column mapping', () => {
   });
 
   test('open task with unknown state (legacy) → "ready"', () => {
-    const out = toCard(makeTask({ current_state: 'wat-is-this', status: 'running' }));
+    const out = toCard(makeTask({ current_state: 'wat-is-this' as never, status: 'running' }));
     expect(out.state).toBe('ready');
     expect(out.status).toBe('open');
   });

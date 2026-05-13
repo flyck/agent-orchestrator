@@ -26,7 +26,25 @@
             · <span class="rating-bad" [title]="t.user_rating_comment ?? 'flagged as bad experience'">flagged</span>
           }
         </p>
-        <h2>{{ t.title }}</h2>
+        @let pr = prMeta();
+        @if (pr && pr.html_url) {
+          <h2>
+            <a class="detail-title-link"
+               [href]="pr.html_url"
+               target="_blank"
+               rel="noopener"
+               [title]="'Open ' + pr.repo + '#' + pr.number + ' on ' + pr.source">
+              {{ t.title }}
+              <svg class="detail-title-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 3h7v7"/>
+                <path d="M10 14L21 3"/>
+                <path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6"/>
+              </svg>
+            </a>
+          </h2>
+        } @else {
+          <h2>{{ t.title }}</h2>
+        }
       </div>
       <div class="detail-head-actions">
         @if (t.workspace === 'review' && t.abandoned_at === null && t.current_state === 'ready') {
@@ -566,42 +584,60 @@
           @if (synth.ranked.length > 0) {
             <ul class="findings findings-select" role="list">
               @for (f of synth.ranked; track f.id) {
-                <li class="finding" [attr.data-severity]="f.severity">
-                  <label class="finding-pick">
-                    <input type="checkbox"
-                           [checked]="isFindingChecked(f.id)"
-                           (change)="toggleFinding(f.id)" />
-                    <span class="finding-body">
-                      <span class="finding-head">
-                        <span class="finding-severity">{{ f.severity }}</span>
-                        <span class="finding-title">{{ f.title }}</span>
-                        <span class="confidence-pill" [attr.data-confidence]="f.confidence">
-                          {{ f.confidence }}
+                <li class="finding"
+                    [attr.data-severity]="f.severity"
+                    [class.doubted]="isFindingDoubted(f.id)">
+                  <div class="finding-row">
+                    <label class="finding-pick">
+                      <input type="checkbox"
+                             [checked]="isFindingChecked(f.id)"
+                             (change)="toggleFinding(f.id)" />
+                      <span class="finding-body">
+                        <span class="finding-head">
+                          <span class="finding-severity">{{ f.severity }}</span>
+                          <span class="finding-title">{{ f.title }}</span>
+                          <span class="confidence-pill" [attr.data-confidence]="f.confidence">
+                            {{ f.confidence }}
+                          </span>
                         </span>
+                        @if (f.location && f.location !== 'general') {
+                          <span class="finding-loc mono">{{ f.location }}</span>
+                        }
+                        @if (f.detail) {
+                          <span class="finding-detail">{{ f.detail }}</span>
+                        }
+                        @if (f.confirmed_by.length > 0) {
+                          <span class="finding-attribution meta">
+                            confirmed by {{ f.confirmed_by.join(', ') }}
+                          </span>
+                        }
+                        @if (f.dissent) {
+                          <span class="finding-dissent meta">⚠ dissent: {{ f.dissent }}</span>
+                        }
+                        @if (f.tags.length > 0) {
+                          <span class="finding-tags">
+                            @for (tag of f.tags; track tag) {
+                              <span class="tag-pill">{{ tag }}</span>
+                            }
+                          </span>
+                        }
                       </span>
-                      @if (f.location && f.location !== 'general') {
-                        <span class="finding-loc mono">{{ f.location }}</span>
-                      }
-                      @if (f.detail) {
-                        <span class="finding-detail">{{ f.detail }}</span>
-                      }
-                      @if (f.confirmed_by.length > 0) {
-                        <span class="finding-attribution meta">
-                          confirmed by {{ f.confirmed_by.join(', ') }}
-                        </span>
-                      }
-                      @if (f.dissent) {
-                        <span class="finding-dissent meta">⚠ dissent: {{ f.dissent }}</span>
-                      }
-                      @if (f.tags.length > 0) {
-                        <span class="finding-tags">
-                          @for (tag of f.tags; track tag) {
-                            <span class="tag-pill">{{ tag }}</span>
-                          }
-                        </span>
-                      }
-                    </span>
-                  </label>
+                    </label>
+                    <button type="button"
+                            class="doubt-toggle"
+                            [class.active]="isFindingDoubted(f.id)"
+                            (click)="toggleDoubt(f.id)"
+                            [title]="isFindingDoubted(f.id) ? 'Drop the doubt' : 'Doubt this finding — sent back to the synthesizer'">
+                      {{ isFindingDoubted(f.id) ? '✓ doubted' : 'doubt' }}
+                    </button>
+                  </div>
+                  @if (isFindingDoubted(f.id)) {
+                    <textarea class="doubt-note"
+                              rows="2"
+                              placeholder="Why do you doubt this? (optional — synthesizer reads it as user steering)"
+                              [value]="getDoubtNote(f.id)"
+                              (input)="setDoubtNote(f.id, $any($event.target).value)"></textarea>
+                  }
                 </li>
               }
             </ul>
@@ -612,21 +648,38 @@
               <summary class="meta">noise — low severity + low confidence ({{ synth.noise.length }})</summary>
               <ul class="findings findings-select" role="list">
                 @for (f of synth.noise; track f.id) {
-                  <li class="finding" [attr.data-severity]="f.severity">
-                    <label class="finding-pick">
-                      <input type="checkbox"
-                             [checked]="isFindingChecked(f.id)"
-                             (change)="toggleFinding(f.id)" />
-                      <span class="finding-body">
-                        <span class="finding-head">
-                          <span class="finding-severity">{{ f.severity }}</span>
-                          <span class="finding-title">{{ f.title }}</span>
+                  <li class="finding"
+                      [attr.data-severity]="f.severity"
+                      [class.doubted]="isFindingDoubted(f.id)">
+                    <div class="finding-row">
+                      <label class="finding-pick">
+                        <input type="checkbox"
+                               [checked]="isFindingChecked(f.id)"
+                               (change)="toggleFinding(f.id)" />
+                        <span class="finding-body">
+                          <span class="finding-head">
+                            <span class="finding-severity">{{ f.severity }}</span>
+                            <span class="finding-title">{{ f.title }}</span>
+                          </span>
+                          @if (f.detail) {
+                            <span class="finding-detail">{{ f.detail }}</span>
+                          }
                         </span>
-                        @if (f.detail) {
-                          <span class="finding-detail">{{ f.detail }}</span>
-                        }
-                      </span>
-                    </label>
+                      </label>
+                      <button type="button"
+                              class="doubt-toggle"
+                              [class.active]="isFindingDoubted(f.id)"
+                              (click)="toggleDoubt(f.id)">
+                        {{ isFindingDoubted(f.id) ? '✓ doubted' : 'doubt' }}
+                      </button>
+                    </div>
+                    @if (isFindingDoubted(f.id)) {
+                      <textarea class="doubt-note"
+                                rows="2"
+                                placeholder="Why do you doubt this? (optional)"
+                                [value]="getDoubtNote(f.id)"
+                                (input)="setDoubtNote(f.id, $any($event.target).value)"></textarea>
+                    }
                   </li>
                 }
               </ul>
@@ -664,11 +717,47 @@
             </section>
           }
 
-          @if (t.current_state === 'ready' && t.abandoned_at === null) {
+          @if (t.current_state === 'ready') {
+            @if (doubtCount() > 0) {
+              <section class="synth-doubt-block">
+                <header class="review-head">
+                  <h4>Send back to synthesizer</h4>
+                  <span class="meta">{{ doubtCount() }} finding(s) doubted</span>
+                </header>
+                <p class="muted small">
+                  The synthesizer re-runs with these doubts as user steering.
+                  It can downgrade severity, re-bucket, or drop findings the
+                  user disagrees with. Add a global note below for cross-cutting
+                  guidance.
+                </p>
+                <textarea class="doubt-global-note"
+                          rows="3"
+                          placeholder="Optional: any extra guidance for the synthesizer."
+                          [value]="doubtGlobalNote()"
+                          (input)="doubtGlobalNote.set($any($event.target).value)"></textarea>
+                <div class="synth-doubt-actions">
+                  <button type="button"
+                          class="primary"
+                          [disabled]="sendingBack() || doubtCount() === 0"
+                          (click)="sendBackWithDoubts()">
+                    {{ sendingBack() ? 'sending back…' : 'Send back with doubts' }}
+                  </button>
+                  <button type="button"
+                          class="meta-action"
+                          (click)="clearDoubts()"
+                          [disabled]="sendingBack()">
+                    clear doubts
+                  </button>
+                </div>
+                @if (sendBackError()) {
+                  <p class="error small">{{ sendBackError() }}</p>
+                }
+              </section>
+            }
             <div class="synth-post">
               <button type="button"
                       class="primary"
-                      [disabled]="posting() || checkedCount() === 0"
+                      [disabled]="posting() || checkedCount() === 0 || t.abandoned_at !== null"
                       (click)="postSelectedFindings()">
                 {{ posting() ? 'posting…' : 'Post selected to PR' }}
               </button>
@@ -680,10 +769,16 @@
                   Posted ✓ <a [href]="url" target="_blank" rel="noopener">view comment</a>
                 </p>
               }
+              @if (t.abandoned_at !== null) {
+                <p class="muted small">
+                  Task is marked done. Re-engage by sending back with doubts or by re-clicking
+                  Review from the PR list.
+                </p>
+              }
             </div>
           } @else {
             <p class="muted small">
-              The post-to-PR button shows up once the task reaches the Ready stage.
+              The post-to-PR + send-back controls show up once the task reaches the Ready stage.
             </p>
           }
         </section>

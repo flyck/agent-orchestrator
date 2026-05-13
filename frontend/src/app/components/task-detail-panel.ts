@@ -15,6 +15,7 @@ import { Subject, type Subscription, timer } from "rxjs";
 import { takeUntil } from "rxjs/operators";
 import {
   TasksService,
+  parseTaskPrMeta,
   type ReviewFinding,
   type Task,
   type TaskAlternativeRow,
@@ -185,6 +186,25 @@ function extractMermaid(text: string): string | null {
         margin-bottom: 12px;
       }
       .detail-head h2 { margin: 4px 0 0; }
+      .detail-title-link {
+        color: inherit;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .detail-title-link:hover {
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+      .detail-title-icon {
+        flex-shrink: 0;
+        align-self: center;
+        color: var(--ink-muted);
+        transition: color 120ms ease;
+      }
+      .detail-title-link:hover .detail-title-icon { color: var(--ink); }
       .detail-close-btn {
         font-size: 12px;
         letter-spacing: 0.06em;
@@ -776,6 +796,73 @@ function extractMermaid(text: string): string | null {
         gap: 6px;
         align-items: flex-start;
       }
+      .finding-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 10px;
+      }
+      .finding-row .finding-pick {
+        flex: 1;
+        padding: 0;
+      }
+      .doubt-toggle {
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: transparent;
+        border: 1px solid var(--rule-strong);
+        color: var(--ink-muted);
+        padding: 3px 8px;
+        cursor: pointer;
+        border-radius: 2px;
+        flex-shrink: 0;
+        align-self: center;
+      }
+      .doubt-toggle:hover {
+        color: var(--ink-amber);
+        border-color: var(--ink-amber);
+      }
+      .doubt-toggle.active {
+        background: var(--ink-amber);
+        color: var(--paper);
+        border-color: var(--ink-amber);
+      }
+      .finding.doubted {
+        background: var(--ink-amber-bg, rgba(255, 200, 100, 0.08));
+      }
+      .doubt-note {
+        width: calc(100% - 20px);
+        margin: 4px 10px 10px;
+        font-family: inherit;
+        font-size: 12.5px;
+        padding: 6px 8px;
+        border: 1px solid var(--rule-strong);
+        background: var(--paper);
+        resize: vertical;
+      }
+      .synth-doubt-block {
+        margin-top: 16px;
+        padding: 12px 14px;
+        border: 1px dashed var(--ink-amber);
+        background: var(--ink-amber-bg, rgba(255, 200, 100, 0.05));
+      }
+      .doubt-global-note {
+        width: 100%;
+        font-family: inherit;
+        font-size: 13px;
+        padding: 8px 10px;
+        border: 1px solid var(--rule-strong);
+        background: var(--paper);
+        margin: 8px 0 10px;
+        resize: vertical;
+      }
+      .synth-doubt-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
       .review-notes {
         margin: 4px 0 6px;
         font-family: var(--font-serif);
@@ -930,6 +1017,14 @@ export class TaskDetailPanelComponent {
   protected readonly taskError = signal<string | null>(null);
   protected readonly deleting = signal(false);
   protected readonly finishing = signal(false);
+
+  /** PR coordinates parsed out of the task's metadata blob. Drives the
+   *  title-as-link affordance + the post-comment routing. Null for
+   *  non-review tasks (or review tasks created before metadata existed). */
+  protected readonly prMeta = computed(() => {
+    const t = this.task();
+    return t ? parseTaskPrMeta(t) : null;
+  });
 
   protected readonly terminalStatuses = new Set(["done", "failed", "canceled"]);
 
@@ -1337,6 +1432,41 @@ export class TaskDetailPanelComponent {
   private readonly uncheckedFindingIds = signal<Set<string>>(new Set());
   private readonly uncheckedObservationIdx = signal<Set<number>>(new Set());
 
+  /** Per-finding "doubt" state. Independent of the post-checkbox: the
+   *  user can simultaneously want to post some findings AND doubt others
+   *  on the same Ready review. The Map values hold the per-finding note
+   *  textarea contents so they survive re-renders. */
+  protected readonly doubtNotes = signal<Map<string, string>>(new Map());
+  protected readonly doubtGlobalNote = signal<string>("");
+
+  protected isFindingDoubted(id: string): boolean {
+    return this.doubtNotes().has(id);
+  }
+  protected getDoubtNote(id: string): string {
+    return this.doubtNotes().get(id) ?? "";
+  }
+  protected toggleDoubt(id: string): void {
+    this.doubtNotes.update((m) => {
+      const next = new Map(m);
+      if (next.has(id)) next.delete(id);
+      else next.set(id, "");
+      return next;
+    });
+  }
+  protected setDoubtNote(id: string, value: string): void {
+    this.doubtNotes.update((m) => {
+      if (!m.has(id)) return m;
+      const next = new Map(m);
+      next.set(id, value);
+      return next;
+    });
+  }
+  protected clearDoubts(): void {
+    this.doubtNotes.set(new Map());
+    this.doubtGlobalNote.set("");
+  }
+  protected readonly doubtCount = computed<number>(() => this.doubtNotes().size);
+
   protected isFindingChecked(id: string): boolean {
     return !this.uncheckedFindingIds().has(id);
   }
@@ -1403,6 +1533,66 @@ export class TaskDetailPanelComponent {
   protected readonly posting = signal(false);
   protected readonly postError = signal<string | null>(null);
   protected readonly postedHtmlUrl = signal<string | null>(null);
+
+  protected readonly sendingBack = signal(false);
+  protected readonly sendBackError = signal<string | null>(null);
+
+  protected sendBackWithDoubts(): void {
+    const task = this.task();
+    const synth = this.synthesisFindings();
+    if (!task || !synth) return;
+    const doubts = this.doubtNotes();
+    if (doubts.size === 0) {
+      this.sendBackError.set("Toggle 'doubt' on at least one finding first.");
+      return;
+    }
+    // Resolve each doubted id back to its full finding so we can ship
+    // the title + severity along (helps the synthesizer talk about it
+    // without re-resolving from the prior phase output).
+    const all = [...synth.ranked, ...synth.noise];
+    const payload: Array<{
+      finding_id: string;
+      title: string;
+      severity: string;
+      reason: string;
+    }> = [];
+    for (const [id, reason] of doubts.entries()) {
+      const f = all.find((x) => x.id === id);
+      if (!f) continue;
+      payload.push({
+        finding_id: f.id,
+        title: f.title,
+        severity: f.severity,
+        reason,
+      });
+    }
+    if (payload.length === 0) {
+      this.sendBackError.set("Couldn't resolve any doubted findings — try refreshing.");
+      return;
+    }
+    if (
+      !confirm(
+        `Send ${payload.length} doubt(s) back to the synthesizer? This will re-run the synthesis phase with your notes.`,
+      )
+    ) {
+      return;
+    }
+    this.sendingBack.set(true);
+    this.sendBackError.set(null);
+    this.tasksApi
+      .sendBackReviewWithDoubts(task.id, payload, this.doubtGlobalNote().trim())
+      .subscribe({
+        next: () => {
+          this.sendingBack.set(false);
+          this.clearDoubts();
+          this.taskChanged.emit();
+        },
+        error: (e) => {
+          this.sendingBack.set(false);
+          this.sendBackError.set(e?.error?.message ?? e?.message ?? String(e));
+        },
+      });
+  }
 
   protected postSelectedFindings(): void {
     const task = this.task();
@@ -1623,9 +1813,13 @@ export class TaskDetailPanelComponent {
     this.sessionTranscriptLoading.set(new Set());
     this.uncheckedFindingIds.set(new Set());
     this.uncheckedObservationIdx.set(new Set());
+    this.doubtNotes.set(new Map());
+    this.doubtGlobalNote.set("");
     this.posting.set(false);
     this.postError.set(null);
     this.postedHtmlUrl.set(null);
+    this.sendingBack.set(false);
+    this.sendBackError.set(null);
     this.closeStream();
   }
 
