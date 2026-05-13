@@ -34,15 +34,19 @@ function parseLabel(reply: string): string | null {
 }
 
 export async function generateContextLabel(record: ContextSwitchRow): Promise<void> {
-  const task = getTask(record.task_id);
+  // Manual navbar entries land in context_switches with task_id=NULL and
+  // already carry the user's literal label — nothing to label here.
+  if (!record.task_id) return;
+  const taskId = record.task_id;
+  const task = getTask(taskId);
   if (!task) {
-    log.warn("context_label.task_not_found", { taskId: record.task_id });
+    log.warn("context_label.task_not_found", { taskId });
     return;
   }
 
   const allTasks = listTasks({});
   const otherTitles = allTasks
-    .filter((t) => t.id !== record.task_id && t.status !== "done" && t.status !== "failed" && t.status !== "canceled")
+    .filter((t) => t.id !== taskId && t.status !== "done" && t.status !== "failed" && t.status !== "canceled")
     .map((t) => t.title);
 
   let engine;

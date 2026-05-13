@@ -537,7 +537,9 @@ export interface TaskAlternativeRow {
 
 export interface ContextSwitchRow {
   id: string;
-  task_id: string;
+  /** Null for free-form manual entries typed into the navbar; set when
+   *  the switch was tied to a specific task via the ↻ button. */
+  task_id: string | null;
   label: string | null;
   created_at: number;
 }

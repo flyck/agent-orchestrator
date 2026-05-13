@@ -115,6 +115,33 @@ function applyMigrations(db: Database) {
   // malformed after the reprompt cap. Drives UI hints.
   ensureColumn("task_phase_outputs", "validation_status", "TEXT");
   ensureColumn("task_phase_outputs", "validation_errors_json", "TEXT");
+
+  // Allow context_switches rows to have a null task_id so manual entries
+  // (typed into the navbar) can join the donut + count alongside task-
+  // attributed switches. The original schema declared task_id as NOT
+  // NULL; SQLite can't relax that with a simple ALTER, so we rebuild
+  // the table on first boot after the rule changes.
+  const ctxCols = db
+    .query<{ name: string; notnull: number }, never[]>(
+      `PRAGMA table_info(context_switches)`,
+    )
+    .all() as { name: string; notnull: number }[];
+  const taskIdCol = ctxCols.find((c) => c.name === "task_id");
+  if (taskIdCol && taskIdCol.notnull === 1) {
+    db.exec(`
+      CREATE TABLE context_switches_new (
+        id          TEXT PRIMARY KEY,
+        task_id     TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+        label       TEXT,
+        created_at  INTEGER NOT NULL
+      );
+      INSERT INTO context_switches_new (id, task_id, label, created_at)
+        SELECT id, task_id, label, created_at FROM context_switches;
+      DROP TABLE context_switches;
+      ALTER TABLE context_switches_new RENAME TO context_switches;
+      CREATE INDEX IF NOT EXISTS idx_context_switches_task ON context_switches(task_id);
+    `);
+  }
 }
 
 const DEFAULT_SETTINGS: Record<string, string> = {
