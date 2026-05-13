@@ -615,6 +615,62 @@ const postCommentSchema = z.object({
   /** Posting to PR/MR is irreversible. Make the agent assert intent. */
   confirm: z.literal(true),
 });
+
+/**
+ * Provider-agnostic comment proxy. Routes through whichever provider
+ * the task was created against — reads `tasks.metadata_json.pr` (new
+ * shape, both GitHub + Bitbucket) and falls back to `.github` for tasks
+ * created by the older poller path. The user-curated review body comes
+ * from the frontend's "post selected findings" flow on Ready.
+ */
+integrations.post("/comment", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = postCommentSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "invalid_payload", issues: parsed.error.issues }, 400);
+  }
+  const task = getTask(parsed.data.task_id);
+  if (!task) return c.json({ error: "task_not_found" }, 404);
+
+  const meta = parseTaskMetadata(task.metadata_json);
+  const coord = meta.pr ?? (meta.github ? { source: "github" as const, ...meta.github } : null);
+  if (!coord?.repo || !coord?.number) {
+    return c.json(
+      { error: "task_not_a_pr_review", message: "Task has no PR coordinates." },
+      400,
+    );
+  }
+  const provider = await getActiveProvider();
+  if (!provider) return c.json({ error: "not_connected" }, 400);
+  if (provider.id !== coord.source) {
+    return c.json(
+      {
+        error: "provider_mismatch",
+        message: `Task was created against ${coord.source}, but ${provider.id} is currently active.`,
+      },
+      400,
+    );
+  }
+  try {
+    const r = await provider.postPullComment(coord.repo, coord.number, parsed.data.body);
+    log.info("api.integrations.comment_posted", {
+      source: provider.id,
+      task_id: task.id,
+      repo: coord.repo,
+      number: coord.number,
+    });
+    return c.json({ ok: true, source: provider.id, html_url: r.html_url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn("api.integrations.comment_failed", {
+      source: provider.id,
+      task_id: task.id,
+      message,
+    });
+    return c.json({ error: "provider_request_failed", source: provider.id, message }, 502);
+  }
+});
+
 integrations.post("/github/comment", async (c) => {
   const cfg = getGithubConfig();
   if (!cfg) return c.json({ error: "not_connected" }, 400);

@@ -259,4 +259,18 @@ export class IntegrationsService {
       {},
     );
   }
+
+  /** Post a curated review comment back to the PR for a review-workspace
+   *  task. Backend looks up the PR coordinates on the task and dispatches
+   *  to whichever provider the task was created against. */
+  postReviewComment(
+    taskId: string,
+    body: string,
+  ): Observable<{ ok: true; source: 'github' | 'bitbucket'; html_url: string | null }> {
+    return this.http.post<{
+      ok: true;
+      source: 'github' | 'bitbucket';
+      html_url: string | null;
+    }>('/api/integrations/comment', { task_id: taskId, body, confirm: true });
+  }
 }

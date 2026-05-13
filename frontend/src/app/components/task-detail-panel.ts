@@ -40,6 +40,12 @@ import { ScoringRadar } from "./scoring-radar";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { MarkdownView } from "./markdown-view";
 import { formatTs, relativeTs, clockTs } from "../util/time";
+import {
+  parseSynthesisOutput,
+  renderCommentBody,
+  type ParsedSynthesis,
+} from "../pages/review/synthesis";
+import { IntegrationsService } from "../services/integrations.service";
 
 // ─── Stream / transcript types ────────────────────────────────────────
 
@@ -690,6 +696,86 @@ function extractMermaid(text: string): string | null {
       .finding-title { flex: 1; font-size: 13.5px; }
       .finding-loc { font-size: 11.5px; color: var(--ink-muted); margin: 4px 0 0; }
       .finding-detail { font-size: 13px; margin: 4px 0 0; white-space: pre-wrap; }
+
+      /* ─── Synthesis selector ────────────────────────────── */
+      .synthesis-section {
+        border: 1px solid var(--rule-strong);
+        padding: 14px 16px;
+        margin: 0 0 20px;
+        background: var(--paper);
+      }
+      .synth-controls {
+        display: flex;
+        gap: 6px;
+        margin: 10px 0 8px;
+        flex-wrap: wrap;
+      }
+      .synth-controls .meta-action {
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: transparent;
+        border: 1px solid var(--rule-strong);
+        padding: 3px 8px;
+        cursor: pointer;
+        color: var(--ink-muted);
+      }
+      .synth-controls .meta-action:hover {
+        color: var(--ink);
+        border-color: var(--ink);
+      }
+      .findings-select .finding {
+        padding: 0;
+      }
+      .findings-select .finding-pick {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+      .findings-select .finding-pick input[type='checkbox'] {
+        margin-top: 3px;
+        flex-shrink: 0;
+      }
+      .findings-select .finding-body {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        flex: 1;
+        min-width: 0;
+      }
+      .finding-attribution { font-size: 11px; }
+      .finding-dissent { font-size: 12px; color: var(--ink-amber); }
+      .finding-tags {
+        display: inline-flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 2px;
+      }
+      .tag-pill {
+        font-size: 10px;
+        font-family: var(--font-mono);
+        letter-spacing: 0.04em;
+        padding: 1px 6px;
+        border: 1px dashed var(--rule-strong);
+        border-radius: 8px;
+        color: var(--ink-muted);
+      }
+      .synth-noise {
+        margin-top: 10px;
+        border-top: 1px solid var(--rule);
+        padding-top: 8px;
+      }
+      .synth-noise summary { cursor: pointer; padding: 4px 0; }
+      .synth-observations { margin-top: 12px; }
+      .synth-post {
+        margin-top: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: flex-start;
+      }
       .review-notes {
         margin: 4px 0 6px;
         font-family: var(--font-serif);
@@ -829,6 +915,7 @@ export class TaskDetailPanelComponent {
   private settingsApi = inject(SettingsService);
   private suggestionsApi = inject(SuggestionsService);
   private issueLinksApi = inject(IssueLinksService);
+  private integrationsApi = inject(IntegrationsService);
 
   readonly taskId = input<string | null>(null);
   readonly close = output<void>();
@@ -1229,6 +1316,128 @@ export class TaskDetailPanelComponent {
     return extractMermaid(intake.output_md);
   });
 
+  // ─── Synthesized findings (PR-review Ready stage) ────────────────────
+  //
+  // Parsed from the latest synthesis phase_output. When parsing succeeds
+  // the Reviews tab shows the per-finding checkbox list above the per-
+  // cycle reviewer history. The user trims the list, clicks "Post
+  // selected to PR", and only the checked findings ride the comment.
+  protected readonly synthesisFindings = computed<ParsedSynthesis | null>(() => {
+    const synths = this.phaseOutputs().filter((p) => p.phase_id === "synthesis");
+    if (synths.length === 0) return null;
+    // Newest first — there might be multiple if the agent re-ran.
+    const latest = synths[synths.length - 1]!;
+    return parseSynthesisOutput(latest.output_md);
+  });
+
+  /** Set of finding ids the user has KEPT checked. We seed all-checked on
+   *  first parse, then track explicit unchecks. New findings emitted by
+   *  a re-run come in default-checked because they won't be in the set
+   *  of explicit unchecks. */
+  private readonly uncheckedFindingIds = signal<Set<string>>(new Set());
+  private readonly uncheckedObservationIdx = signal<Set<number>>(new Set());
+
+  protected isFindingChecked(id: string): boolean {
+    return !this.uncheckedFindingIds().has(id);
+  }
+  protected isObservationChecked(i: number): boolean {
+    return !this.uncheckedObservationIdx().has(i);
+  }
+  protected toggleFinding(id: string): void {
+    this.uncheckedFindingIds.update((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  protected toggleObservation(i: number): void {
+    this.uncheckedObservationIdx.update((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+  protected selectAllFindings(): void {
+    this.uncheckedFindingIds.set(new Set());
+    this.uncheckedObservationIdx.set(new Set());
+  }
+  protected selectNoFindings(): void {
+    const synth = this.synthesisFindings();
+    if (!synth) return;
+    const allIds = new Set<string>();
+    for (const f of synth.ranked) allIds.add(f.id);
+    for (const f of synth.noise) allIds.add(f.id);
+    const allObs = new Set<number>();
+    for (let i = 0; i < synth.observations.length; i++) allObs.add(i);
+    this.uncheckedFindingIds.set(allIds);
+    this.uncheckedObservationIdx.set(allObs);
+  }
+  /** Uncheck the noise bucket + observations, keep ranked. */
+  protected selectRankedOnly(): void {
+    const synth = this.synthesisFindings();
+    if (!synth) return;
+    const drop = new Set<string>();
+    for (const f of synth.noise) drop.add(f.id);
+    const allObs = new Set<number>();
+    for (let i = 0; i < synth.observations.length; i++) allObs.add(i);
+    this.uncheckedFindingIds.set(drop);
+    this.uncheckedObservationIdx.set(allObs);
+  }
+
+  protected readonly checkedCount = computed<number>(() => {
+    const synth = this.synthesisFindings();
+    if (!synth) return 0;
+    const unchecked = this.uncheckedFindingIds();
+    const uncheckedObs = this.uncheckedObservationIdx();
+    let n = 0;
+    for (const f of synth.ranked) if (!unchecked.has(f.id)) n++;
+    for (const f of synth.noise) if (!unchecked.has(f.id)) n++;
+    for (let i = 0; i < synth.observations.length; i++) {
+      if (!uncheckedObs.has(i)) n++;
+    }
+    return n;
+  });
+
+  protected readonly posting = signal(false);
+  protected readonly postError = signal<string | null>(null);
+  protected readonly postedHtmlUrl = signal<string | null>(null);
+
+  protected postSelectedFindings(): void {
+    const task = this.task();
+    const synth = this.synthesisFindings();
+    if (!task || !synth) return;
+    const unchecked = this.uncheckedFindingIds();
+    const uncheckedObs = this.uncheckedObservationIdx();
+    const keptFindings = [...synth.ranked, ...synth.noise].filter(
+      (f) => !unchecked.has(f.id),
+    );
+    const obsIdx = new Set<number>();
+    for (let i = 0; i < synth.observations.length; i++) {
+      if (!uncheckedObs.has(i)) obsIdx.add(i);
+    }
+    const body = renderCommentBody(keptFindings, synth.observations, obsIdx);
+    if (!body) {
+      this.postError.set("Select at least one finding to post.");
+      return;
+    }
+    if (!confirm(`Post this review comment to the PR?\n\nThis can't be undone.`)) return;
+    this.posting.set(true);
+    this.postError.set(null);
+    this.postedHtmlUrl.set(null);
+    this.integrationsApi.postReviewComment(task.id, body).subscribe({
+      next: (r) => {
+        this.posting.set(false);
+        this.postedHtmlUrl.set(r.html_url ?? null);
+      },
+      error: (e) => {
+        this.posting.set(false);
+        this.postError.set(e?.error?.message ?? e?.message ?? String(e));
+      },
+    });
+  }
+
   // ─── Usage events (Tokens tab) ────────────────────────────────────────
   protected readonly usageEvents = signal<UsageEventRow[]>([]);
   protected readonly tokensTotalIn = computed(() =>
@@ -1412,6 +1621,11 @@ export class TaskDetailPanelComponent {
     this.transcriptLoading.set(false);
     this.sessionTranscripts.set(new Map());
     this.sessionTranscriptLoading.set(new Set());
+    this.uncheckedFindingIds.set(new Set());
+    this.uncheckedObservationIdx.set(new Set());
+    this.posting.set(false);
+    this.postError.set(null);
+    this.postedHtmlUrl.set(null);
     this.closeStream();
   }
 

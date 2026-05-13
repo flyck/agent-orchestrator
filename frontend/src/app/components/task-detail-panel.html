@@ -541,6 +541,154 @@
         }
       }
 
+      @let synth = synthesisFindings();
+      @if (synth) {
+        <section class="synthesis-section">
+          <header class="review-head">
+            <h3>Synthesized findings</h3>
+            <span class="meta">
+              {{ checkedCount() }}/{{ synth.ranked.length + synth.noise.length + synth.observations.length }} selected
+            </span>
+          </header>
+          <p class="muted small">
+            One ranked, deduplicated list from the synthesizer agent. Untick any finding
+            you don't want included before posting the review back to the PR.
+          </p>
+          <div class="synth-controls">
+            <button type="button" class="meta-action"
+                    (click)="selectAllFindings()">select all</button>
+            <button type="button" class="meta-action"
+                    (click)="selectNoFindings()">select none</button>
+            <button type="button" class="meta-action"
+                    (click)="selectRankedOnly()">ranked only</button>
+          </div>
+
+          @if (synth.ranked.length > 0) {
+            <ul class="findings findings-select" role="list">
+              @for (f of synth.ranked; track f.id) {
+                <li class="finding" [attr.data-severity]="f.severity">
+                  <label class="finding-pick">
+                    <input type="checkbox"
+                           [checked]="isFindingChecked(f.id)"
+                           (change)="toggleFinding(f.id)" />
+                    <span class="finding-body">
+                      <span class="finding-head">
+                        <span class="finding-severity">{{ f.severity }}</span>
+                        <span class="finding-title">{{ f.title }}</span>
+                        <span class="confidence-pill" [attr.data-confidence]="f.confidence">
+                          {{ f.confidence }}
+                        </span>
+                      </span>
+                      @if (f.location && f.location !== 'general') {
+                        <span class="finding-loc mono">{{ f.location }}</span>
+                      }
+                      @if (f.detail) {
+                        <span class="finding-detail">{{ f.detail }}</span>
+                      }
+                      @if (f.confirmed_by.length > 0) {
+                        <span class="finding-attribution meta">
+                          confirmed by {{ f.confirmed_by.join(', ') }}
+                        </span>
+                      }
+                      @if (f.dissent) {
+                        <span class="finding-dissent meta">⚠ dissent: {{ f.dissent }}</span>
+                      }
+                      @if (f.tags.length > 0) {
+                        <span class="finding-tags">
+                          @for (tag of f.tags; track tag) {
+                            <span class="tag-pill">{{ tag }}</span>
+                          }
+                        </span>
+                      }
+                    </span>
+                  </label>
+                </li>
+              }
+            </ul>
+          }
+
+          @if (synth.noise.length > 0) {
+            <details class="synth-noise">
+              <summary class="meta">noise — low severity + low confidence ({{ synth.noise.length }})</summary>
+              <ul class="findings findings-select" role="list">
+                @for (f of synth.noise; track f.id) {
+                  <li class="finding" [attr.data-severity]="f.severity">
+                    <label class="finding-pick">
+                      <input type="checkbox"
+                             [checked]="isFindingChecked(f.id)"
+                             (change)="toggleFinding(f.id)" />
+                      <span class="finding-body">
+                        <span class="finding-head">
+                          <span class="finding-severity">{{ f.severity }}</span>
+                          <span class="finding-title">{{ f.title }}</span>
+                        </span>
+                        @if (f.detail) {
+                          <span class="finding-detail">{{ f.detail }}</span>
+                        }
+                      </span>
+                    </label>
+                  </li>
+                }
+              </ul>
+            </details>
+          }
+
+          @if (synth.observations.length > 0) {
+            <section class="synth-observations">
+              <header class="review-head">
+                <h4>Synthesizer observations</h4>
+                <span class="meta">findings no reviewer raised</span>
+              </header>
+              <ul class="findings findings-select" role="list">
+                @for (obs of synth.observations; track obs.title; let i = $index) {
+                  <li class="finding">
+                    <label class="finding-pick">
+                      <input type="checkbox"
+                             [checked]="isObservationChecked(i)"
+                             (change)="toggleObservation(i)" />
+                      <span class="finding-body">
+                        <span class="finding-head">
+                          <span class="finding-title">{{ obs.title }}</span>
+                        </span>
+                        @if (obs.detail) {
+                          <span class="finding-detail">{{ obs.detail }}</span>
+                        }
+                        @if (obs.reasoning) {
+                          <span class="finding-attribution meta">reasoning: {{ obs.reasoning }}</span>
+                        }
+                      </span>
+                    </label>
+                  </li>
+                }
+              </ul>
+            </section>
+          }
+
+          @if (t.current_state === 'ready' && t.abandoned_at === null) {
+            <div class="synth-post">
+              <button type="button"
+                      class="primary"
+                      [disabled]="posting() || checkedCount() === 0"
+                      (click)="postSelectedFindings()">
+                {{ posting() ? 'posting…' : 'Post selected to PR' }}
+              </button>
+              @if (postError()) {
+                <p class="error small">{{ postError() }}</p>
+              }
+              @if (postedHtmlUrl(); as url) {
+                <p class="small">
+                  Posted ✓ <a [href]="url" target="_blank" rel="noopener">view comment</a>
+                </p>
+              }
+            </div>
+          } @else {
+            <p class="muted small">
+              The post-to-PR button shows up once the task reaches the Ready stage.
+            </p>
+          }
+        </section>
+      }
+
       <section class="review-section">
         <header class="review-head">
           <h3>Reviewer agent</h3>
